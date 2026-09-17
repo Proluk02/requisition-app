@@ -17,6 +17,16 @@ class User extends Authenticatable
 
     protected $keyType = 'string';
 
+    /**
+     * Rôles ne nécessitant aucune affectation (projet ou site).
+     */
+    public const UNASSIGNED_ROLES = ['admin', 'director'];
+
+    /**
+     * Rôles nécessitant une affectation à un SITE plutôt qu'à un projet.
+     */
+    public const SITE_ASSIGNED_ROLES = ['coordinator'];
+
     protected $fillable = [
         'name',
         'first_name',
@@ -50,8 +60,24 @@ class User extends Authenticatable
     {
         return $this->belongsTo(Project::class);
     }
+
     public function site(): BelongsTo
     {
         return $this->belongsTo(Site::class);
+    }
+
+    public static function roleRequiresSite(?string $role): bool
+    {
+        return in_array($role, self::SITE_ASSIGNED_ROLES, true);
+    }
+
+    public static function roleRequiresProject(?string $role): bool
+    {
+        return ! in_array($role, [...self::UNASSIGNED_ROLES, ...self::SITE_ASSIGNED_ROLES], true);
+    }
+
+    public function isActive(): bool
+    {
+        return $this->status === 'active';
     }
 }
