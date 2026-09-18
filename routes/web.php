@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\Admin\UserController;
+use App\Http\Controllers\DashboardController; // Import ajouté
 
 Route::get('/', function () {
     return Inertia::render('Welcome', [
@@ -32,9 +33,8 @@ Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admi
 
 // Groupe Utilisateur : Authentifié + Statut Actif
 Route::middleware(['auth', 'active'])->group(function () {
-    Route::get('/dashboard', function () {
-        return Inertia::render('Dashboard');
-    })->name('dashboard');
+    // Redirection dynamique via le contrôleur
+    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');

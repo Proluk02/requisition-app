@@ -13,27 +13,30 @@ export default {
     theme: {
         extend: {
             colors: {
-                // Ta palette "Pro-Management Core"
+                background: '#f9f9ff',
+                sidebar: '#0B192C', // Bleu Nuit
                 primary: {
-                    DEFAULT: '#2563eb', // Bleu Institutionnel
-                    dark: '#1d4ed8',
-                    container: '#e5eeff',
+                    DEFAULT: '#04326D', // Bleu Cobalt
+                    container: '#0B192C',
                 },
                 secondary: {
-                    DEFAULT: '#16a34a', // Vert Succès
-                    container: '#dcfce7',
+                    DEFAULT: '#3c5e9b',
+                    container: '#9bbbff',
                 },
+                tertiary: '#F58F20', // Orange Accent
                 surface: {
-                    DEFAULT: '#f8f9ff',
-                    bright: '#ffffff',
-                    dim: '#cbdbf5',
+                    DEFAULT: '#f9f9ff',
+                    dim: '#cedaf3',
+                    variant: '#d7e3fc',
                 },
-                'on-surface': '#0b1c30',
-                'on-surface-variant': '#434655',
-                outline: '#737686',
-                'outline-variant': '#e2e8f0',
-                // Sidebar Slate Dark
-                sidebar: '#0f172a',
+                'on-surface': '#101c2e',
+                'on-surface-variant': '#44474c',
+                outline: {
+                    DEFAULT: '#75777d',
+                    variant: '#c5c6cd', // Bleu Mist
+                },
+                success: '#10B981',
+                error: '#ba1a1a',
             },
             fontFamily: {
                 sans: ['Inter', ...defaultTheme.fontFamily.sans],
