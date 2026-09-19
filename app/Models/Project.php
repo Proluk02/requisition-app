@@ -13,6 +13,7 @@ class Project extends Model
     use HasFactory, HasUuids;
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [
@@ -25,6 +26,7 @@ class Project extends Model
     {
         return $this->belongsToMany(Site::class, 'project_site');
     }
+
     public function users(): HasMany
     {
         return $this->hasMany(User::class);

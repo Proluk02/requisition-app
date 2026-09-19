@@ -9,15 +9,15 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('sites', function (Blueprint $table) {
-            $table->uuid('id')->primary(); 
-            $table->string('name'); 
+            $table->uuid('id')->primary();
+            $table->string('name');
             $table->string('location')->nullable();
             $table->timestamps();
         });
 
         Schema::create('projects', function (Blueprint $table) {
-            $table->uuid('id')->primary(); 
-            $table->string('name'); 
+            $table->uuid('id')->primary();
+            $table->string('name');
             $table->string('full_name');
             $table->text('description')->nullable();
             $table->timestamps();
@@ -25,8 +25,8 @@ return new class extends Migration
 
         Schema::create('project_site', function (Blueprint $table) {
             $table->id();
-            $table->foreignUuid('project_id')->constrained()->onDelete('cascade'); 
-            $table->foreignUuid('site_id')->constrained()->onDelete('cascade');    
+            $table->foreignUuid('project_id')->constrained()->onDelete('cascade');
+            $table->foreignUuid('site_id')->constrained()->onDelete('cascade');
         });
     }
 

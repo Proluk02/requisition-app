@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Head } from '@inertiajs/react';
+import { Head, Link } from '@inertiajs/react';
 import StaffLayout from '@/Layouts/StaffLayout';
 import { mockStaffStats, mockStaffRequisitions, RequisitionItem } from '@/types/staff';
 
@@ -32,12 +32,15 @@ export default function StaffDashboard() {
 
                 {/* Boutons d'actions rapides (Haut Droite) */}
                 <div className="flex flex-col sm:flex-row gap-2">
-                    <button className="bg-[#0B192C] text-white hover:bg-[#152842] px-3.5 py-2 rounded text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition">
-                        <svg className="w-4 h-4 text-[#F58F20]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        Nouvelle Réquisition (Standard / Multi-articles)
-                    </button>
+                    <Link
+    href={route('requisitions.create')}
+    className="bg-[#0B192C] text-white hover:bg-[#152842] px-3.5 py-2 rounded text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition"
+>
+    <svg className="w-4 h-4 text-[#F58F20]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+    Nouvelle Réquisition (Standard / Multi-articles)
+</Link>
                     <button className="bg-white border border-[#B2BED6] text-[#0B192C] hover:bg-gray-50 px-3.5 py-2 rounded text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition">
                         <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />

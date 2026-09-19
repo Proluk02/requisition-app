@@ -5,8 +5,8 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
-use Laravel\Socialite\Facades\Socialite;
 use Illuminate\Support\Facades\Log;
+use Laravel\Socialite\Facades\Socialite;
 
 class GoogleController extends Controller
 {
@@ -21,7 +21,7 @@ class GoogleController extends Controller
     {
         try {
             $googleUser = Socialite::driver('google')->user();
-            
+
             // Chercher l'utilisateur par son email
             $user = User::where('email', $googleUser->getEmail())->first();
 
@@ -43,7 +43,8 @@ class GoogleController extends Controller
                 ]);
             }
         } catch (\Exception $e) {
-            Log::error('Erreur Google Auth : ' . $e->getMessage());
+            Log::error('Erreur Google Auth : '.$e->getMessage());
+
             return redirect()->route('login')->withErrors([
                 'email' => 'Erreur lors de la connexion avec Google.',
             ]);

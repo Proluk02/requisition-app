@@ -1,12 +1,12 @@
 <?php
 
+use App\Http\Controllers\Admin\UserController;
+use App\Http\Controllers\Auth\GoogleController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
-use App\Http\Controllers\Auth\GoogleController;
-use App\Http\Controllers\Admin\UserController;
-use App\Http\Controllers\DashboardController; // Import ajouté
+use Inertia\Inertia; // Import ajouté
 
 Route::get('/', function () {
     return Inertia::render('Welcome', [
@@ -39,6 +39,14 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+
+    Route::get('/requisitions/create', function () {
+        return Inertia::render('Staff/Requisitions/Create');
+    })->name('requisitions.create');
+
+    Route::get('/requisitions', function () {
+        return Inertia::render('Staff/Requisitions/Index');
+    })->name('requisitions.index');
 });
 
 require __DIR__.'/auth.php';

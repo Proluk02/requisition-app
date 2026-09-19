@@ -19,7 +19,7 @@ return new class extends Migration
 
             $table->foreignUuid('project_id')->nullable()->index();
             $table->foreignUuid('site_id')->nullable()->index();
-            
+
             $table->string('role')->default('beneficiary');
             $table->string('status')->default('active');
             $table->string('google_id')->nullable();

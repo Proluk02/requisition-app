@@ -2,10 +2,10 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Seeder;
-use Spatie\Permission\Models\Role;
 use App\Models\Project;
 use App\Models\Site;
+use Illuminate\Database\Seeder;
+use Spatie\Permission\Models\Role;
 
 class RoleAndDataSeeder extends Seeder
 {
@@ -13,8 +13,8 @@ class RoleAndDataSeeder extends Seeder
     {
         // 1. Création des Rôles
         $roles = [
-            'admin', 'beneficiary', 'project_manager', 'finance', 
-            'admin_manager', 'director', 'purchaser', 'cashier', 'coordinator'
+            'admin', 'beneficiary', 'project_manager', 'finance',
+            'admin_manager', 'director', 'purchaser', 'cashier', 'coordinator',
         ];
         foreach ($roles as $role) {
             Role::create(['name' => $role]);
@@ -43,7 +43,7 @@ class RoleAndDataSeeder extends Seeder
         $chakuishi = Project::where('name', 'CHAKUISHI')->first();
         $kanina = Site::where('name', 'Kanina')->first();
         $tshala = Site::where('name', 'Tshala')->first();
-        
+
         $chakuishi->sites()->attach([$kanina->id, $tshala->id]);
     }
 }
