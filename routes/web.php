@@ -47,6 +47,10 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::get('/requisitions', function () {
         return Inertia::render('Staff/Requisitions/Index');
     })->name('requisitions.index');
+
+    Route::get('/transport', function () {
+        return Inertia::render('Staff/Transport/Index');
+    })->name('transport.index');
 });
 
 require __DIR__.'/auth.php';
