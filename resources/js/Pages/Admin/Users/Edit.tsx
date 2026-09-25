@@ -1,5 +1,5 @@
-import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, Link, useForm } from '@inertiajs/react';
+import AppLayout from '@/Layouts/AppLayout';
 import InputError from '@/Components/InputError';
 import InputLabel from '@/Components/InputLabel';
 import PrimaryButton from '@/Components/PrimaryButton';
@@ -15,6 +15,7 @@ interface EditableUser {
     email: string;
     role: string;
     status: string;
+    avatar?: string;
     project_id: string | null;
     site_id: string | null;
 }
@@ -43,25 +44,41 @@ export default function Edit({ user, projects, sites, roles }: Props) {
     };
 
     return (
-        <AuthenticatedLayout
-            header={<h2 className="text-xl font-semibold leading-tight text-gray-800 dark:text-gray-100">Modifier {user.name}</h2>}
+        <AppLayout
+            header={<h2 className="text-xl font-bold leading-tight text-[#0B192C]">Modifier {user.name}</h2>}
         >
             <Head title={`Modifier ${user.name}`} />
 
-            <div className="py-12">
-                <div className="mx-auto max-w-3xl sm:px-6 lg:px-8">
-                    <div className="rounded-lg border border-gray-100 bg-white p-8 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                        <form onSubmit={submit} className="space-y-6">
+            <div className="py-6">
+                <div className="mx-auto max-w-3xl">
+                    <div className="bg-white p-6 shadow-sm rounded border border-[#B2BED6]">
+                        
+                        {/* Aperçu Avatar si existant */}
+                        <div className="flex items-center gap-3 border-b pb-4 mb-4">
+                            {user.avatar ? (
+                                <img src={user.avatar} alt={user.name} className="w-12 h-12 rounded-full object-cover border border-[#04326D]" />
+                            ) : (
+                                <div className="w-12 h-12 rounded-full bg-[#04326D] text-white flex items-center justify-center font-bold text-sm">
+                                    {user.name.substring(0, 2).toUpperCase()}
+                                </div>
+                            )}
+                            <div>
+                                <h3 className="font-bold text-[#0B192C] text-sm">{user.name}</h3>
+                                <p className="text-xs text-gray-500">{user.email}</p>
+                            </div>
+                        </div>
+
+                        <form onSubmit={submit} className="space-y-5">
                             <div>
                                 <InputLabel htmlFor="name" value="Nom Complet" />
                                 <TextInput
                                     id="name"
-                                    className="mt-1 block w-full"
+                                    className="mt-1 block w-full border-[#B2BED6] text-xs p-2 rounded"
                                     value={data.name}
                                     onChange={(e) => setData('name', e.target.value)}
                                     required
                                 />
-                                <InputError message={errors.name} className="mt-2" />
+                                <InputError message={errors.name} className="mt-1" />
                             </div>
 
                             <div>
@@ -69,33 +86,33 @@ export default function Edit({ user, projects, sites, roles }: Props) {
                                 <TextInput
                                     id="email"
                                     type="email"
-                                    className="mt-1 block w-full"
+                                    className="mt-1 block w-full border-[#B2BED6] text-xs p-2 rounded"
                                     value={data.email}
                                     onChange={(e) => setData('email', e.target.value)}
                                     required
                                 />
-                                <InputError message={errors.email} className="mt-2" />
+                                <InputError message={errors.email} className="mt-1" />
                             </div>
 
                             <div>
-                                <InputLabel htmlFor="password" value="Nouveau mot de passe (laisser vide pour ne pas changer)" />
+                                <InputLabel htmlFor="password" value="Nouveau mot de passe (laisser vide pour conserver l'actuel)" />
                                 <TextInput
                                     id="password"
                                     type="password"
-                                    className="mt-1 block w-full"
+                                    className="mt-1 block w-full border-[#B2BED6] text-xs p-2 rounded"
                                     value={data.password}
                                     onChange={(e) => setData('password', e.target.value)}
                                     placeholder="••••••••"
                                 />
-                                <InputError message={errors.password} className="mt-2" />
+                                <InputError message={errors.password} className="mt-1" />
                             </div>
 
-                            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <InputLabel htmlFor="role" value="Rôle / Fonction" />
+                                    <InputLabel htmlFor="role" value="Rôle Attribué" />
                                     <select
                                         id="role"
-                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                                        className="mt-1 block w-full border border-[#B2BED6] rounded p-2 text-xs font-bold text-[#04326D] bg-white focus:outline-none"
                                         value={data.role}
                                         onChange={(e) => {
                                             setData('role', e.target.value);
@@ -103,20 +120,20 @@ export default function Edit({ user, projects, sites, roles }: Props) {
                                             setData('site_id', '');
                                         }}
                                     >
-                                        {roles.map((role) => (
-                                            <option key={role.id} value={role.name}>
-                                                {role.name.toUpperCase()}
+                                        {roles.map((r) => (
+                                            <option key={r.id} value={r.name}>
+                                                {r.name.toUpperCase()}
                                             </option>
                                         ))}
                                     </select>
-                                    <InputError message={errors.role} className="mt-2" />
+                                    <InputError message={errors.role} className="mt-1" />
                                 </div>
 
                                 <div>
-                                    <InputLabel htmlFor="status" value="Statut du compte" />
+                                    <InputLabel htmlFor="status" value="Statut du Compte" />
                                     <select
                                         id="status"
-                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                                        className="mt-1 block w-full border border-[#B2BED6] rounded p-2 text-xs text-gray-700 bg-white focus:outline-none"
                                         value={data.status}
                                         onChange={(e) => setData('status', e.target.value)}
                                     >
@@ -126,66 +143,67 @@ export default function Edit({ user, projects, sites, roles }: Props) {
                                 </div>
                             </div>
 
-                            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+                            {/* Affectation */}
+                            <div className="p-4 bg-[#F9F9FF] rounded border border-gray-200">
                                 {data.role === 'coordinator' ? (
                                     <div>
-                                        <InputLabel htmlFor="site_id" value="Affectation au Site (Coordonnateur)" />
+                                        <InputLabel htmlFor="site_id" value="Site d'affectation (Coordonnateur)" />
                                         <select
                                             id="site_id"
-                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                                            className="mt-1 block w-full border border-[#B2BED6] rounded p-2 text-xs bg-white focus:outline-none"
                                             value={data.site_id}
                                             onChange={(e) => setData('site_id', e.target.value)}
                                             required
                                         >
-                                            <option value="">Sélectionner un site...</option>
-                                            {sites.map((site) => (
-                                                <option key={site.id} value={site.id}>{site.name}</option>
+                                            <option value="">Sélectionnez un site...</option>
+                                            {sites.map((s) => (
+                                                <option key={s.id} value={s.id}>{s.name}</option>
                                             ))}
                                         </select>
-                                        <InputError message={errors.site_id} className="mt-2" />
+                                        <InputError message={errors.site_id} className="mt-1" />
                                     </div>
                                 ) : (
                                     data.role !== 'admin' && data.role !== 'director' && (
                                         <div>
-                                            <InputLabel htmlFor="project_id" value="Affectation au Projet (Staff)" />
+                                            <InputLabel htmlFor="project_id" value="Projet d'affectation" />
                                             <select
                                                 id="project_id"
-                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                                                className="mt-1 block w-full border border-[#B2BED6] rounded p-2 text-xs bg-white focus:outline-none"
                                                 value={data.project_id}
                                                 onChange={(e) => setData('project_id', e.target.value)}
                                                 required
                                             >
-                                                <option value="">Sélectionner un projet...</option>
-                                                {projects.map((project) => (
-                                                    <option key={project.id} value={project.id}>{project.name}</option>
+                                                <option value="">Sélectionnez un projet...</option>
+                                                {projects.map((p) => (
+                                                    <option key={p.id} value={p.id}>{p.name}</option>
                                                 ))}
                                             </select>
-                                            <InputError message={errors.project_id} className="mt-2" />
+                                            <InputError message={errors.project_id} className="mt-1" />
                                         </div>
                                     )
                                 )}
                                 {(data.role === 'admin' || data.role === 'director') && (
-                                    <p className="text-center text-sm italic text-gray-500 dark:text-gray-400">
-                                        Aucun rattachement spécifique requis pour ce rôle.
+                                    <p className="text-xs text-gray-500 italic">
+                                        Rôle transversal sans projet unique assigné.
                                     </p>
                                 )}
                             </div>
 
-                            <div className="mt-8 flex items-center justify-end gap-4">
+                            <div className="flex items-center justify-end gap-3 pt-3 border-t">
                                 <Link
                                     href={route('admin.users.index')}
-                                    className="text-sm text-gray-600 underline hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
+                                    className="text-xs font-semibold text-gray-600 hover:underline"
                                 >
                                     Annuler
                                 </Link>
-                                <PrimaryButton disabled={processing}>
-                                    Enregistrer les modifications
+                                <PrimaryButton disabled={processing} className="bg-[#04326D] hover:bg-[#06428f] text-xs font-bold py-2 px-4 rounded">
+                                    Enregistrer les Modifications
                                 </PrimaryButton>
                             </div>
                         </form>
                     </div>
                 </div>
             </div>
-        </AuthenticatedLayout>
+        </AppLayout>
     );
 }

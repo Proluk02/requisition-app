@@ -1,6 +1,7 @@
 import { PropsWithChildren, useState, useRef, useEffect, ReactNode } from 'react';
 import { Link, usePage } from '@inertiajs/react';
-import { PageProps } from '@/types';
+import { PageProps, User } from '@/types';
+import { useTranslation } from '@/lib/i18n';
 
 interface NotificationItem {
     id: string;
@@ -17,9 +18,15 @@ interface AppLayoutProps extends PropsWithChildren {
 
 export default function AppLayout({ header, children }: AppLayoutProps) {
     const { auth } = usePage<PageProps>().props;
-    const user = auth.user;
+    const { __, locale, switchLocale } = useTranslation();
 
-    // Helper Spatie / rôle direct
+    const user = auth.user as User & {
+        roles?: { name: string }[];
+        permissions?: string[];
+        project?: { name: string; full_name?: string };
+        site?: { name: string };
+    };
+
     const hasRole = (roleName: string): boolean => {
         if (!user) return false;
         if (user.role === roleName) return true;
@@ -36,11 +43,9 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
     const isCashier = hasRole('cashier');
     const isAdmin = hasRole('admin');
 
-    // LECTURE DIRECTE DE LA BASE DE DONNÉES (Table projects ou sites)
-    const nomDuProjet = user.project?.name || (user.site ? `Site de ${user.site.name}` : '');
+    const projetAffecte = user.project?.name || (user.site ? `Site ${user.site.name}` : '');
 
     // États
-    const [locale, setLocale] = useState<'FR' | 'EN'>('FR');
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [showNotifications, setShowNotifications] = useState(false);
     const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -99,7 +104,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
 
     return (
         <div className="flex min-h-screen bg-[#F9F9FF] font-sans antialiased text-[#101c2e]">
-            {/* 1. SIDEBAR (Bleu Nuit #0B192C) */}
+            {/* 1. SIDEBAR */}
             <aside
                 className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#0B192C] flex flex-col justify-between text-white border-r border-[#1B2B44] transition-transform duration-300 lg:translate-x-0 ${
                     mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
@@ -128,14 +133,14 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                     </div>
 
                     {/* Bloc Projet */}
-                    {nomDuProjet && (
+                    {projetAffecte && (
                         <div className="p-4 shrink-0">
                             <div className="bg-[#04326D] p-3 rounded border border-white/10 shadow-inner">
                                 <span className="text-[9px] uppercase tracking-wider text-[#B2BED6] font-bold block">
-                                    Projet Affecté
+                                    {__('Projet Affecté')}
                                 </span>
-                                <span className="text-xs font-bold text-white block mt-0.5 truncate" title={nomDuProjet}>
-                                    {nomDuProjet}
+                                <span className="text-xs font-bold text-white block mt-0.5 truncate" title={projetAffecte}>
+                                    {projetAffecte}
                                 </span>
                                 <span className="inline-block mt-1.5 px-2 py-0.5 bg-[#F58F20] text-white rounded text-[9px] font-mono font-bold uppercase tracking-wider">
                                     {user.role?.replace('_', ' ')}
@@ -154,14 +159,13 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
                                 </svg>
-                                <span>Nouvelle Réquisition</span>
+                                <span>{__('Nouvelle Réquisition')}</span>
                             </Link>
                         </div>
                     )}
 
                     {/* Navigation */}
                     <nav className="px-3 py-2 space-y-4 text-xs font-medium flex-1">
-                        {/* Dashboard */}
                         <div className="space-y-1">
                             <Link
                                 href={route('dashboard')}
@@ -174,16 +178,13 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
                                 </svg>
-                                <span>Tableau de Bord</span>
+                                <span>{__('Dashboard')}</span>
                             </Link>
                         </div>
 
-                        {/* Liens Staff / Coordonnateur */}
+                        {/* Staff */}
                         {isStaff && (
                             <div className="space-y-1">
-                                <span className="px-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">
-                                    Opérations & Besoins
-                                </span>
                                 <Link
                                     href={route('requisitions.index')}
                                     className={`flex items-center gap-3 px-3 py-2 rounded transition ${
@@ -195,7 +196,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                     </svg>
-                                    <span>Mes Réquisitions</span>
+                                    <span>{__('Mes Réquisitions')}</span>
                                 </Link>
 
                                 <Link
@@ -209,17 +210,14 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                                     </svg>
-                                    <span>Transport & Déplacements</span>
+                                    <span>{__('Transport & Déplacements')}</span>
                                 </Link>
                             </div>
                         )}
 
-                        {/* Liens Manager de Projet */}
+                        {/* Manager de Projet */}
                         {isMP && (
                             <div className="space-y-1">
-                                <span className="px-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">
-                                    Gestion du Projet
-                                </span>
                                 <Link
                                     href={route('dashboard')}
                                     className={`flex items-center gap-3 px-3 py-2 rounded transition ${
@@ -231,7 +229,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                                     </svg>
-                                    <span>Validations Équipe</span>
+                                    <span>{__('Validations Équipe')}</span>
                                 </Link>
 
                                 <Link
@@ -245,7 +243,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                                     </svg>
-                                    <span>Contrôle Transports</span>
+                                    <span>{__('Contrôle Transports')}</span>
                                 </Link>
 
                                 <Link
@@ -259,12 +257,12 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                                     </svg>
-                                    <span>Mes Réquisitions Projet</span>
+                                    <span>{__('Mes Réquisitions Projet')}</span>
                                 </Link>
                             </div>
                         )}
 
-                        {/* Admin */}
+                        {/* Admin Système */}
                         {isAdmin && (
                             <div className="space-y-1">
                                 <span className="px-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">
@@ -281,18 +279,26 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                                     </svg>
-                                    <span>Gestion Utilisateurs</span>
+                                    <span>{__('Gestion Utilisateurs')}</span>
                                 </Link>
                             </div>
                         )}
                     </nav>
 
-                    {/* Footer Utilisateur Réel */}
+                    {/* Footer Utilisateur Réel avec Avatar */}
                     <div className="p-4 border-t border-white/10 shrink-0 space-y-3">
                         <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-[#04326D] text-white flex items-center justify-center font-bold text-xs shrink-0">
-                                {getInitials(user.name)}
-                            </div>
+                            {user.avatar ? (
+                                <img
+                                    src={user.avatar}
+                                    alt={user.name}
+                                    className="w-8 h-8 rounded-full object-cover border border-[#04326D] shrink-0"
+                                />
+                            ) : (
+                                <div className="w-8 h-8 rounded-full bg-[#04326D] text-white flex items-center justify-center font-bold text-xs shrink-0">
+                                    {getInitials(user.name)}
+                                </div>
+                            )}
                             <div className="truncate">
                                 <p className="text-xs font-bold text-white truncate">{user.name}</p>
                                 <p className="text-[10px] text-[#B2BED6] capitalize truncate">
@@ -310,7 +316,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                             </svg>
-                            <span>Déconnexion</span>
+                            <span>{__('Déconnexion')}</span>
                         </Link>
                     </div>
                 </div>
@@ -337,26 +343,29 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </svg>
                         </button>
 
-                        {nomDuProjet && (
+                        {projetAffecte && (
                             <div className="hidden md:flex items-center gap-2 text-xs text-gray-600">
                                 <span className="w-2 h-2 rounded-full bg-[#10B981]"></span>
-                                <span>Projet :</span>
-                                <strong className="text-[#0B192C]">{nomDuProjet}</strong>
+                                <span>{__('Projet')} :</span>
+                                <strong className="text-[#0B192C]">{projetAffecte}</strong>
                             </div>
                         )}
                     </div>
 
                     <div className="flex items-center gap-3">
+                        {/* Sélecteur de Langue dynamique */}
                         <div className="flex border border-[#B2BED6] rounded overflow-hidden text-[10px] font-bold">
                             <button
-                                onClick={() => setLocale('FR')}
-                                className={`px-2 py-1 transition ${locale === 'FR' ? 'bg-[#04326D] text-white' : 'bg-white text-gray-600'}`}
+                                type="button"
+                                onClick={() => switchLocale('fr')}
+                                className={`px-2 py-1 transition ${locale === 'fr' ? 'bg-[#04326D] text-white' : 'bg-white text-gray-600 hover:bg-gray-100'}`}
                             >
                                 FR
                             </button>
                             <button
-                                onClick={() => setLocale('EN')}
-                                className={`px-2 py-1 transition ${locale === 'EN' ? 'bg-[#04326D] text-white' : 'bg-white text-gray-600'}`}
+                                type="button"
+                                onClick={() => switchLocale('en')}
+                                className={`px-2 py-1 transition ${locale === 'en' ? 'bg-[#04326D] text-white' : 'bg-white text-gray-600 hover:bg-gray-100'}`}
                             >
                                 EN
                             </button>
@@ -367,7 +376,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             type="button"
                             onClick={() => setShowHelpModal(true)}
                             className="p-1.5 text-gray-500 hover:text-[#04326D] hover:bg-gray-100 rounded-full transition"
-                            title="Procédures financières"
+                            title={__('Procédures financières')}
                         >
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -394,7 +403,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             {showNotifications && (
                                 <div className="absolute right-0 mt-2 w-80 bg-white border border-[#B2BED6] rounded shadow-2xl z-50 text-xs overflow-hidden">
                                     <div className="p-3 bg-[#0B192C] text-white flex items-center justify-between">
-                                        <span className="font-bold">Notifications ({unreadCount})</span>
+                                        <span className="font-bold">{__('Notifications')} ({unreadCount})</span>
                                     </div>
                                     <div className="divide-y divide-gray-100 max-h-72 overflow-y-auto">
                                         {notifications.map((n) => (
@@ -413,15 +422,23 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             )}
                         </div>
 
-                        {/* Profil */}
+                        {/* Profil avec Avatar ou Initiales */}
                         <div className="relative" ref={profileRef}>
                             <button
                                 onClick={() => setShowProfileMenu(!showProfileMenu)}
                                 className="flex items-center gap-2.5 border-l border-gray-200 pl-3 text-left hover:opacity-90"
                             >
-                                <div className="w-8 h-8 rounded-full bg-[#04326D] text-white flex items-center justify-center font-bold text-xs">
-                                    {getInitials(user.name)}
-                                </div>
+                                {user.avatar ? (
+                                    <img
+                                        src={user.avatar}
+                                        alt={user.name}
+                                        className="w-8 h-8 rounded-full object-cover border border-[#04326D]"
+                                    />
+                                ) : (
+                                    <div className="w-8 h-8 rounded-full bg-[#04326D] text-white flex items-center justify-center font-bold text-xs">
+                                        {getInitials(user.name)}
+                                    </div>
+                                )}
                                 <div className="hidden md:block">
                                     <p className="text-xs font-bold text-[#101c2e] leading-tight">{user.name}</p>
                                     <p className="text-[10px] text-gray-500 capitalize">{user.role?.replace('_', ' ')}</p>
@@ -441,7 +458,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                         href={route('profile.edit')}
                                         className="block px-4 py-2 text-gray-700 hover:bg-gray-100"
                                     >
-                                        Mon Profil
+                                        {__('Mon Profil')}
                                     </Link>
                                     <Link
                                         href={route('logout')}
@@ -449,7 +466,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                         as="button"
                                         className="w-full text-left px-4 py-2 text-red-600 hover:bg-red-50"
                                     >
-                                        Déconnexion
+                                        {__('Déconnexion')}
                                     </Link>
                                 </div>
                             )}
@@ -464,7 +481,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                 </main>
             </div>
 
-            {/* MODALE DU GUIDE DE PROCÉDURES */}
+            {/* Modale Procédures */}
             {showHelpModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-lg w-full p-6 space-y-4">
@@ -473,7 +490,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 <svg className="w-5 h-5 text-[#04326D]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                                 </svg>
-                                <span>Règles Financières & Procédures</span>
+                                <span>{__('Règles Financières & Procédures')}</span>
                             </h3>
                             <button
                                 onClick={() => setShowHelpModal(false)}
@@ -511,7 +528,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 onClick={() => setShowHelpModal(false)}
                                 className="px-4 py-1.5 bg-[#04326D] text-white rounded text-xs font-bold"
                             >
-                                Compris
+                                {__('Compris')}
                             </button>
                         </div>
                     </div>

@@ -30,6 +30,7 @@ class HandleInertiaRequests extends Middleware
     public function share(Request $request): array
     {
         $user = $request->user();
+
         if ($user) {
             $user->load([
                 'project:id,name,full_name',
@@ -38,11 +39,16 @@ class HandleInertiaRequests extends Middleware
             ]);
         }
 
+        // Langue de session ou de cookie ou par défaut 'fr'
+        $locale = $request->session()->get('locale', $request->cookie('locale', 'fr'));
+        app()->setLocale($locale);
+
         return [
             ...parent::share($request),
             'auth' => [
                 'user' => $user,
             ],
+            'locale' => $locale,
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),
