@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Head, Link } from '@inertiajs/react';
-import StaffLayout from '@/Layouts/StaffLayout';
+import AppLayout from '@/Layouts/AppLayout';
 import { mockRequisitionsStaff, RequisitionSuivi, WorkflowStep, DetailArticle } from '@/types/requisitionsList';
 import { numberToWordsFR } from '@/lib/numberToWords';
 
@@ -25,18 +25,15 @@ const CAISSES_DISPONIBLES = [
 export default function RequisitionsIndex() {
     const [requisitions, setRequisitions] = useState<RequisitionSuivi[]>(mockRequisitionsStaff);
 
-    // Filtres
     const [search, setSearch] = useState('');
     const [filterEtape, setFilterEtape] = useState<string>('all');
     const [filterDevise, setFilterDevise] = useState<string>('all');
     const [filterNature, setFilterNature] = useState<string>('all');
 
-    // Modales
     const [viewReq, setViewReq] = useState<RequisitionSuivi | null>(null);
     const [editReq, setEditReq] = useState<RequisitionSuivi | null>(null);
     const [printReq, setPrintReq] = useState<RequisitionSuivi | null>(null);
 
-    // Filtrage dynamique
     const filteredList = useMemo(() => {
         return requisitions.filter(r => {
             const matchesSearch = r.numero.toLowerCase().includes(search.toLowerCase()) ||
@@ -51,7 +48,6 @@ export default function RequisitionsIndex() {
         });
     }, [requisitions, search, filterEtape, filterDevise, filterNature]);
 
-    // Suppression
     const handleDelete = (id: string, numero: string) => {
         if (confirm(`Confirmez-vous la suppression de la réquisition ${numero} ?`)) {
             setRequisitions(prev => prev.filter(r => r.id !== id));
@@ -61,21 +57,17 @@ export default function RequisitionsIndex() {
         }
     };
 
-    // Impression sécurisée sans page vide
     const handleTriggerPrint = (req: RequisitionSuivi) => {
         setPrintReq(req);
-        // Laisser le temps à React de peindre le DOM d'impression avant d'appeler window.print()
         setTimeout(() => {
             window.print();
         }, 350);
     };
 
-    // Sauvegarde des modifications du modal Edit
     const handleSaveEdit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!editReq) return;
 
-        // Recalcul du total et du montant en lettres
         const total = editReq.articles.reduce((acc, a) => acc + (Number(a.total) || 0), 0);
         const enLettres = numberToWordsFR(total, editReq.devise);
 
@@ -90,7 +82,6 @@ export default function RequisitionsIndex() {
         setEditReq(null);
     };
 
-    // Mise à jour d'un article dans la modale Edit
     const handleUpdateEditArticle = (artId: string, field: keyof DetailArticle, val: any) => {
         if (!editReq) return;
         const newArticles = editReq.articles.map(art => {
@@ -110,32 +101,24 @@ export default function RequisitionsIndex() {
         });
     };
 
-    // Helper couleur stepper
     const getStepClasses = (currentStep: WorkflowStep, stepIndex: number) => {
         const order: WorkflowStep[] = ['brouillon', 'visa_mp', 'controle_finance', 'visa_admin', 'approbation_direction', 'decaissement_caisse', 'cloture'];
         const currentIndex = order.indexOf(currentStep);
 
-        if (stepIndex < currentIndex) {
-            return 'bg-[#10B981] text-white border-[#10B981]';
-        }
-        if (stepIndex === currentIndex) {
-            return 'bg-[#F58F20] text-white border-[#F58F20] ring-4 ring-[#F58F20]/20';
-        }
+        if (stepIndex < currentIndex) return 'bg-[#10B981] text-white border-[#10B981]';
+        if (stepIndex === currentIndex) return 'bg-[#F58F20] text-white border-[#F58F20] ring-4 ring-[#F58F20]/20';
         return 'bg-gray-100 text-gray-400 border-gray-200';
     };
 
     return (
-        <StaffLayout>
+        <AppLayout>
             <Head title="Suivi des Réquisitions" />
 
-            {/* STYLES CSS D'IMPRESSION RIGOUREUX */}
             <style>{`
                 @media print {
-                    /* Masquer l'interface web */
                     nav, aside, header, .no-print-zone, button {
                         display: none !important;
                     }
-                    /* Afficher uniquement la zone print */
                     #bon-pasteur-print-zone {
                         display: block !important;
                         position: fixed;
@@ -160,16 +143,15 @@ export default function RequisitionsIndex() {
             `}</style>
 
             <div className="space-y-6 no-print-zone">
-                {/* 1. EN-TÊTE DE LA PAGE */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E2E8F0] pb-4">
                     <div>
                         <nav className="text-[11px] text-gray-500 font-medium mb-1 flex items-center gap-1">
-                            <Link href={route('dashboard')} className="hover:underline">Espace Opérationnel</Link>
+                            <Link href={route('dashboard')} className="hover:underline">Dashboard</Link>
                             <span>&rsaquo;</span>
                             <span className="text-[#0B192C] font-bold">Mes Réquisitions</span>
                         </nav>
                         <h1 className="text-xl font-bold text-[#0B192C] tracking-tight">
-                            Suivi des Réquisitions
+                            Suivi des Réquisitions & Workflow
                         </h1>
                         <p className="text-xs text-gray-500 mt-0.5">
                             Visualisez l'état d'avancement des signatures hiérarchiques et gérez vos bons de demande.
@@ -178,7 +160,7 @@ export default function RequisitionsIndex() {
 
                     <Link
                         href={route('requisitions.create')}
-                        className="bg-[#04326D] hover:bg-[#06428f] text-white px-4 py-2 rounded text-xs font-bold flex items-center gap-2 shadow-sm self-start sm:self-auto transition"
+                        className="bg-[#04326D] hover:bg-[#06428f] text-white px-4 py-2 rounded text-xs font-bold flex items-center gap-2 shadow-sm transition"
                     >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
@@ -187,9 +169,8 @@ export default function RequisitionsIndex() {
                     </Link>
                 </div>
 
-                {/* 2. BARRE DE FILTRES */}
+                {/* Filtres */}
                 <div className="bg-white border border-[#B2BED6] rounded p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
-                    {/* Recherche texte */}
                     <div className="relative w-full md:w-80">
                         <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400 pointer-events-none">
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -205,7 +186,6 @@ export default function RequisitionsIndex() {
                         />
                     </div>
 
-                    {/* Filtres déroulants */}
                     <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
                         <select
                             value={filterEtape}
@@ -254,7 +234,7 @@ export default function RequisitionsIndex() {
                     </div>
                 </div>
 
-                {/* 3. TABLEAU DES RÉQUISITIONS */}
+                {/* Tableau des réquisitions */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs border-collapse">
@@ -278,146 +258,86 @@ export default function RequisitionsIndex() {
                                     </tr>
                                 ) : (
                                     filteredList.map((req) => (
-                                        <tr key={req.id} className="hover:bg-[#F9F9FF] transition items-center">
-                                            {/* Numéro */}
+                                        <tr key={req.id} className="hover:bg-[#F9F9FF] transition">
                                             <td className="py-3.5 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
                                                 {req.numero}
                                             </td>
-
-                                            {/* Date et Nature */}
                                             <td className="py-3.5 px-4 whitespace-nowrap">
                                                 <p className="font-semibold text-gray-800">{req.dateSoumission}</p>
                                                 <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold mt-0.5 ${
-                                                    req.nature === 'Achat' 
-                                                        ? 'bg-blue-100 text-[#04326D]' 
-                                                        : 'bg-orange-100 text-[#F58F20]'
+                                                    req.nature === 'Achat' ? 'bg-blue-100 text-[#04326D]' : 'bg-orange-100 text-[#F58F20]'
                                                 }`}>
                                                     {req.nature}
                                                 </span>
                                             </td>
-
-                                            {/* Projet & Caisse */}
                                             <td className="py-3.5 px-4 max-w-[180px]">
-                                                <p className="font-bold text-[#0B192C] truncate" title={req.projet}>{req.projet}</p>
-                                                <p className="text-[10px] text-gray-500 truncate" title={req.caisse}>
-                                                    {req.caisse}
-                                                </p>
+                                                <p className="font-bold text-[#0B192C] truncate">{req.projet}</p>
+                                                <p className="text-[10px] text-gray-500 truncate">{req.caisse}</p>
                                             </td>
-
-                                            {/* Observation & Lignes */}
                                             <td className="py-3.5 px-4 max-w-xs">
-                                                <p className="text-gray-800 font-medium truncate" title={req.observation}>
-                                                    {req.observation || 'Sans observation'}
-                                                </p>
+                                                <p className="text-gray-800 font-medium truncate">{req.observation || 'Sans observation'}</p>
                                                 <span className="text-[10px] text-gray-400">
                                                     {req.articles.length} article(s) • {req.articles.reduce((acc, a) => acc + a.justificatifsCount, 0)} justificatif(s)
                                                 </span>
                                             </td>
-
-                                            {/* Montant Total */}
                                             <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono font-bold text-sm text-[#0B192C]">
                                                 {req.montantTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} {req.devise}
                                             </td>
-
-                                            {/* Badge Workflow */}
                                             <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                                                {req.etapeActuelle === 'brouillon' && (
-                                                    <span className="bg-gray-100 text-gray-700 px-2.5 py-1 rounded-full text-[10px] font-bold">
-                                                        Brouillon
-                                                    </span>
-                                                )}
-                                                {req.etapeActuelle === 'visa_mp' && (
-                                                    <span className="bg-blue-100 text-[#04326D] px-2.5 py-1 rounded-full text-[10px] font-bold">
-                                                        Visa Chef Projet
-                                                    </span>
-                                                )}
-                                                {req.etapeActuelle === 'controle_finance' && (
-                                                    <span className="bg-purple-100 text-purple-800 px-2.5 py-1 rounded-full text-[10px] font-bold">
-                                                        Contrôle Finances
-                                                    </span>
-                                                )}
-                                                {req.etapeActuelle === 'visa_admin' && (
-                                                    <span className="bg-indigo-100 text-indigo-800 px-2.5 py-1 rounded-full text-[10px] font-bold">
-                                                        Administration
-                                                    </span>
-                                                )}
-                                                {req.etapeActuelle === 'approbation_direction' && (
-                                                    <span className="bg-amber-100 text-amber-900 px-2.5 py-1 rounded-full text-[10px] font-bold">
-                                                        Approbation Direction
-                                                    </span>
-                                                )}
-                                                {req.etapeActuelle === 'decaissement_caisse' && (
-                                                    <span className="bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full text-[10px] font-bold">
-                                                        Caisse (Prêt)
-                                                    </span>
-                                                )}
-                                                {req.etapeActuelle === 'cloture' && (
-                                                    <span className="bg-gray-800 text-white px-2.5 py-1 rounded-full text-[10px] font-bold">
-                                                        Clôturé
-                                                    </span>
-                                                )}
+                                                {req.etapeActuelle === 'brouillon' && <span className="bg-gray-100 text-gray-700 px-2.5 py-1 rounded-full text-[10px] font-bold">Brouillon</span>}
+                                                {req.etapeActuelle === 'visa_mp' && <span className="bg-blue-100 text-[#04326D] px-2.5 py-1 rounded-full text-[10px] font-bold">Visa Chef Projet</span>}
+                                                {req.etapeActuelle === 'controle_finance' && <span className="bg-purple-100 text-purple-800 px-2.5 py-1 rounded-full text-[10px] font-bold">Contrôle Finances</span>}
+                                                {req.etapeActuelle === 'visa_admin' && <span className="bg-indigo-100 text-indigo-800 px-2.5 py-1 rounded-full text-[10px] font-bold">Administration</span>}
+                                                {req.etapeActuelle === 'approbation_direction' && <span className="bg-amber-100 text-amber-900 px-2.5 py-1 rounded-full text-[10px] font-bold">Approbation Direction</span>}
+                                                {req.etapeActuelle === 'decaissement_caisse' && <span className="bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full text-[10px] font-bold">Caisse (Prêt)</span>}
+                                                {req.etapeActuelle === 'cloture' && <span className="bg-gray-800 text-white px-2.5 py-1 rounded-full text-[10px] font-bold">Clôturé</span>}
                                             </td>
-
-                                            {/* ACTIONS (Vrais icônes SVG) */}
                                             <td className="py-3.5 px-4 text-right whitespace-nowrap">
                                                 <div className="inline-flex items-center gap-1">
-                                                    {/* VIEW */}
                                                     <button
                                                         type="button"
                                                         onClick={() => setViewReq(req)}
-                                                        className="p-1.5 text-gray-600 hover:text-[#04326D] hover:bg-blue-50 rounded transition"
-                                                        title="Consulter le circuit & articles"
+                                                        className="p-1.5 text-gray-600 hover:text-[#04326D] hover:bg-blue-50 rounded"
+                                                        title="Consulter"
                                                     >
                                                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                                                         </svg>
                                                     </button>
-
-                                                    {/* PRINT */}
                                                     <button
                                                         type="button"
                                                         onClick={() => handleTriggerPrint(req)}
-                                                        className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition"
-                                                        title="Imprimer le bon officiel"
+                                                        className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded"
+                                                        title="Imprimer"
                                                     >
                                                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                                                         </svg>
                                                     </button>
-
-                                                    {/* EDIT (Modale) */}
-                                                    {req.etapeActuelle === 'brouillon' ? (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setEditReq(JSON.parse(JSON.stringify(req)))}
-                                                            className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded transition"
-                                                            title="Modifier la réquisition"
-                                                        >
-                                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                                            </svg>
-                                                        </button>
-                                                    ) : (
-                                                        <span className="p-1.5 text-gray-300 cursor-not-allowed" title="Verrouillé pour validation">
-                                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                                                            </svg>
-                                                        </span>
-                                                    )}
-
-                                                    {/* DELETE */}
                                                     {req.etapeActuelle === 'brouillon' && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleDelete(req.id, req.numero)}
-                                                            className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition"
-                                                            title="Supprimer définitivement"
-                                                        >
-                                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                                            </svg>
-                                                        </button>
+                                                        <>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setEditReq(JSON.parse(JSON.stringify(req)))}
+                                                                className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded"
+                                                                title="Modifier"
+                                                            >
+                                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                                </svg>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleDelete(req.id, req.numero)}
+                                                                className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded"
+                                                                title="Supprimer"
+                                                            >
+                                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                                </svg>
+                                                            </button>
+                                                        </>
                                                     )}
                                                 </div>
                                             </td>
@@ -430,7 +350,7 @@ export default function RequisitionsIndex() {
                 </div>
             </div>
 
-            {/* 4. MODAL DE VISUALISATION DÉTAILLÉE (VIEW) */}
+            {/* MODALE VIEW */}
             {viewReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 no-print-zone">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-3xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto">
@@ -448,7 +368,7 @@ export default function RequisitionsIndex() {
                                 <button
                                     type="button"
                                     onClick={() => handleTriggerPrint(viewReq)}
-                                    className="px-3 py-1.5 bg-[#04326D] text-white rounded text-xs font-bold hover:bg-[#06428f] flex items-center gap-1.5 transition"
+                                    className="px-3 py-1.5 bg-[#04326D] text-white rounded text-xs font-bold hover:bg-[#06428f] flex items-center gap-1.5"
                                 >
                                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
@@ -465,11 +385,9 @@ export default function RequisitionsIndex() {
                             </div>
                         </div>
 
-                        {/* STEPPER DU WORKFLOW */}
+                        {/* STEPPER */}
                         <div>
-                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
-                                Circuit d'approbation temps-réel
-                            </h3>
+                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Circuit d'approbation</h3>
                             <div className="flex items-center justify-between relative">
                                 <div className="absolute left-0 top-3.5 h-0.5 w-full bg-gray-200 -z-0"></div>
                                 {WORKFLOW_STEPS.map((step, idx) => (
@@ -482,21 +400,11 @@ export default function RequisitionsIndex() {
                                     </div>
                                 ))}
                             </div>
-                            {viewReq.dernierCommentaire && (
-                                <div className="mt-4 p-2.5 bg-blue-50/70 border border-blue-200 rounded text-xs text-[#04326D] flex items-start gap-2">
-                                    <svg className="w-4 h-4 shrink-0 text-blue-500 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                                    </svg>
-                                    <p><strong>Dernière note :</strong> {viewReq.dernierCommentaire}</p>
-                                </div>
-                            )}
                         </div>
 
                         {/* ARTICLES */}
                         <div>
-                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
-                                Lignes d'articles & Justificatifs
-                            </h3>
+                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Articles</h3>
                             <table className="w-full text-left text-xs border border-gray-200">
                                 <thead className="bg-gray-50 font-bold text-gray-600">
                                     <tr>
@@ -505,7 +413,6 @@ export default function RequisitionsIndex() {
                                         <th className="p-2 text-center">{viewReq.nature === 'Achat' ? 'Qté' : 'Durée'}</th>
                                         <th className="p-2 text-right">Prix Unitaire</th>
                                         <th className="p-2 text-right">Total</th>
-                                        <th className="p-2 text-center">Justificatifs</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y text-gray-700">
@@ -516,9 +423,6 @@ export default function RequisitionsIndex() {
                                             <td className="p-2 text-center">{art.quantiteOuDuree} {art.unite}</td>
                                             <td className="p-2 text-right">{art.prixUnitaire.toLocaleString()} {viewReq.devise}</td>
                                             <td className="p-2 text-right font-bold">{art.total.toLocaleString()} {viewReq.devise}</td>
-                                            <td className="p-2 text-center text-blue-600 font-medium">
-                                                {art.justificatifsCount > 0 ? `${art.justificatifsCount} scan(s)` : '—'}
-                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -528,44 +432,39 @@ export default function RequisitionsIndex() {
                                         <td className="p-2 text-right text-[#04326D] text-sm font-mono font-bold">
                                             {viewReq.montantTotal.toLocaleString()} {viewReq.devise}
                                         </td>
-                                        <td></td>
                                     </tr>
                                 </tfoot>
                             </table>
-                            <p className="text-[11px] italic text-gray-500 mt-2">
-                                <strong>Montant en toutes lettres :</strong> {viewReq.montantLettres}
-                            </p>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* 5. MODAL DE MODIFICATION INTERACTIF (EDIT) */}
+            {/* MODALE EDIT */}
             {editReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 no-print-zone">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-3xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
                         <div className="flex items-center justify-between border-b pb-3">
-                            <h2 className="text-base font-bold text-[#0B192C] flex items-center gap-2">
-                                <span>Modifier Réquisition : {editReq.numero}</span>
-                                <span className="text-xs bg-amber-100 text-amber-800 font-mono px-2 py-0.5 rounded">Brouillon</span>
+                            <h2 className="text-base font-bold text-[#0B192C]">
+                                Modifier Réquisition : {editReq.numero}
                             </h2>
                             <button
                                 type="button"
                                 onClick={() => setEditReq(null)}
-                                className="text-gray-400 hover:text-gray-600 text-xl font-bold p-1 leading-none"
+                                className="text-gray-400 hover:text-gray-600 text-xl font-bold"
                             >
                                 &times;
                             </button>
                         </div>
 
                         <form onSubmit={handleSaveEdit} className="space-y-4 text-xs">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div>
-                                    <label className="block font-semibold text-gray-700 mb-1">Caisse de Décaissement</label>
+                                    <label className="block font-semibold text-gray-700 mb-1">Caisse</label>
                                     <select
                                         value={editReq.caisse}
                                         onChange={(e) => setEditReq({ ...editReq, caisse: e.target.value })}
-                                        className="w-full border border-gray-300 rounded p-1.5 text-xs focus:outline-none focus:border-[#04326D]"
+                                        className="w-full border border-gray-300 rounded p-1.5 text-xs focus:outline-none"
                                     >
                                         {CAISSES_DISPONIBLES.map(c => <option key={c} value={c}>{c}</option>)}
                                     </select>
@@ -575,21 +474,12 @@ export default function RequisitionsIndex() {
                                     <select
                                         value={editReq.devise}
                                         onChange={(e) => setEditReq({ ...editReq, devise: e.target.value as any })}
-                                        className="w-full border border-gray-300 rounded p-1.5 text-xs font-bold focus:outline-none focus:border-[#04326D]"
+                                        className="w-full border border-gray-300 rounded p-1.5 text-xs font-bold focus:outline-none"
                                     >
                                         <option value="USD">USD ($)</option>
                                         <option value="FC">FC (CDF)</option>
                                         <option value="EUR">EUR (€)</option>
                                     </select>
-                                </div>
-                                <div>
-                                    <label className="block font-semibold text-gray-700 mb-1">Nature</label>
-                                    <input
-                                        type="text"
-                                        value={editReq.nature}
-                                        disabled
-                                        className="w-full bg-gray-100 border border-gray-200 rounded p-1.5 text-xs text-gray-500 font-bold"
-                                    />
                                 </div>
                             </div>
 
@@ -599,13 +489,12 @@ export default function RequisitionsIndex() {
                                     rows={2}
                                     value={editReq.observation || ''}
                                     onChange={(e) => setEditReq({ ...editReq, observation: e.target.value })}
-                                    className="w-full border border-gray-300 rounded p-1.5 text-xs focus:outline-none focus:border-[#04326D]"
+                                    className="w-full border border-gray-300 rounded p-1.5 text-xs focus:outline-none"
                                 />
                             </div>
 
-                            {/* ÉDITION DES LIGNES */}
                             <div>
-                                <h3 className="font-bold text-gray-700 uppercase tracking-wider mb-2">Modifier les Lignes d'articles</h3>
+                                <h3 className="font-bold text-gray-700 uppercase tracking-wider mb-2">Modifier les articles</h3>
                                 <div className="space-y-2">
                                     {editReq.articles.map(art => (
                                         <div key={art.id} className="p-3 border border-gray-200 rounded bg-gray-50 grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
@@ -615,7 +504,6 @@ export default function RequisitionsIndex() {
                                                     value={art.activite}
                                                     onChange={(e) => handleUpdateEditArticle(art.id, 'activite', e.target.value)}
                                                     className="w-full border border-gray-300 rounded p-1 text-xs"
-                                                    placeholder="Libellé"
                                                     required
                                                 />
                                             </div>
@@ -626,7 +514,6 @@ export default function RequisitionsIndex() {
                                                     value={art.quantiteOuDuree}
                                                     onChange={(e) => handleUpdateEditArticle(art.id, 'quantiteOuDuree', Number(e.target.value))}
                                                     className="w-full border border-gray-300 rounded p-1 text-xs text-center"
-                                                    placeholder={editReq.nature === 'Achat' ? 'Qté' : 'Durée'}
                                                 />
                                             </div>
                                             <div className="md:col-span-2">
@@ -637,7 +524,6 @@ export default function RequisitionsIndex() {
                                                     value={art.prixUnitaire}
                                                     onChange={(e) => handleUpdateEditArticle(art.id, 'prixUnitaire', Number(e.target.value))}
                                                     className="w-full border border-gray-300 rounded p-1 text-xs text-right"
-                                                    placeholder="Prix U."
                                                 />
                                             </div>
                                             <div className="md:col-span-3 text-right font-mono font-bold text-xs text-[#0B192C]">
@@ -648,16 +534,11 @@ export default function RequisitionsIndex() {
                                 </div>
                             </div>
 
-                            <div className="bg-[#0B192C] text-white p-3 rounded flex justify-between items-center">
-                                <span className="text-xs uppercase text-gray-300">Nouveau Total :</span>
-                                <span className="font-mono text-base font-bold">{editReq.montantTotal.toLocaleString()} {editReq.devise}</span>
-                            </div>
-
                             <div className="flex justify-end gap-2 pt-2 border-t">
                                 <button
                                     type="button"
                                     onClick={() => setEditReq(null)}
-                                    className="px-3 py-1.5 border border-gray-300 rounded text-gray-600 hover:bg-gray-50"
+                                    className="px-3 py-1.5 border rounded text-xs text-gray-600 hover:bg-gray-50"
                                 >
                                     Annuler
                                 </button>
@@ -665,7 +546,7 @@ export default function RequisitionsIndex() {
                                     type="submit"
                                     className="px-4 py-1.5 bg-[#04326D] text-white rounded font-bold hover:bg-[#06428f]"
                                 >
-                                    Enregistrer les modifications
+                                    Enregistrer
                                 </button>
                             </div>
                         </form>
@@ -673,60 +554,37 @@ export default function RequisitionsIndex() {
                 </div>
             )}
 
-            {/* 6. ZONE D'IMPRESSION PRO BON PASTEUR (VISIBLE UNIQUEMENT LORS DE WINDOW.PRINT) */}
+            {/* ZONE D'IMPRESSION OFFICIELLE */}
             {printReq && (
                 <div id="bon-pasteur-print-zone">
-                    {/* Header Institutionnel */}
-                    <div style={{ borderBottom: '2px solid black', paddingBottom: '12px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ borderBottom: '2px solid black', paddingBottom: '12px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between' }}>
                         <div>
                             <h1 style={{ fontSize: '18px', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>
                                 ASBL BON PASTEUR KOLWEZI
                             </h1>
-                            <p style={{ fontSize: '11px', margin: '3px 0 0 0', color: '#333' }}>
-                                Coordination Générale • Service des Finances & Budget
-                            </p>
-                            <p style={{ fontSize: '11px', margin: '2px 0 0 0' }}>
-                                Projet : <strong>{printReq.projet}</strong> (Site : {printReq.site})
+                            <p style={{ fontSize: '11px', margin: '3px 0 0 0' }}>
+                                Service des Finances & Budget • Projet : {printReq.projet}
                             </p>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                            <h2 style={{ fontSize: '15px', fontWeight: 'bold', margin: 0, letterSpacing: '1px' }}>
+                            <h2 style={{ fontSize: '15px', fontWeight: 'bold', margin: 0 }}>
                                 BON DE RÉQUISITION
                             </h2>
                             <p style={{ fontSize: '13px', fontWeight: 'bold', margin: '3px 0 0 0', fontFamily: 'monospace' }}>
                                 N° {printReq.numero}
                             </p>
-                            <p style={{ fontSize: '11px', margin: '2px 0 0 0', color: '#555' }}>
-                                Date : {printReq.dateSoumission}
-                            </p>
                         </div>
                     </div>
 
-                    {/* Meta Données */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', fontSize: '11px', marginBottom: '20px' }}>
-                        <div>
-                            <p style={{ margin: '2px 0' }}><strong>Nature de la demande :</strong> Réquisition d'{printReq.nature}</p>
-                            <p style={{ margin: '2px 0' }}><strong>Caisse de décaissement :</strong> {printReq.caisse}</p>
-                            <p style={{ margin: '2px 0' }}><strong>Devise :</strong> {printReq.devise}</p>
-                        </div>
-                        <div>
-                            <p style={{ margin: '2px 0' }}><strong>Statut Workflow :</strong> {printReq.etapeActuelle.toUpperCase()}</p>
-                            <p style={{ margin: '2px 0' }}><strong>Observation :</strong> {printReq.observation || 'Néant'}</p>
-                        </div>
-                    </div>
-
-                    {/* Tableau Articles Imprimé */}
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '20px' }}>
                         <thead>
                             <tr style={{ background: '#f0f0f0', textTransform: 'uppercase', textAlign: 'left' }}>
-                                <th style={{ border: '1px solid black', padding: '6px', width: '30px', textAlign: 'center' }}>#</th>
-                                <th style={{ border: '1px solid black', padding: '6px' }}>Désignation / Activité</th>
-                                <th style={{ border: '1px solid black', padding: '6px', width: '90px', textAlign: 'center' }}>Code Alloué</th>
-                                <th style={{ border: '1px solid black', padding: '6px', width: '70px', textAlign: 'center' }}>
-                                    {printReq.nature === 'Achat' ? 'Qté' : 'Durée'}
-                                </th>
-                                <th style={{ border: '1px solid black', padding: '6px', width: '100px', textAlign: 'right' }}>Prix Unitaire</th>
-                                <th style={{ border: '1px solid black', padding: '6px', width: '120px', textAlign: 'right' }}>Total ({printReq.devise})</th>
+                                <th style={{ border: '1px solid black', padding: '6px', textAlign: 'center' }}>#</th>
+                                <th style={{ border: '1px solid black', padding: '6px' }}>Désignation</th>
+                                <th style={{ border: '1px solid black', padding: '6px', textAlign: 'center' }}>Code</th>
+                                <th style={{ border: '1px solid black', padding: '6px', textAlign: 'center' }}>{printReq.nature === 'Achat' ? 'Qté' : 'Durée'}</th>
+                                <th style={{ border: '1px solid black', padding: '6px', textAlign: 'right' }}>Prix U.</th>
+                                <th style={{ border: '1px solid black', padding: '6px', textAlign: 'right' }}>Total ({printReq.devise})</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -741,8 +599,8 @@ export default function RequisitionsIndex() {
                                 </tr>
                             ))}
                             <tr>
-                                <td colSpan={5} style={{ border: '1px solid black', padding: '8px', textAlign: 'right', fontWeight: 'bold', textTransform: 'uppercase' }}>
-                                    Montant Total Général :
+                                <td colSpan={5} style={{ border: '1px solid black', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>
+                                    TOTAL GÉNÉRAL :
                                 </td>
                                 <td style={{ border: '1px solid black', padding: '8px', textAlign: 'right', fontWeight: 'bold', fontSize: '13px' }}>
                                     {printReq.montantTotal.toLocaleString()} {printReq.devise}
@@ -751,32 +609,30 @@ export default function RequisitionsIndex() {
                         </tbody>
                     </table>
 
-                    {/* Montant en toutes lettres */}
-                    <div style={{ fontSize: '11px', marginBottom: '35px', padding: '8px', background: '#f8f8f8', border: '1px solid #ddd' }}>
-                        <strong>Certifié sincère et conforme à la somme de :</strong> <em>{printReq.montantLettres}</em>
-                    </div>
+                    <p style={{ fontSize: '11px', marginBottom: '35px' }}>
+                        <strong>Montant certifié :</strong> <em>{printReq.montantLettres}</em>
+                    </p>
 
-                    {/* Zone de 4 Signatures Réglementaires */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', textAlign: 'center', fontSize: '10px' }}>
-                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '90px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                            <p style={{ fontWeight: 'bold', margin: 0 }}>1. L'Initiateur (Staff)</p>
-                            <p style={{ borderTop: '1px dashed black', paddingTop: '4px', margin: 0 }}>Date & Signature</p>
+                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '80px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                            <p style={{ fontWeight: 'bold', margin: 0 }}>1. L'Initiateur</p>
+                            <p style={{ borderTop: '1px dashed black', paddingTop: '4px', margin: 0 }}>Signature</p>
                         </div>
-                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '90px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                            <p style={{ fontWeight: 'bold', margin: 0 }}>2. Manager de Projet</p>
+                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '80px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                            <p style={{ fontWeight: 'bold', margin: 0 }}>2. Manager Projet</p>
                             <p style={{ borderTop: '1px dashed black', paddingTop: '4px', margin: 0 }}>Visa & Date</p>
                         </div>
-                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '90px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                            <p style={{ fontWeight: 'bold', margin: 0 }}>3. Contrôle Financier</p>
-                            <p style={{ borderTop: '1px dashed black', paddingTop: '4px', margin: 0 }}>Imputation & Visa</p>
+                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '80px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                            <p style={{ fontWeight: 'bold', margin: 0 }}>3. Finances</p>
+                            <p style={{ borderTop: '1px dashed black', paddingTop: '4px', margin: 0 }}>Visa & Imputation</p>
                         </div>
-                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '90px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                            <p style={{ fontWeight: 'bold', margin: 0 }}>4. Directrice Générale</p>
+                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '80px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                            <p style={{ fontWeight: 'bold', margin: 0 }}>4. Direction</p>
                             <p style={{ borderTop: '1px dashed black', paddingTop: '4px', margin: 0 }}>Bon à Payer</p>
                         </div>
                     </div>
                 </div>
             )}
-        </StaffLayout>
+        </AppLayout>
     );
 }

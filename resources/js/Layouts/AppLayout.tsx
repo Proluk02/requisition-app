@@ -1,6 +1,6 @@
 import { PropsWithChildren, useState, useRef, useEffect, ReactNode } from 'react';
 import { Link, usePage } from '@inertiajs/react';
-import { PageProps, User } from '@/types';
+import { PageProps } from '@/types';
 
 interface NotificationItem {
     id: string;
@@ -17,14 +17,9 @@ interface AppLayoutProps extends PropsWithChildren {
 
 export default function AppLayout({ header, children }: AppLayoutProps) {
     const { auth } = usePage<PageProps>().props;
-    const user = auth.user as User & {
-        roles?: { name: string }[];
-        permissions?: string[];
-        project?: { name: string };
-        site?: { name: string };
-    };
+    const user = auth.user;
 
-    // Helper universel de détection des rôles (supporte la colonne string ou la relation Spatie)
+    // Helper Spatie / rôle direct
     const hasRole = (roleName: string): boolean => {
         if (!user) return false;
         if (user.role === roleName) return true;
@@ -32,7 +27,6 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
         return false;
     };
 
-    // Détection des groupes d'acteurs
     const isStaff = hasRole('beneficiary') || hasRole('coordinator');
     const isMP = hasRole('project_manager');
     const isFinance = hasRole('finance');
@@ -42,7 +36,10 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
     const isCashier = hasRole('cashier');
     const isAdmin = hasRole('admin');
 
-    // États d'interface
+    // LECTURE DIRECTE DE LA BASE DE DONNÉES (Table projects ou sites)
+    const nomDuProjet = user.project?.name || (user.site ? `Site de ${user.site.name}` : '');
+
+    // États
     const [locale, setLocale] = useState<'FR' | 'EN'>('FR');
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [showNotifications, setShowNotifications] = useState(false);
@@ -52,7 +49,6 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
     const notifRef = useRef<HTMLDivElement>(null);
     const profileRef = useRef<HTMLDivElement>(null);
 
-    // Notifications temps-réel simulées
     const [notifications, setNotifications] = useState<NotificationItem[]>([
         {
             id: '1',
@@ -65,22 +61,14 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
         {
             id: '2',
             titre: 'Caisse décaissée',
-            message: 'Le bon de sortie UB/09/001 a été décaissé au guichet.',
+            message: 'Le bon de sortie a été liquidé au guichet.',
             date: 'Il y a 1h',
             lu: false,
-        },
-        {
-            id: '3',
-            titre: 'Dépôt Justificatif (48h)',
-            message: 'Rappel : Décharge #DCH-089 en attente des reçus originaux.',
-            date: 'Hier',
-            lu: true,
         },
     ]);
 
     const unreadCount = notifications.filter((n) => !n.lu).length;
 
-    // Fermeture des dropdowns au clic extérieur
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
             if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
@@ -94,11 +82,6 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const markAllNotificationsAsRead = () => {
-        setNotifications((prev) => prev.map((n) => ({ ...n, lu: true })));
-    };
-
-    // Helper sécurisé pour vérifier la route active sans crash
     const isRouteActive = (pattern: string): boolean => {
         try {
             return route().current(pattern);
@@ -116,16 +99,14 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
 
     return (
         <div className="flex min-h-screen bg-[#F9F9FF] font-sans antialiased text-[#101c2e]">
-            {/* ========================================================= */}
-            {/* 1. SIDEBAR DESKTOP & DRAWER MOBILE (260px / Bleu Nuit)     */}
-            {/* ========================================================= */}
+            {/* 1. SIDEBAR (Bleu Nuit #0B192C) */}
             <aside
                 className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#0B192C] flex flex-col justify-between text-white border-r border-[#1B2B44] transition-transform duration-300 lg:translate-x-0 ${
                     mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
                 }`}
             >
                 <div className="flex flex-col flex-1 overflow-y-auto">
-                    {/* Header Logo Institutionnel */}
+                    {/* Header Logo */}
                     <div className="h-16 flex items-center justify-between px-6 border-b border-white/10 shrink-0">
                         <Link href={route('dashboard')} className="flex items-center gap-3">
                             <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center font-black text-[#0B192C] text-sm shadow">
@@ -146,22 +127,24 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                         </button>
                     </div>
 
-                    {/* Bloc Identification & Périmètre de l'Utilisateur */}
-                    <div className="p-4 shrink-0">
-                        <div className="bg-[#04326D] p-3 rounded border border-white/10 shadow-inner">
-                            <span className="text-[9px] uppercase tracking-wider text-[#B2BED6] font-bold block">
-                                Périmètre Opérationnel
-                            </span>
-                            <span className="text-xs font-bold text-white block mt-0.5 truncate">
-                                {user.project?.name || user.site?.name || 'Coordination Centrale'}
-                            </span>
-                            <span className="inline-block mt-1.5 px-2 py-0.5 bg-[#F58F20] text-white rounded text-[9px] font-mono font-bold uppercase tracking-wider">
-                                {user.role?.replace('_', ' ')}
-                            </span>
+                    {/* Bloc Projet */}
+                    {nomDuProjet && (
+                        <div className="p-4 shrink-0">
+                            <div className="bg-[#04326D] p-3 rounded border border-white/10 shadow-inner">
+                                <span className="text-[9px] uppercase tracking-wider text-[#B2BED6] font-bold block">
+                                    Projet Affecté
+                                </span>
+                                <span className="text-xs font-bold text-white block mt-0.5 truncate" title={nomDuProjet}>
+                                    {nomDuProjet}
+                                </span>
+                                <span className="inline-block mt-1.5 px-2 py-0.5 bg-[#F58F20] text-white rounded text-[9px] font-mono font-bold uppercase tracking-wider">
+                                    {user.role?.replace('_', ' ')}
+                                </span>
+                            </div>
                         </div>
-                    </div>
+                    )}
 
-                    {/* Bouton CTA "Nouvelle Réquisition" (Staff, Coordonnateur, MP, Admin) */}
+                    {/* CTA Nouvelle Réquisition */}
                     {(isStaff || isMP || isAdmin) && (
                         <div className="px-4 pb-2 shrink-0">
                             <Link
@@ -176,9 +159,9 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                         </div>
                     )}
 
-                    {/* NAVIGATION UNIFIÉE SELON LES RÔLES SPATIE */}
+                    {/* Navigation */}
                     <nav className="px-3 py-2 space-y-4 text-xs font-medium flex-1">
-                        {/* SECTION A : TABLEAU DE BORD GÉNÉRAL */}
+                        {/* Dashboard */}
                         <div className="space-y-1">
                             <Link
                                 href={route('dashboard')}
@@ -195,8 +178,8 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </Link>
                         </div>
 
-                        {/* SECTION B : OPÉRATIONS DE TERRAIN (Staff / Coordonnateur / Initiateurs) */}
-                        {(isStaff || isMP || isAdmin) && (
+                        {/* Liens Staff / Coordonnateur */}
+                        {isStaff && (
                             <div className="space-y-1">
                                 <span className="px-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">
                                     Opérations & Besoins
@@ -231,107 +214,57 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </div>
                         )}
 
-                        {/* SECTION C : CIRCUIT DE VALIDATION (Manager Projet, Finance, Admin, Directrice) */}
-                        {(isMP || isFinance || isAdminManager || isDirector || isAdmin) && (
+                        {/* Liens Manager de Projet */}
+                        {isMP && (
                             <div className="space-y-1">
                                 <span className="px-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">
-                                    Circuit de Validation
+                                    Gestion du Projet
                                 </span>
-
-                                {isMP && (
-                                    <Link
-                                        href={route('dashboard')}
-                                        className="flex items-center gap-3 px-3 py-2 rounded text-[#B2BED6] hover:bg-white/5 hover:text-white transition"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                                        </svg>
-                                        <span>Arbitrage Manager Projet</span>
-                                    </Link>
-                                )}
-
-                                {(isFinance || isAdmin) && (
-                                    <a
-                                        href="#finances"
-                                        className="flex items-center gap-3 px-3 py-2 rounded text-[#B2BED6] hover:bg-white/5 hover:text-white transition"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                                        </svg>
-                                        <span>Contrôle Budgétaire & Visas</span>
-                                    </a>
-                                )}
-
-                                {(isAdminManager || isAdmin) && (
-                                    <a
-                                        href="#administration"
-                                        className="flex items-center gap-3 px-3 py-2 rounded text-[#B2BED6] hover:bg-white/5 hover:text-white transition"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                                        </svg>
-                                        <span>Visa Administratif</span>
-                                    </a>
-                                )}
-
-                                {(isDirector || isAdmin) && (
-                                    <a
-                                        href="#direction"
-                                        className="flex items-center gap-3 px-3 py-2 rounded text-[#B2BED6] hover:bg-white/5 hover:text-white transition"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-                                        </svg>
-                                        <span>Approbations Direction</span>
-                                    </a>
-                                )}
-                            </div>
-                        )}
-
-                        {/* SECTION D : TRÉSORERIE & ACHATS (Caisse, Achats, Return Form) */}
-                        {(isCashier || isPurchaser || isFinance || isAdmin) && (
-                            <div className="space-y-1">
-                                <span className="px-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">
-                                    Trésorerie & Achats
-                                </span>
-
-                                {(isCashier || isFinance || isAdmin) && (
-                                    <a
-                                        href="#caisse"
-                                        className="flex items-center gap-3 px-3 py-2 rounded text-[#B2BED6] hover:bg-white/5 hover:text-white transition"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-                                        </svg>
-                                        <span>Guichet Caisse & Bons</span>
-                                    </a>
-                                )}
-
-                                {(isPurchaser || isAdmin) && (
-                                    <a
-                                        href="#achats"
-                                        className="flex items-center gap-3 px-3 py-2 rounded text-[#B2BED6] hover:bg-white/5 hover:text-white transition"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
-                                        </svg>
-                                        <span>Bureau des Achats</span>
-                                    </a>
-                                )}
-
-                                <a
-                                    href="#return-forms"
-                                    className="flex items-center gap-3 px-3 py-2 rounded text-[#B2BED6] hover:bg-white/5 hover:text-white transition"
+                                <Link
+                                    href={route('dashboard')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('dashboard')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
                                 >
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2zM10 8.5a.5.5 0 11-1 0 .5.5 0 011 0zm5 5a.5.5 0 11-1 0 .5.5 0 011 0z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                                     </svg>
-                                    <span>Return Forms & Justifs</span>
-                                </a>
+                                    <span>Validations Équipe</span>
+                                </Link>
+
+                                <Link
+                                    href={route('transport.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('transport.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                                    </svg>
+                                    <span>Contrôle Transports</span>
+                                </Link>
+
+                                <Link
+                                    href={route('requisitions.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('requisitions.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                                    </svg>
+                                    <span>Mes Réquisitions Projet</span>
+                                </Link>
                             </div>
                         )}
 
-                        {/* SECTION E : ADMINISTRATION SYSTÈME (Admin) */}
+                        {/* Admin */}
                         {isAdmin && (
                             <div className="space-y-1">
                                 <span className="px-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">
@@ -354,7 +287,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                         )}
                     </nav>
 
-                    {/* Footer Utilisateur Réel & Déconnexion */}
+                    {/* Footer Utilisateur Réel */}
                     <div className="p-4 border-t border-white/10 shrink-0 space-y-3">
                         <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-full bg-[#04326D] text-white flex items-center justify-center font-bold text-xs shrink-0">
@@ -383,7 +316,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                 </div>
             </aside>
 
-            {/* Arrière-plan sombre sur mobile */}
+            {/* Backdrop Mobile */}
             {mobileMenuOpen && (
                 <div
                     onClick={() => setMobileMenuOpen(false)}
@@ -391,13 +324,9 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                 ></div>
             )}
 
-            {/* ========================================================= */}
-            {/* 2. ZONE DE TRAVAIL DROITE (TOPBAR COMPLÈTE & CONTENU)     */}
-            {/* ========================================================= */}
+            {/* 2. ZONE DE CONTENU */}
             <div className="flex-1 lg:pl-64 flex flex-col min-w-0">
-                {/* TOPBAR PROFESSIONNELLE */}
                 <header className="h-16 bg-white border-b border-[#E2E8F0] flex items-center justify-between px-4 sm:px-8 sticky top-0 z-30 shadow-sm">
-                    {/* Gauche : Bouton menu mobile + Périmètre actif */}
                     <div className="flex items-center gap-3">
                         <button
                             onClick={() => setMobileMenuOpen(true)}
@@ -408,32 +337,16 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </svg>
                         </button>
 
-                        <div className="hidden md:flex items-center gap-2 text-xs text-gray-600">
-                            <span className="w-2 h-2 rounded-full bg-[#10B981]"></span>
-                            <span>Projet :</span>
-                            <strong className="text-[#0B192C]">
-                                {user.project?.name || user.site?.name || 'Coordination Générale'}
-                            </strong>
-                        </div>
+                        {nomDuProjet && (
+                            <div className="hidden md:flex items-center gap-2 text-xs text-gray-600">
+                                <span className="w-2 h-2 rounded-full bg-[#10B981]"></span>
+                                <span>Projet :</span>
+                                <strong className="text-[#0B192C]">{nomDuProjet}</strong>
+                            </div>
+                        )}
                     </div>
 
-                    {/* Centre : Recherche Globale */}
-                    <div className="relative w-60 sm:w-80 hidden sm:block">
-                        <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-gray-400">
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                        </span>
-                        <input
-                            type="text"
-                            placeholder="Rechercher réf, code budget, voucher..."
-                            className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-[#B2BED6] rounded focus:outline-none focus:border-[#04326D]"
-                        />
-                    </div>
-
-                    {/* Droite : Langue, Aide, Notifications, Profil */}
                     <div className="flex items-center gap-3">
-                        {/* Sélecteur de Langue */}
                         <div className="flex border border-[#B2BED6] rounded overflow-hidden text-[10px] font-bold">
                             <button
                                 onClick={() => setLocale('FR')}
@@ -449,25 +362,24 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </button>
                         </div>
 
-                        {/* Bouton Guide Procédures (Aide) */}
+                        {/* Guide Procédures */}
                         <button
                             type="button"
                             onClick={() => setShowHelpModal(true)}
                             className="p-1.5 text-gray-500 hover:text-[#04326D] hover:bg-gray-100 rounded-full transition"
-                            title="Consulter les procédures financières"
+                            title="Procédures financières"
                         >
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                         </button>
 
-                        {/* Centre de Notifications avec Tiroir */}
+                        {/* Notifications */}
                         <div className="relative" ref={notifRef}>
                             <button
                                 type="button"
                                 onClick={() => setShowNotifications(!showNotifications)}
                                 className="relative p-1.5 text-gray-500 hover:text-[#04326D] hover:bg-gray-100 rounded-full transition"
-                                title="Notifications"
                             >
                                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -483,21 +395,10 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 <div className="absolute right-0 mt-2 w-80 bg-white border border-[#B2BED6] rounded shadow-2xl z-50 text-xs overflow-hidden">
                                     <div className="p-3 bg-[#0B192C] text-white flex items-center justify-between">
                                         <span className="font-bold">Notifications ({unreadCount})</span>
-                                        {unreadCount > 0 && (
-                                            <button
-                                                onClick={markAllNotificationsAsRead}
-                                                className="text-[10px] text-[#F58F20] hover:underline"
-                                            >
-                                                Tout marquer comme lu
-                                            </button>
-                                        )}
                                     </div>
                                     <div className="divide-y divide-gray-100 max-h-72 overflow-y-auto">
                                         {notifications.map((n) => (
-                                            <div
-                                                key={n.id}
-                                                className={`p-3 hover:bg-gray-50 transition ${!n.lu ? 'bg-blue-50/40' : ''}`}
-                                            >
+                                            <div key={n.id} className="p-3 hover:bg-gray-50 transition">
                                                 <div className="flex items-center justify-between mb-1">
                                                     <span className={`font-bold ${n.urgent ? 'text-[#DC2626]' : 'text-[#04326D]'}`}>
                                                         {n.titre}
@@ -512,7 +413,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             )}
                         </div>
 
-                        {/* Profil Utilisateur avec Dropdown */}
+                        {/* Profil */}
                         <div className="relative" ref={profileRef}>
                             <button
                                 onClick={() => setShowProfileMenu(!showProfileMenu)}
@@ -556,14 +457,14 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                     </div>
                 </header>
 
-                {/* ZONE DE CONTENU DE LA PAGE */}
+                {/* ZONE DE CONTENU */}
                 <main className="p-4 sm:p-8 space-y-6 flex-1 max-w-[1440px]">
                     {header && <div className="mb-2">{header}</div>}
                     {children}
                 </main>
             </div>
 
-            {/* MODALE DU GUIDE DE PROCÉDURES (Accessible à tous les acteurs) */}
+            {/* MODALE DU GUIDE DE PROCÉDURES */}
             {showHelpModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-lg w-full p-6 space-y-4">
@@ -586,21 +487,21 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             <div className="p-3 bg-blue-50 border border-blue-200 rounded">
                                 <strong className="text-[#04326D] block mb-1">1. Petite Caisse (&le; 20 USD / 30 000 FC)</strong>
                                 <p className="text-[11px] text-gray-600">
-                                    Réservée aux achats d'urgence immédiats. Décaissement direct avec visa du Chef de Projet.
+                                    Achats d'urgence immédiats. Décaissement direct avec visa du Chef de Projet.
                                 </p>
                             </div>
 
                             <div className="p-3 bg-gray-50 border border-gray-200 rounded">
                                 <strong className="text-gray-900 block mb-1">2. Règle des 3 Devis (&gt; 150 USD)</strong>
                                 <p className="text-[11px] text-gray-600">
-                                    Toute réquisition de matériel ou service excédant 150 USD doit obligatoirement inclure 3 devis comparatifs (proforma).
+                                    Toute réquisition excédant 150 USD doit obligatoirement inclure 3 devis comparatifs.
                                 </p>
                             </div>
 
                             <div className="p-3 bg-orange-50 border border-orange-200 rounded">
                                 <strong className="text-[#F58F20] block mb-1">3. Règle d'or de Décharge (48h ouvrées)</strong>
                                 <p className="text-[11px] text-gray-600">
-                                    Les factures définitives et pièces de caisse originales doivent être retournées au caissier dans les 48h suivant le décaissement.
+                                    Les pièces de caisse originales doivent être retournées dans les 48h suivant le décaissement.
                                 </p>
                             </div>
                         </div>

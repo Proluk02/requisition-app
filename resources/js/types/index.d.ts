@@ -1,33 +1,39 @@
 import { Config } from 'ziggy-js';
 
 export interface Project {
-    id: number;
-    name: string;
-    full_name: string;
+    id: string; // UUID
+    name: string; // Ex: USIMAMIZI BORA
+    full_name: string; // Ex: Bonne Gouvernance
     description?: string;
 }
 
 export interface Site {
-    id: number;
-    name: string;
+    id: string; // UUID
+    name: string; // Ex: Kanina, Tshala
     location?: string;
 }
 
-export interface User {
+export interface Role {
     id: number;
+    name: string;
+}
+
+export interface User {
+    id: string; // UUID
     name: string;
     first_name?: string;
     last_name?: string;
     email: string;
     email_verified_at?: string;
-    
-    // Identifiants de relations
-    project_id?: number | null;
-    site_id?: number | null;
-    
-    // Objets de relations (chargés via with() dans Laravel)
+
+    // Clés étrangères UUID
+    project_id?: string | null;
+    site_id?: string | null;
+
+    // Modèles chargés depuis MySQL via HandleInertiaRequests
     project?: Project | null;
     site?: Site | null;
+    roles?: Role[];
 
     role: 'admin' | 'beneficiary' | 'project_manager' | 'finance' | 'admin_manager' | 'director' | 'purchaser' | 'cashier' | 'coordinator';
     status: 'active' | 'inactive';
@@ -41,6 +47,10 @@ export type PageProps<
 > = T & {
     auth: {
         user: User;
+    };
+    flash: {
+        success?: string;
+        error?: string;
     };
     ziggy: Config & { location: string };
 };
