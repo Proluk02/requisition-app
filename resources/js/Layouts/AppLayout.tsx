@@ -17,7 +17,7 @@ interface AppLayoutProps extends PropsWithChildren {
 }
 
 export default function AppLayout({ header, children }: AppLayoutProps) {
-    const { auth } = usePage<PageProps>().props;
+    const { auth, notifications: sharedNotifications } = usePage<PageProps & { notifications?: NotificationItem[] }>().props;
     const { __, locale, switchLocale } = useTranslation();
 
     const user = auth.user as User & {
@@ -54,23 +54,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
     const notifRef = useRef<HTMLDivElement>(null);
     const profileRef = useRef<HTMLDivElement>(null);
 
-    const [notifications, setNotifications] = useState<NotificationItem[]>([
-        {
-            id: '1',
-            titre: 'Visa Requis',
-            message: 'Une réquisition de transport nécessite votre arbitrage.',
-            date: 'Il y a 10 min',
-            lu: false,
-            urgent: true,
-        },
-        {
-            id: '2',
-            titre: 'Caisse décaissée',
-            message: 'Le bon de sortie a été liquidé au guichet.',
-            date: 'Il y a 1h',
-            lu: false,
-        },
-    ]);
+    const notifications = sharedNotifications ?? [];
 
     const unreadCount = notifications.filter((n) => !n.lu).length;
 
@@ -258,6 +242,24 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                                     </svg>
                                     <span>{__('Mes Réquisitions Projet')}</span>
+                                </Link>
+                            </div>
+                        )}
+
+                        {isFinance && (
+                            <div className="space-y-1">
+                                <Link
+                                    href={route('finance.dashboard')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('finance.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3v18h18M7 14l4-4 4 4 6-7" />
+                                    </svg>
+                                    <span>{__('Validation Finance')}</span>
                                 </Link>
                             </div>
                         )}

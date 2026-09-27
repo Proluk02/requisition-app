@@ -1,8 +1,12 @@
 import { useState, useMemo } from 'react';
-import { Head, Link } from '@inertiajs/react';
+import { Head, Link, router } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { mockRequisitionsStaff, RequisitionSuivi, WorkflowStep, DetailArticle } from '@/types/requisitionsList';
 import { numberToWordsFR } from '@/lib/numberToWords';
+
+interface RequisitionIndexProps {
+    requisitions?: RequisitionSuivi[];
+}
 
 const WORKFLOW_STEPS: { key: WorkflowStep; label: string; role: string }[] = [
     { key: 'brouillon', label: 'Brouillon', role: 'Staff' },
@@ -22,8 +26,13 @@ const CAISSES_DISPONIBLES = [
     'Local Fund 2'
 ];
 
-export default function RequisitionsIndex() {
-    const [requisitions, setRequisitions] = useState<RequisitionSuivi[]>(mockRequisitionsStaff);
+export default function RequisitionsIndex({ requisitions: initialRequisitions }: RequisitionIndexProps) {
+    const [requisitions, setRequisitions] = useState<RequisitionSuivi[]>(
+        (initialRequisitions ?? []).map((req) => ({
+            ...req,
+            montantLettres: req.montantLettres || numberToWordsFR(req.montantTotal, req.devise),
+        }))
+    );
 
     const [search, setSearch] = useState('');
     const [filterEtape, setFilterEtape] = useState<string>('all');
@@ -33,6 +42,7 @@ export default function RequisitionsIndex() {
     const [viewReq, setViewReq] = useState<RequisitionSuivi | null>(null);
     const [editReq, setEditReq] = useState<RequisitionSuivi | null>(null);
     const [printReq, setPrintReq] = useState<RequisitionSuivi | null>(null);
+    const [savingEdit, setSavingEdit] = useState(false);
 
     const filteredList = useMemo(() => {
         return requisitions.filter(r => {
@@ -77,9 +87,26 @@ export default function RequisitionsIndex() {
             montantLettres: enLettres
         };
 
-        setRequisitions(prev => prev.map(r => r.id === updated.id ? updated : r));
-        if (viewReq?.id === updated.id) setViewReq(updated);
-        setEditReq(null);
+        router.patch(route('requisitions.update', updated.id), {
+            caisse_decaissement: updated.caisse,
+            devise: updated.devise,
+            observation: updated.observation || null,
+            articles: updated.articles.map((article) => ({
+                id: article.id,
+                activite: article.activite,
+                quantiteOuDuree: article.quantiteOuDuree,
+                prixUnitaire: article.prixUnitaire,
+            })),
+        }, {
+            preserveScroll: true,
+            onStart: () => setSavingEdit(true),
+            onFinish: () => setSavingEdit(false),
+            onSuccess: () => {
+                setRequisitions(prev => prev.map(r => r.id === updated.id ? updated : r));
+                if (viewReq?.id === updated.id) setViewReq(updated);
+                setEditReq(null);
+            },
+        });
     };
 
     const handleUpdateEditArticle = (artId: string, field: keyof DetailArticle, val: any) => {
@@ -277,7 +304,7 @@ export default function RequisitionsIndex() {
                                             <td className="py-3.5 px-4 max-w-xs">
                                                 <p className="text-gray-800 font-medium truncate">{req.observation || 'Sans observation'}</p>
                                                 <span className="text-[10px] text-gray-400">
-                                                    {req.articles.length} article(s) • {req.articles.reduce((acc, a) => acc + a.justificatifsCount, 0)} justificatif(s)
+                                                    {req.articles.length} demandes(s) • {req.articles.reduce((acc, a) => acc + a.justificatifsCount, 0)} piece (s) jointe (s)
                                                 </span>
                                             </td>
                                             <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono font-bold text-sm text-[#0B192C]">
@@ -402,9 +429,9 @@ export default function RequisitionsIndex() {
                             </div>
                         </div>
 
-                        {/* ARTICLES */}
+                        {/* DEMANDES */}
                         <div>
-                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Articles</h3>
+                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">DEMANDES</h3>
                             <table className="w-full text-left text-xs border border-gray-200">
                                 <thead className="bg-gray-50 font-bold text-gray-600">
                                     <tr>
@@ -435,6 +462,48 @@ export default function RequisitionsIndex() {
                                     </tr>
                                 </tfoot>
                             </table>
+                        </div>
+
+                        <div className="space-y-3">
+                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Fichiers joints par demande</h3>
+                            {viewReq.articles.some((art) => (art.justificatifs ?? []).length > 0) ? (
+                                <div className="space-y-3">
+                                    {viewReq.articles.map((art) => (
+                                        <div key={art.id} className="border border-gray-200 rounded p-3 bg-gray-50">
+                                            <div className="flex items-center justify-between gap-3 mb-2">
+                                                <p className="text-xs font-bold text-[#0B192C]">{art.activite}</p>
+                                                <span className="text-[10px] text-gray-500">{art.justificatifs?.length ?? 0} fichier(s)</span>
+                                            </div>
+                                            <div className="space-y-2">
+                                                {(art.justificatifs ?? []).map((justif) => (
+                                                    <div key={justif.id} className="flex items-center justify-between gap-3 bg-white border border-gray-200 rounded px-2 py-2">
+                                                        <div>
+                                                            <p className="text-[11px] font-semibold text-gray-700">{justif.originalName || justif.description}</p>
+                                                            <p className="text-[10px] text-gray-500">{justif.date} • {justif.montant.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} {viewReq.devise}</p>
+                                                        </div>
+                                                        {justif.fileUrl ? (
+                                                            <a
+                                                                href={justif.fileUrl}
+                                                                target="_blank"
+                                                                rel="noreferrer"
+                                                                className="inline-flex items-center gap-1 px-2 py-1 bg-[#04326D] text-white text-[10px] font-bold rounded hover:bg-[#06428f]"
+                                                            >
+                                                                Consulter
+                                                            </a>
+                                                        ) : (
+                                                            <span className="text-[10px] text-gray-400">Fichier non disponible</span>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="border border-dashed border-gray-300 rounded p-3 text-[11px] text-gray-500">
+                                    Aucun fichier joint sur cette réquisition.
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -544,9 +613,10 @@ export default function RequisitionsIndex() {
                                 </button>
                                 <button
                                     type="submit"
-                                    className="px-4 py-1.5 bg-[#04326D] text-white rounded font-bold hover:bg-[#06428f]"
+                                    disabled={savingEdit}
+                                    className="px-4 py-1.5 bg-[#04326D] text-white rounded font-bold hover:bg-[#06428f] disabled:opacity-60"
                                 >
-                                    Enregistrer
+                                    {savingEdit ? 'Enregistrement...' : 'Enregistrer'}
                                 </button>
                             </div>
                         </form>

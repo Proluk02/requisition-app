@@ -10,6 +10,7 @@ interface JustificatifItem {
     description: string;
     montant: number;
     scanNom: string;
+    file?: File;
 }
 
 interface ArticleLigne {
@@ -85,6 +86,7 @@ export default function CreateRequisition() {
             justificatifs: []
         }
     ]);
+    const [submittedData, setSubmittedData] = useState<any>(null);
 
     // Modal Justificatifs
     const [activeLigneModal, setActiveLigneModal] = useState<string | null>(null);
@@ -171,7 +173,8 @@ export default function CreateRequisition() {
             date: newJustifDate,
             description: newJustifDesc,
             montant: parseFloat(newJustifMontant),
-            scanNom: newJustifFile ? newJustifFile.name : 'devis_proforma.pdf'
+            scanNom: newJustifFile ? newJustifFile.name : 'devis_proforma.pdf',
+            file: newJustifFile ?? undefined,
         };
 
         setLignes(lignes.map(l => {
@@ -205,8 +208,39 @@ export default function CreateRequisition() {
             return;
         }
 
-        alert(`Réquisition ${numeroRequisition} enregistrée avec succès ! Redirection vers votre tableau de bord.`);
-        router.visit(route('dashboard'));
+        const formData = new FormData();
+
+        formData.append('numero_requisition', numeroRequisition);
+        formData.append('nature_requisition', natureRequisition);
+        formData.append('projet', selectedProject);
+        formData.append('project_code', projectCode);
+        formData.append('caisse_decaissement', caisseDecaissement);
+        formData.append('devise', devise);
+        formData.append('observation', observation);
+        formData.append('montant_total', String(montantTotal));
+
+        lignes.forEach((ligne, index) => {
+            formData.append(`lignes[${index}][activite]`, ligne.activite);
+            formData.append(`lignes[${index}][code_all_budget]`, ligne.codeAllBudget);
+            formData.append(`lignes[${index}][nature]`, ligne.nature);
+            formData.append(`lignes[${index}][quantite]`, String(ligne.quantite));
+            formData.append(`lignes[${index}][duree]`, String(ligne.duree));
+            formData.append(`lignes[${index}][unite]`, ligne.unite);
+            formData.append(`lignes[${index}][frais_unitaire]`, String(ligne.fraisUnitaire));
+            formData.append(`lignes[${index}][total_ligne]`, String(ligne.totalLigne));
+
+            ligne.justificatifs.forEach((justif, justifIndex) => {
+                formData.append(`lignes[${index}][justificatifs][${justifIndex}][description]`, justif.description);
+                formData.append(`lignes[${index}][justificatifs][${justifIndex}][date]`, justif.date);
+                formData.append(`lignes[${index}][justificatifs][${justifIndex}][montant]`, String(justif.montant));
+
+                if (justif.file) {
+                    formData.append(`lignes[${index}][justificatifs][${justifIndex}][file]`, justif.file);
+                }
+            });
+        });
+
+        router.post(route('requisitions.store'), formData);
     };
 
     return (
@@ -556,6 +590,17 @@ export default function CreateRequisition() {
                         </button>
                     </div>
                 </div>
+
+                {submittedData && (
+                    <div className="bg-[#F8FAFC] border border-[#B2BED6] rounded p-4 shadow-sm">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] mb-2">
+                            Payload envoyé
+                        </h3>
+                        <pre className="overflow-x-auto text-[11px] whitespace-pre-wrap break-words text-gray-700 bg-white p-3 rounded border border-[#E2E8F0]">
+                            {JSON.stringify(submittedData, null, 2)}
+                        </pre>
+                    </div>
+                )}
 
             </form>
 

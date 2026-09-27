@@ -7,6 +7,17 @@ export type WorkflowStep =
     | 'decaissement_caisse' 
     | 'cloture';
 
+export interface JustificatifItem {
+    id: string;
+    description: string;
+    originalName: string;
+    date: string;
+    montant: number;
+    filePath?: string | null;
+    fileUrl?: string | null;
+    mimeType?: string | null;
+}
+
 export interface DetailArticle {
     id: string;
     activite: string;
@@ -17,6 +28,7 @@ export interface DetailArticle {
     prixUnitaire: number;
     total: number;
     justificatifsCount: number;
+    justificatifs?: JustificatifItem[];
 }
 
 export interface RequisitionSuivi {

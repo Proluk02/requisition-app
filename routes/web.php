@@ -5,6 +5,7 @@ use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\LocaleController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\RequisitionController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -40,6 +41,9 @@ Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admi
 Route::middleware(['auth', 'active'])->group(function () {
     // Redirection dynamique vers le bon Dashboard selon le Rôle Spatie
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/finance/requisitions', [DashboardController::class, 'finance'])
+        ->middleware('role:finance')
+        ->name('finance.dashboard');
 
     // Profil Utilisateur
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
@@ -47,13 +51,19 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 
     // Réquisitions Opérationnelles (Staff & Manager de Projet)
-    Route::get('/requisitions', function () {
-        return Inertia::render('Staff/Requisitions/Index');
-    })->name('requisitions.index');
+    Route::get('/requisitions', [RequisitionController::class, 'index'])->name('requisitions.index');
+
+    Route::get('/requisitions/justificatifs/{justificatif}', [RequisitionController::class, 'showJustificatif'])
+        ->name('requisitions.justificatif.show');
 
     Route::get('/requisitions/create', function () {
         return Inertia::render('Staff/Requisitions/Create');
     })->name('requisitions.create');
+
+    Route::post('/requisitions', [RequisitionController::class, 'store'])->name('requisitions.store');
+    Route::patch('/requisitions/{requisition}', [RequisitionController::class, 'update'])->name('requisitions.update');
+    Route::patch('/requisitions/{requisition}/manager-decision', [RequisitionController::class, 'managerDecision'])->name('requisitions.manager-decision');
+    Route::patch('/requisitions/{requisition}/finance-decision', [RequisitionController::class, 'financeDecision'])->name('requisitions.finance-decision');
 
     // Transport, Déplacements & Décharges Terrain
     Route::get('/transport', function () {

@@ -3,8 +3,10 @@ import { Head, usePage } from '@inertiajs/react';
 import { PageProps } from '@/types';
 
 export default function Dashboard() {
-    const { auth } = usePage<PageProps>().props;
+    const { auth, stats } = usePage<PageProps<{ stats?: { usersCount?: number; requisitionsCount?: number } }>>().props;
     const isAdmin = auth.user.role === 'admin';
+    const usersCount = stats?.usersCount ?? 0;
+    const requisitionsCount = stats?.requisitionsCount ?? 0;
 
     return (
         <AuthenticatedLayout header={<h2 className="text-xl font-bold text-[#04326D]">Tableau de Bord Administration</h2>}>
@@ -28,8 +30,8 @@ export default function Dashboard() {
 
                     {/* Stats */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <StatCard title="Total Utilisateurs" value="24" color="primary" />
-                        <StatCard title="Réquisitions du Jour" value="12" color="secondary" />
+                        <StatCard title="Total Utilisateurs" value={String(usersCount)} color="primary" />
+                        <StatCard title="Réquisitions du Jour" value={String(requisitionsCount)} color="secondary" />
                     </div>
                 </div>
 

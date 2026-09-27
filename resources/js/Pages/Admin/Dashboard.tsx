@@ -1,7 +1,26 @@
 import { Head, Link } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 
-export default function AdminDashboard() {
+interface AdminDashboardStats {
+    usersCount: number;
+    projectsCount: number;
+    sitesCount: number;
+    requisitionsCount: number;
+    securityStatus: string;
+}
+
+export default function AdminDashboard({ stats }: { stats?: AdminDashboardStats }) {
+    const safeStats = stats ?? {
+        usersCount: 0,
+        projectsCount: 0,
+        sitesCount: 0,
+        requisitionsCount: 0,
+        securityStatus: '100% Conforme',
+    };
+
+    const usersLabel = `${safeStats.usersCount} ${safeStats.usersCount > 1 ? 'comptes' : 'compte'}`;
+    const requisitionsLabel = `${safeStats.requisitionsCount} ${safeStats.requisitionsCount > 1 ? 'réquisitions' : 'réquisition'}`;
+
     return (
         <AppLayout>
             <Head title="Tableau de Bord Administration" />
@@ -33,26 +52,26 @@ export default function AdminDashboard() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div className="bg-white border border-[#B2BED6] rounded p-4 shadow-sm">
                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Utilisateurs Enregistrés</span>
-                        <p className="text-2xl font-black text-[#0B192C] mt-1">24 comptes</p>
+                        <p className="text-2xl font-black text-[#0B192C] mt-1">{usersLabel}</p>
                         <p className="text-[11px] text-[#10B981] font-semibold mt-1">Tous authentifiés Google OAuth</p>
                     </div>
 
                     <div className="bg-white border border-[#B2BED6] rounded p-4 shadow-sm">
                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Projets Actifs</span>
-                        <p className="text-2xl font-black text-[#04326D] mt-1">6 projets</p>
+                        <p className="text-2xl font-black text-[#04326D] mt-1">{safeStats.projectsCount} projets</p>
                         <p className="text-[11px] text-gray-500 mt-1">Dont USIMAMIZI, AFYA BORA...</p>
                     </div>
 
                     <div className="bg-white border border-[#B2BED6] rounded p-4 shadow-sm">
                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Sites Opérationnels</span>
-                        <p className="text-2xl font-black text-[#0B192C] mt-1">6 sites</p>
+                        <p className="text-2xl font-black text-[#0B192C] mt-1">{safeStats.sitesCount} sites</p>
                         <p className="text-[11px] text-gray-500 mt-1">Kanina, Tshala, Mukoma...</p>
                     </div>
 
                     <div className="bg-white border-2 border-[#F58F20] rounded p-4 shadow-sm">
-                        <span className="text-[10px] font-bold text-[#0B192C] uppercase tracking-wider">Sécurité Système</span>
-                        <p className="text-2xl font-black text-[#10B981] mt-1">100% Conforme</p>
-                        <p className="text-[11px] text-gray-500 mt-1">Inscription publique désactivée</p>
+                        <span className="text-[10px] font-bold text-[#0B192C] uppercase tracking-wider">Réquisitions</span>
+                        <p className="text-2xl font-black text-[#10B981] mt-1">{requisitionsLabel}</p>
+                        <p className="text-[11px] text-gray-500 mt-1">{safeStats.securityStatus}</p>
                     </div>
                 </div>
 

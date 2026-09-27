@@ -2,15 +2,29 @@ import { useState } from 'react';
 import { Head, Link, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
-import { mockStaffStats, mockStaffRequisitions, RequisitionItem } from '@/types/staff';
+import { RequisitionItem, StaffStats } from '@/types/staff';
 
-export default function StaffDashboard() {
+interface StaffDashboardProps {
+    stats?: StaffStats;
+    requisitions?: RequisitionItem[];
+}
+
+export default function StaffDashboard({ stats: initialStats, requisitions: initialReqs }: StaffDashboardProps) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
 
     const [filtreEtat, setFiltreEtat] = useState<string>('all');
-    const [requisitions] = useState<RequisitionItem[]>(mockStaffRequisitions);
-    const stats = mockStaffStats;
+    const [requisitions] = useState<RequisitionItem[]>(initialReqs ?? []);
+    const stats = initialStats ?? {
+        enCoursCount: 0,
+        valideesPretesCount: 0,
+        valideesPretesMontantUSD: 0,
+        vouchersMoisCount: 0,
+        vouchersMoisTotalUSD: 0,
+        justificatifsADeposerCount: 0,
+        activiteEnSouffrance: 'Aucune',
+        dechargeRef: '#DCH-000',
+    };
 
     const filteredReqs = filtreEtat === 'all'
         ? requisitions

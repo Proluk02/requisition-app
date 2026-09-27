@@ -1,27 +1,30 @@
 import { useState, useMemo } from 'react';
-import { Head, Link, usePage } from '@inertiajs/react';
+import { Head, Link, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
 
 // Modèle Demande conforme au diagramme de classes
 interface Justificatif {
+    id: string;
     date: string;
     description: string;
     montant: number;
     scan: string;
+    fileUrl: string | null;
 }
 
 interface LigneDemande {
     id: string;
     activite: string;
     codeAllBudget: string;
-    nature: 'Achat' | 'Service';
+    nature: string;
     quantiteOuDuree: number;
     unite: string;
     frais: number;
     devise: 'USD' | 'FC' | 'EUR';
     total: number;
     justif: Justificatif[];
+    newFiles?: File[];
 }
 
 interface RequisitionMP {
@@ -36,7 +39,13 @@ interface RequisitionMP {
     caisseSouhaitee: string;
     caisseAttribuee?: string;
     observation?: string;
-    statut: 'en_attente_mp' | 'valide_mp' | 'rejete_mp';
+    statut: 'en_attente_mp' | 'valide_mp' | 'rejete_mp' | 'a_corriger' | 'autre';
+    statusCode: string;
+    statusLabel: string;
+    canDecide: boolean;
+    canEdit: boolean;
+    financeReturned: boolean;
+    needsCorrection: boolean;
     dateSoumission: string;
     motifRejet?: string;
     lignes: LigneDemande[];
@@ -50,94 +59,21 @@ const CAISSES_DISPONIBLES = [
     'Local Fund 2'
 ];
 
-export default function ProjectManagerDashboard() {
+export default function ProjectManagerDashboard({ requisitions: initialRequisitions }: { requisitions?: RequisitionMP[] }) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
 
-    // Liste des demandes de son projet (showList / filter)
-    const [demandes, setDemandes] = useState<RequisitionMP[]>([
-        {
-            id: '1',
-            numero: 'UB/09/001',
-            projet: user.project?.name || 'USIMAMIZI BORA',
-            initiateurNom: 'Kasongo Mukendi',
-            initiateurRole: 'Staff Terrain',
-            nature: 'Achat',
-            devise: 'USD',
-            montantTotal: 1250.00,
-            caisseSouhaitee: 'Caisse principale',
-            observation: 'Achat kits scolaires et outillage de formation',
-            statut: 'en_attente_mp',
-            dateSoumission: '16/09/2026',
-            lignes: [
-                {
-                    id: 'l1',
-                    activite: 'Achat uniformes et cartables',
-                    codeAllBudget: '2.1.1',
-                    nature: 'Achat',
-                    quantiteOuDuree: 50,
-                    unite: 'Kits',
-                    frais: 20,
-                    devise: 'USD',
-                    total: 1000,
-                    justif: [
-                        { date: '2026-09-15', description: 'Proforma Éts ABC Couture', montant: 1000, scan: 'proforma_abc.pdf' },
-                        { date: '2026-09-15', description: 'Devis comparatif ETS Bio', montant: 1100, scan: 'devis_bio.pdf' }
-                    ]
-                },
-                {
-                    id: 'l2',
-                    activite: 'Transport matériel vers site Kanina',
-                    codeAllBudget: '2.1.2',
-                    nature: 'Service',
-                    quantiteOuDuree: 1,
-                    unite: 'Course',
-                    frais: 250,
-                    devise: 'USD',
-                    total: 250,
-                    justif: [
-                        { date: '2026-09-15', description: 'Facture transporteur express', montant: 250, scan: 'facture_transp.pdf' }
-                    ]
-                }
-            ]
-        },
-        {
-            id: '2',
-            numero: 'UB/09/002',
-            projet: user.project?.name || 'USIMAMIZI BORA',
-            initiateurNom: 'Mireille Kabange',
-            initiateurRole: 'Coordonnateur de Site',
-            nature: 'Service',
-            devise: 'USD',
-            montantTotal: 380.00,
-            caisseSouhaitee: 'EU',
-            observation: 'Maintenance motopompe d\'irrigation',
-            statut: 'en_attente_mp',
-            dateSoumission: '17/09/2026',
-            lignes: [
-                {
-                    id: 'l3',
-                    activite: 'Entretien et vidange motopompe Honda',
-                    codeAllBudget: '1.4.1',
-                    nature: 'Service',
-                    quantiteOuDuree: 2,
-                    unite: 'Jours',
-                    frais: 190,
-                    devise: 'USD',
-                    total: 380,
-                    justif: [
-                        { date: '2026-09-16', description: 'Devis garage central', montant: 380, scan: 'devis_garage.pdf' }
-                    ]
-                }
-            ]
-        }
-    ]);
+    const [demandes, setDemandes] = useState<RequisitionMP[]>(initialRequisitions ?? []);
 
     // Filtre d'affichage
-    const [filterStatut, setFilterStatut] = useState<string>('en_attente_mp');
+    const [filterStatut, setFilterStatut] = useState<string>('all');
 
     // Modale d'arbitrage (show detail Req / firstValidation / reject)
     const [selectedReq, setSelectedReq] = useState<RequisitionMP | null>(null);
+    const [editingReq, setEditingReq] = useState<RequisitionMP | null>(null);
+    const [savingEdit, setSavingEdit] = useState(false);
+    const [editError, setEditError] = useState<string | null>(null);
+    const [editFiles, setEditFiles] = useState<Record<string, File[]>>({});
     const [caisseChoisie, setCaisseChoisie] = useState<string>('Caisse principale');
     const [modeRejet, setModeRejet] = useState<boolean>(false);
     const [motifRejet, setMotifRejet] = useState<string>('');
@@ -145,32 +81,117 @@ export default function ProjectManagerDashboard() {
     // Notification toast
     const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+    const openEditModal = (req: RequisitionMP) => {
+        setEditingReq({ ...req, lignes: req.lignes.map((line) => ({ ...line })) });
+        setEditFiles({});
+        setEditError(null);
+    };
+
+    const updateEditingLine = (lineId: string, changes: Partial<LigneDemande>) => {
+        setEditingReq((current) => {
+            if (!current) return current;
+
+            return {
+                ...current,
+                lignes: current.lignes.map((line) => {
+                    if (line.id !== lineId) return line;
+                    const updated = { ...line, ...changes };
+                    updated.total = Number(updated.quantiteOuDuree || 0) * Number(updated.frais || 0);
+                    return updated;
+                }),
+                montantTotal: current.lignes.reduce((sum, line) => {
+                    if (line.id !== lineId) return sum + line.total;
+                    const updated = { ...line, ...changes };
+                    return sum + Number(updated.quantiteOuDuree || 0) * Number(updated.frais || 0);
+                }, 0),
+            };
+        });
+    };
+
+    const handleSaveEdit = (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!editingReq) return;
+
+        const updatedReq = editingReq;
+        router.post(route('requisitions.update', updatedReq.id), {
+            _method: 'patch',
+            nature_requisition: updatedReq.nature,
+            caisse_decaissement: updatedReq.caisseSouhaitee,
+            devise: updatedReq.devise,
+            observation: updatedReq.observation || null,
+            articles: updatedReq.lignes.map((line) => ({
+                id: line.id,
+                activite: line.activite,
+                code_all_budget: line.codeAllBudget,
+                nature: line.nature,
+                quantiteOuDuree: line.quantiteOuDuree,
+                unite: line.unite,
+                prixUnitaire: line.frais,
+                justificatifs: (editFiles[line.id] ?? []).map((file) => ({
+                    description: file.name,
+                    date: new Date().toISOString().slice(0, 10),
+                    montant: 0,
+                    file,
+                })),
+            })),
+        }, {
+            preserveScroll: true,
+            forceFormData: true,
+            onStart: () => setSavingEdit(true),
+            onFinish: () => setSavingEdit(false),
+            onError: (errors) => {
+                setEditError(Object.values(errors)[0] ?? 'La réquisition n’a pas pu être enregistrée.');
+            },
+            onSuccess: (page) => {
+                const refreshed = page.props.requisitions as RequisitionMP[] | undefined;
+                if (refreshed) setDemandes(refreshed);
+                setToast({ type: 'success', message: `Réquisition ${updatedReq.numero} mise à jour.` });
+                setEditingReq(null);
+                setEditFiles({});
+                setEditError(null);
+            },
+        });
+    };
+
     // Filtrage
     const demandesFiltrees = useMemo(() => {
         if (filterStatut === 'all') return demandes;
+        if (filterStatut === 'a_corriger') return demandes.filter(d => d.needsCorrection);
         return demandes.filter(d => d.statut === filterStatut);
     }, [demandes, filterStatut]);
 
     // Action : firstValidation()
     const handleFirstValidation = (id: string) => {
-        setDemandes(demandes.map(d => {
-            if (d.id === id) {
-                return {
-                    ...d,
-                    statut: 'valide_mp',
-                    caisseAttribuee: caisseChoisie
-                };
-            }
-            return d;
-        }));
+        router.patch(route('requisitions.manager-decision', id), {
+            decision: 'approve',
+            caisse_decaissement: caisseChoisie,
+        }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setDemandes(prev => prev.map(d => {
+                    if (d.id === id) {
+                        return {
+                            ...d,
+                            statut: 'valide_mp',
+                            statusCode: 'visa_mp',
+                            statusLabel: 'Visa Manager Projet',
+                            canDecide: false,
+                            needsCorrection: false,
+                            caisseAttribuee: caisseChoisie,
+                        };
+                    }
+                    return d;
+                }));
 
-        setToast({
-            type: 'success',
-            message: `Première validation accordée pour ${selectedReq?.numero}. Caisse attribuée : ${caisseChoisie}. Transmis aux Finances.`
+                setToast({
+                    type: 'success',
+                    message: `Première validation accordée pour ${selectedReq?.numero}. Caisse attribuée : ${caisseChoisie}. Transmis aux Finances.`
+                });
+
+                setSelectedReq(null);
+                setModeRejet(false);
+            },
         });
-
-        setSelectedReq(null);
-        setModeRejet(false);
     };
 
     // Action : reject()
@@ -180,25 +201,37 @@ export default function ProjectManagerDashboard() {
             return;
         }
 
-        setDemandes(demandes.map(d => {
-            if (d.id === id) {
-                return {
-                    ...d,
-                    statut: 'rejete_mp',
-                    motifRejet: motifRejet
-                };
-            }
-            return d;
-        }));
+        router.patch(route('requisitions.manager-decision', id), {
+            decision: 'reject',
+            motif_rejet: motifRejet,
+        }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setDemandes(prev => prev.map(d => {
+                    if (d.id === id) {
+                        return {
+                            ...d,
+                            statut: 'rejete_mp',
+                            statusCode: 'rejetee',
+                            statusLabel: 'Rejetée',
+                            canDecide: false,
+                            needsCorrection: true,
+                            motifRejet: motifRejet,
+                        };
+                    }
+                    return d;
+                }));
 
-        setToast({
-            type: 'error',
-            message: `Réquisition ${selectedReq?.numero} rejetée. L'initiateur a été notifié du motif.`
+                setToast({
+                    type: 'error',
+                    message: `Réquisition ${selectedReq?.numero} rejetée. L'initiateur a été notifié du motif.`
+                });
+
+                setSelectedReq(null);
+                setModeRejet(false);
+                setMotifRejet('');
+            },
         });
-
-        setSelectedReq(null);
-        setModeRejet(false);
-        setMotifRejet('');
     };
 
     return (
@@ -259,11 +292,11 @@ export default function ProjectManagerDashboard() {
                 </div>
 
                 <div className="bg-white border border-[#B2BED6] rounded p-4 shadow-sm">
-                    <span className="text-[10px] font-bold uppercase text-gray-500">Rejetées</span>
+                    <span className="text-[10px] font-bold uppercase text-gray-500">À corriger</span>
                     <p className="text-2xl font-black text-[#DC2626] mt-1">
-                        {demandes.filter(d => d.statut === 'rejete_mp').length} réquisition(s)
+                        {demandes.filter(d => d.needsCorrection).length} réquisition(s)
                     </p>
-                    <p className="text-[11px] text-gray-500 mt-0.5">Renvoyées pour correction</p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">Rejetées ou renvoyées par Finance</p>
                 </div>
             </div>
 
@@ -289,6 +322,7 @@ export default function ProjectManagerDashboard() {
                             <option value="en_attente_mp">À arbitrer (En attente)</option>
                             <option value="valide_mp">Validées (Transmises)</option>
                             <option value="rejete_mp">Rejetées</option>
+                            <option value="a_corriger">À corriger</option>
                             <option value="all">Toutes</option>
                         </select>
                     </div>
@@ -344,21 +378,40 @@ export default function ProjectManagerDashboard() {
                                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
                                             {req.statut === 'en_attente_mp' && (
                                                 <span className="bg-orange-100 text-[#92400E] px-2.5 py-1 rounded-full text-[10px] font-bold">
-                                                    En attente Visa MP
+                                                    {req.statusLabel}
                                                 </span>
                                             )}
                                             {req.statut === 'valide_mp' && (
                                                 <span className="bg-emerald-100 text-[#065F46] px-2.5 py-1 rounded-full text-[10px] font-bold">
-                                                    ✓ Validé ({req.caisseAttribuee})
+                                                    {req.statusLabel}{req.caisseAttribuee ? ` (${req.caisseAttribuee})` : ''}
                                                 </span>
                                             )}
                                             {req.statut === 'rejete_mp' && (
                                                 <span className="bg-red-100 text-red-700 px-2.5 py-1 rounded-full text-[10px] font-bold">
-                                                    Rejeté
+                                                    {req.statusLabel}
+                                                </span>
+                                            )}
+                                            {req.statut === 'autre' && (
+                                                <span className="bg-gray-100 text-gray-700 px-2.5 py-1 rounded-full text-[10px] font-bold" title={req.statusCode}>
+                                                    {req.statusLabel}
+                                                </span>
+                                            )}
+                                            {req.statut === 'a_corriger' && (
+                                                <span className="bg-red-100 text-red-700 px-2.5 py-1 rounded-full text-[10px] font-bold">
+                                                    {req.statusLabel}
                                                 </span>
                                             )}
                                         </td>
                                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                                            {req.canEdit && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openEditModal(req)}
+                                                    className="mr-2 px-3 py-1.5 border border-[#04326D] text-[#04326D] rounded font-bold text-xs hover:bg-blue-50"
+                                                >
+                                                    Modifier
+                                                </button>
+                                            )}
                                             <button
                                                 type="button"
                                                 onClick={() => {
@@ -368,7 +421,7 @@ export default function ProjectManagerDashboard() {
                                                 }}
                                                 className="px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs transition"
                                             >
-                                                {req.statut === 'en_attente_mp' ? 'Examiner & Statuer' : 'Consulter Dossier'}
+                                                {req.canDecide ? 'Examiner & Statuer' : 'Consulter Dossier'}
                                             </button>
                                         </td>
                                     </tr>
@@ -378,6 +431,92 @@ export default function ProjectManagerDashboard() {
                     </table>
                 </div>
             </div>
+
+            {editingReq && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+                    <form onSubmit={handleSaveEdit} className="w-full max-w-4xl max-h-[92vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl">
+                        <header className="sticky top-0 z-10 flex items-start justify-between gap-4 p-5 border-b border-[#E2E8F0] bg-white">
+                            <div>
+                                <p className="text-[10px] uppercase font-bold text-[#F58F20]">Modification et correction</p>
+                                <h2 className="text-lg font-bold text-[#0B192C]">Réquisition {editingReq.numero}</h2>
+                            </div>
+                            <button type="button" onClick={() => setEditingReq(null)} aria-label="Fermer" className="text-gray-500 text-2xl leading-none">&times;</button>
+                        </header>
+
+                        <div className="p-5 space-y-4 text-xs">
+                            {editError && <div role="alert" className="border border-red-300 bg-red-50 p-3 text-red-800">{editError}</div>}
+                            {editingReq.financeReturned && (
+                                <div className="border-l-4 border-red-500 bg-red-50 p-3 text-red-900">
+                                    <strong>Correction demandée par Finance.</strong>
+                                    <p className="mt-1 whitespace-pre-line">{editingReq.observation}</p>
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <label className="font-semibold text-gray-700">Nature
+                                    <select value={editingReq.nature} onChange={(event) => setEditingReq({ ...editingReq, nature: event.target.value as 'Achat' | 'Service' })} className="mt-1 w-full border border-[#B2BED6] rounded p-2 bg-white">
+                                        <option value="Achat">Achat</option><option value="Service">Service</option>
+                                    </select>
+                                </label>
+                                <label className="font-semibold text-gray-700">Caisse
+                                    <select value={editingReq.caisseSouhaitee} onChange={(event) => setEditingReq({ ...editingReq, caisseSouhaitee: event.target.value })} className="mt-1 w-full border border-[#B2BED6] rounded p-2 bg-white">
+                                        {CAISSES_DISPONIBLES.map((caisse) => <option key={caisse} value={caisse}>{caisse}</option>)}
+                                    </select>
+                                </label>
+                                <label className="font-semibold text-gray-700">Devise
+                                    <select value={editingReq.devise} onChange={(event) => setEditingReq({ ...editingReq, devise: event.target.value as RequisitionMP['devise'] })} className="mt-1 w-full border border-[#B2BED6] rounded p-2 bg-white">
+                                        <option value="USD">USD</option><option value="FC">FC</option><option value="EUR">EUR</option>
+                                    </select>
+                                </label>
+                            </div>
+
+                            <label className="block font-semibold text-gray-700">Observation
+                                <textarea rows={2} value={editingReq.observation ?? ''} onChange={(event) => setEditingReq({ ...editingReq, observation: event.target.value })} className="mt-1 w-full border border-[#B2BED6] rounded p-2 font-normal" />
+                            </label>
+
+                            <div className="space-y-3">
+                                {editingReq.lignes.map((line) => (
+                                    <section key={line.id} className="border border-[#D8DEE8] p-3 space-y-3">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            <label className="font-semibold text-gray-700">Activité / Désignation
+                                                <input required value={line.activite} onChange={(event) => updateEditingLine(line.id, { activite: event.target.value })} className="mt-1 w-full border border-[#B2BED6] rounded p-2 font-normal" />
+                                            </label>
+                                            <label className="font-semibold text-gray-700">Code All. Budget demandé
+                                                <input required value={line.codeAllBudget} onChange={(event) => updateEditingLine(line.id, { codeAllBudget: event.target.value })} className="mt-1 w-full border border-[#B2BED6] rounded p-2 font-mono font-normal" />
+                                            </label>
+                                        </div>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                            <label className="font-semibold text-gray-700">Nature de ligne
+                                                <input value={line.nature} onChange={(event) => updateEditingLine(line.id, { nature: event.target.value })} className="mt-1 w-full border border-[#B2BED6] rounded p-2 font-normal" />
+                                            </label>
+                                            <label className="font-semibold text-gray-700">{editingReq.nature === 'Achat' ? 'Quantité' : 'Durée'}
+                                                <input type="number" min="0" step="0.01" required value={line.quantiteOuDuree} onChange={(event) => updateEditingLine(line.id, { quantiteOuDuree: Number(event.target.value) })} className="mt-1 w-full border border-[#B2BED6] rounded p-2 text-right font-normal" />
+                                            </label>
+                                            <label className="font-semibold text-gray-700">Unité
+                                                <input value={line.unite} onChange={(event) => updateEditingLine(line.id, { unite: event.target.value })} className="mt-1 w-full border border-[#B2BED6] rounded p-2 font-normal" />
+                                            </label>
+                                            <label className="font-semibold text-gray-700">Prix unitaire
+                                                <input type="number" min="0" step="0.01" required value={line.frais} onChange={(event) => updateEditingLine(line.id, { frais: Number(event.target.value) })} className="mt-1 w-full border border-[#B2BED6] rounded p-2 text-right font-normal" />
+                                            </label>
+                                        </div>
+                                        <p className="text-right font-bold text-[#04326D]">Total : {line.total.toLocaleString()} {editingReq.devise}</p>
+                                        {line.justif.length > 0 && <ul className="text-[11px] text-gray-500">{line.justif.map((file, index) => <li key={`${line.id}-file-${index}`}>{file.scan}</li>)}</ul>}
+                                        <label className="block font-semibold text-gray-700">Ajouter des pièces justificatives
+                                            <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(event) => setEditFiles((current) => ({ ...current, [line.id]: Array.from(event.target.files ?? []) }))} className="mt-1 block w-full border border-dashed border-[#B2BED6] rounded p-2 font-normal" />
+                                        </label>
+                                        {(editFiles[line.id] ?? []).length > 0 && <p className="text-[10px] text-gray-500">{editFiles[line.id].map((file) => file.name).join(', ')}</p>}
+                                    </section>
+                                ))}
+                            </div>
+                        </div>
+
+                        <footer className="sticky bottom-0 flex justify-end gap-2 border-t border-[#E2E8F0] p-4 bg-white">
+                            <button type="button" disabled={savingEdit} onClick={() => setEditingReq(null)} className="px-3 py-2 border border-gray-300 text-gray-700 text-xs">Annuler</button>
+                            <button type="submit" disabled={savingEdit} className="px-4 py-2 bg-[#04326D] text-white text-xs font-bold disabled:opacity-50">{savingEdit ? 'Enregistrement...' : 'Enregistrer les corrections'}</button>
+                        </footer>
+                    </form>
+                </div>
+            )}
 
             {/* MODALE CONFORME AU DIAGRAMME DE SÉQUENCE : show detail Req() + loadCaisses() + firstValidation() / reject() */}
             {selectedReq && (
@@ -439,9 +578,19 @@ export default function ProjectManagerDashboard() {
                                                     <div className="space-y-1">
                                                         {ligne.justif.map((j, idx) => (
                                                             <div key={idx} className="bg-blue-50 text-[#04326D] px-2 py-0.5 rounded text-[10px] flex items-center justify-between">
-                                                                <span className="truncate max-w-[120px]" title={j.description}>
-                                                                    📄 {j.scan}
-                                                                </span>
+                                                                {j.fileUrl ? (
+                                                                    <a
+                                                                        href={j.fileUrl}
+                                                                        target="_blank"
+                                                                        rel="noreferrer"
+                                                                        title={`Consulter ${j.description}`}
+                                                                        className="truncate max-w-[140px] underline decoration-transparent hover:decoration-current"
+                                                                    >
+                                                                        {j.scan}
+                                                                    </a>
+                                                                ) : (
+                                                                    <span className="truncate max-w-[140px]" title={j.description}>{j.scan}</span>
+                                                                )}
                                                                 <span className="font-bold">{j.montant} {selectedReq.devise}</span>
                                                             </div>
                                                         ))}
@@ -466,7 +615,7 @@ export default function ProjectManagerDashboard() {
                         </div>
 
                         {/* ZONE D'ARBITRAGE DU MANAGER DE PROJET */}
-                        {selectedReq.statut === 'en_attente_mp' && (
+                        {selectedReq.canDecide && (
                             <div className="border-t pt-4 space-y-4">
                                 {!modeRejet ? (
                                     <>
@@ -553,7 +702,7 @@ export default function ProjectManagerDashboard() {
                             </div>
                         )}
 
-                        {selectedReq.statut !== 'en_attente_mp' && (
+                        {!selectedReq.canDecide && (
                             <div className="border-t pt-3 flex justify-end">
                                 <button
                                     type="button"
