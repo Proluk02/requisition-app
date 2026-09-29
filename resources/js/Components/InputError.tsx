@@ -1,4 +1,5 @@
 import { HTMLAttributes } from 'react';
+import { AlertCircle } from 'lucide-react';
 
 export default function InputError({
     message,
@@ -8,9 +9,13 @@ export default function InputError({
     return message ? (
         <p
             {...props}
-            className={'text-sm text-red-600 dark:text-red-400 ' + className}
+            className={
+                'mt-1 flex items-center gap-1.5 text-xs font-medium text-error dark:text-red-400 ' +
+                className
+            }
         >
-            {message}
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            <span>{message}</span>
         </p>
     ) : null;
 }

@@ -2,6 +2,24 @@ import { useState, useMemo } from 'react';
 import { Head, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
+import {
+    Wallet,
+    ShieldCheck,
+    AlertCircle,
+    CheckCircle2,
+    Clock,
+    FileText,
+    X,
+    Paperclip,
+    Download,
+    Ban,
+    Lock,
+    KeyRound,
+    Loader2,
+    FolderKanban,
+    User as UserIcon,
+    ListFilter,
+} from 'lucide-react';
 
 interface FinanceJustificatif {
     id: string;
@@ -71,152 +89,197 @@ export default function FinanceDashboard({
     scopeLabel = 'Tous les projets',
     requisitions: initialRequisitions = [],
     projects = [],
-    usersList = []
+    usersList = [],
 }: Props) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
 
     const [requisitions, setRequisitions] = useState<FinanceRequisition[]>(initialRequisitions);
-    
-    // NAVIGATION PAR ONGLETS (DEMANDÉE PAR L'UTILISATEUR)
+
     const [activeTab, setActiveTab] = useState<'tous' | 'par_projet' | 'par_utilisateur'>('tous');
     const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
     const [selectedUserId, setSelectedUserId] = useState<string>('all');
-
-    // Filtre d'étape
     const [statusFilter, setStatusFilter] = useState('all');
 
-    // Modales
     const [selected, setSelected] = useState<FinanceRequisition | null>(null);
     const [rejecting, setRejecting] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
-    
-    // SÉCURITÉ : MOT DE PASSE POUR SIGNATURE ÉLECTRONIQUE
+
     const [passwordModalOpen, setPasswordModalOpen] = useState(false);
     const [passwordSaisi, setPasswordSaisi] = useState('');
     const [processing, setProcessing] = useState(false);
-    const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+    const [toast, setToast] = useState<{
+        type: 'success' | 'error';
+        message: string;
+    } | null>(null);
 
-    // Filtrage multi-critères (Onglets + Statut)
+    const showToast = (type: 'success' | 'error', message: string) => {
+        setToast({ type, message });
+        setTimeout(() => setToast(null), 5000);
+    };
+
     const filteredRequisitions = useMemo(() => {
-        return requisitions.filter(item => {
-            // Filtre par statut
+        return requisitions.filter((item) => {
             if (statusFilter === 'pending' && !item.canDecide) return false;
             if (statusFilter === 'approved' && item.statusCode !== 'controle_finance') return false;
             if (statusFilter === 'returned' && !item.financeRejected) return false;
 
-            // Filtre par Onglet Projet
             if (activeTab === 'par_projet' && selectedProjectId !== 'all') {
-                if (item.project_id !== selectedProjectId && item.projet !== selectedProjectId) return false;
+                if (
+                    item.project_id !== selectedProjectId &&
+                    item.projet !== selectedProjectId
+                )
+                    return false;
             }
 
-            // Filtre par Onglet Utilisateur
             if (activeTab === 'par_utilisateur' && selectedUserId !== 'all') {
-                if (item.user_id !== selectedUserId && item.initiateurNom !== selectedUserId) return false;
+                if (
+                    item.user_id !== selectedUserId &&
+                    item.initiateurNom !== selectedUserId
+                )
+                    return false;
             }
 
             return true;
         });
     }, [requisitions, statusFilter, activeTab, selectedProjectId, selectedUserId]);
 
-    // ÉTAPE 1 : Déclencher la validation
     const handleTriggerApprove = () => {
         if (!selected) return;
         setPasswordSaisi('');
         setPasswordModalOpen(true);
     };
 
-    // ÉTAPE 2 : Confirmer avec le mot de passe réel du Financier
     const handleConfirmSignature = (e: React.FormEvent) => {
         e.preventDefault();
         if (!selected || !passwordSaisi) return;
 
         setProcessing(true);
 
-        router.patch(route('requisitions.finance-decision', selected.id), {
-            decision: 'approve',
-            password: passwordSaisi, // ENVOI DU MOT DE PASSE AU BACKEND
-        }, {
-            preserveScroll: true,
-            onFinish: () => setProcessing(false),
-            onSuccess: () => {
-                const updatedId = selected.id;
-                setPasswordModalOpen(false);
-                setSelected(null);
-                setPasswordSaisi('');
-
-                setRequisitions(prev => prev.map(item => {
-                    if (item.id === updatedId) {
-                        return {
-                            ...item,
-                            statusCode: 'controle_finance',
-                            statusLabel: 'Validée par Finance',
-                            canDecide: false,
-                        };
-                    }
-                    return item;
-                }));
-
-                setToast({
-                    type: 'success',
-                    message: `Visa Financier apposé avec succès sur ${selected.numero}. Transmis à l'Administration.`
-                });
+        router.patch(
+            route('requisitions.finance-decision', selected.id),
+            {
+                decision: 'approve',
+                password: passwordSaisi,
             },
-            onError: (errors) => {
-                alert(errors.password || 'Erreur lors de la signature financière.');
-            }
-        });
+            {
+                preserveScroll: true,
+                onFinish: () => setProcessing(false),
+                onSuccess: () => {
+                    const updatedId = selected.id;
+                    setPasswordModalOpen(false);
+                    setSelected(null);
+                    setPasswordSaisi('');
+
+                    setRequisitions((prev) =>
+                        prev.map((item) => {
+                            if (item.id === updatedId) {
+                                return {
+                                    ...item,
+                                    statusCode: 'controle_finance',
+                                    statusLabel: 'Validée par Finance',
+                                    canDecide: false,
+                                };
+                            }
+                            return item;
+                        }),
+                    );
+
+                    showToast(
+                        'success',
+                        `Visa Financier apposé avec succès sur ${selected.numero}. Transmis à l'Administration.`,
+                    );
+                },
+                onError: (errors) => {
+                    showToast(
+                        'error',
+                        (errors as any).password ||
+                            'Erreur lors de la signature financière.',
+                    );
+                },
+            },
+        );
     };
 
-    // Rejet financier
     const handleRejectFinance = () => {
         if (!selected || !rejectionReason.trim()) {
-            alert('Veuillez spécifier le motif du rejet financier.');
+            showToast('error', 'Veuillez spécifier le motif du rejet financier.');
             return;
         }
 
         setProcessing(true);
 
-        router.patch(route('requisitions.finance-decision', selected.id), {
-            decision: 'reject',
-            password: 'skip',
-            motif_rejet: rejectionReason,
-        }, {
-            preserveScroll: true,
-            onFinish: () => setProcessing(false),
-            onSuccess: () => {
-                const updatedId = selected.id;
-                setSelected(null);
-                setRejecting(false);
-                setRejectionReason('');
-
-                setRequisitions(prev => prev.map(item => {
-                    if (item.id === updatedId) {
-                        return {
-                            ...item,
-                            statusCode: 'draft',
-                            statusLabel: 'Renvoyée en correction',
-                            canDecide: false,
-                            financeRejected: true,
-                        };
-                    }
-                    return item;
-                }));
-
-                setToast({
-                    type: 'error',
-                    message: `Réquisition ${selected.numero} renvoyée pour correction budgétaire.`
-                });
+        router.patch(
+            route('requisitions.finance-decision', selected.id),
+            {
+                decision: 'reject',
+                password: 'skip',
+                motif_rejet: rejectionReason,
             },
-            onError: (errors) => {
-                alert(errors.motif_rejet || 'Erreur lors du rejet.');
-            }
-        });
+            {
+                preserveScroll: true,
+                onFinish: () => setProcessing(false),
+                onSuccess: () => {
+                    const updatedId = selected.id;
+                    setSelected(null);
+                    setRejecting(false);
+                    setRejectionReason('');
+
+                    setRequisitions((prev) =>
+                        prev.map((item) => {
+                            if (item.id === updatedId) {
+                                return {
+                                    ...item,
+                                    statusCode: 'draft',
+                                    statusLabel: 'Renvoyée en correction',
+                                    canDecide: false,
+                                    financeRejected: true,
+                                };
+                            }
+                            return item;
+                        }),
+                    );
+
+                    showToast(
+                        'error',
+                        `Réquisition ${selected.numero} renvoyée pour correction budgétaire.`,
+                    );
+                },
+                onError: (errors) => {
+                    showToast(
+                        'error',
+                        (errors as any).motif_rejet || 'Erreur lors du rejet.',
+                    );
+                },
+            },
+        );
     };
 
-    const pendingCount = requisitions.filter(item => item.canDecide).length;
-    const approvedCount = requisitions.filter(item => item.statusCode === 'controle_finance').length;
-    const returnedCount = requisitions.filter(item => item.financeRejected).length;
+    const pendingCount = requisitions.filter((item) => item.canDecide).length;
+    const approvedCount = requisitions.filter(
+        (item) => item.statusCode === 'controle_finance',
+    ).length;
+    const returnedCount = requisitions.filter((item) => item.financeRejected).length;
+
+    const tabClass = (tab: typeof activeTab) =>
+        `inline-flex items-center gap-2 pb-3 px-3 border-b-2 text-xs font-semibold transition ${
+            activeTab === tab
+                ? 'border-primary text-primary'
+                : 'border-transparent text-gray-500 hover:text-on-surface'
+        }`;
+
+    const renderStatutBadge = (item: FinanceRequisition) => {
+        let cls = 'bg-gray-100 text-gray-700';
+        if (item.canDecide) cls = 'bg-tertiary-soft text-tertiary-dark';
+        else if (item.statusCode === 'controle_finance')
+            cls = 'bg-success-soft text-success-dark';
+        else if (item.financeRejected) cls = 'bg-error-soft text-error-dark';
+        return (
+            <span className={`${cls} px-2.5 py-1 rounded-full text-[10px] font-bold`}>
+                {item.statusLabel}
+            </span>
+        );
+    };
 
     return (
         <AppLayout>
@@ -224,75 +287,144 @@ export default function FinanceDashboard({
 
             <div className="space-y-6">
                 {/* En-tête */}
-                <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-[#E2E8F0] pb-4">
+                <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-outline-soft pb-5">
                     <div>
-                        <p className="text-[10px] uppercase tracking-wider font-bold text-[#F58F20]">Direction Financière</p>
-                        <h1 className="text-xl font-bold text-[#0B192C]">Contrôle Budgétaire & Visa Financier</h1>
-                        <p className="text-xs text-gray-500 mt-0.5">Financier : <strong>{user.name}</strong> • Vérification des soubassements et imputations.</p>
+                        <p className="text-[10px] uppercase tracking-wider font-bold text-tertiary flex items-center gap-1.5">
+                            <Wallet className="w-3 h-3" />
+                            Direction Financière
+                        </p>
+                        <h1 className="text-xl font-bold text-on-surface mt-1">
+                            Contrôle Budgétaire & Visa Financier
+                        </h1>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Financier :{' '}
+                            <strong className="text-on-surface">{user.name}</strong> • Vérification
+                            des soubassements et imputations.
+                        </p>
                     </div>
-                    <span className="text-xs font-mono font-bold text-[#04326D] bg-blue-50 px-2.5 py-1 rounded border border-blue-200">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-primary bg-primary-soft px-3 py-1.5 rounded-md border border-primary/15">
+                        <FileText className="w-3 h-3" />
                         {requisitions.length} dossier(s) au total
                     </span>
                 </header>
 
+                {/* Toast */}
                 {toast && (
-                    <div className={`p-3 rounded text-xs font-bold flex justify-between items-center ${toast.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-300' : 'bg-red-50 text-red-800 border border-red-300'}`}>
-                        <span>{toast.message}</span>
-                        <button type="button" onClick={() => setToast(null)} className="underline">Fermer</button>
+                    <div
+                        className={`p-3.5 rounded-md text-xs font-semibold flex justify-between items-center gap-3 border animate-slide-down ${
+                            toast.type === 'success'
+                                ? 'bg-success-soft text-success-dark border-success/30'
+                                : 'bg-error-soft text-error-dark border-error/30'
+                        }`}
+                    >
+                        <div className="flex items-center gap-2">
+                            {toast.type === 'success' ? (
+                                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                            ) : (
+                                <AlertCircle className="w-4 h-4 shrink-0" />
+                            )}
+                            <span>{toast.message}</span>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setToast(null)}
+                            className="text-[11px] underline hover:no-underline shrink-0"
+                        >
+                            Fermer
+                        </button>
                     </div>
                 )}
 
-                {/* 3 Cartes Indicateurs */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="border-l-4 border-[#F58F20] bg-white p-4 shadow-sm border border-[#B2BED6] rounded-r">
-                        <p className="text-[10px] uppercase font-bold text-gray-500">En attente de Visa Finance</p>
-                        <p className="text-2xl font-black text-[#F58F20] mt-1">{pendingCount}</p>
+                {/* KPI */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="bg-white p-5 shadow-card border border-outline-soft rounded-lg border-l-4 border-l-tertiary hover:shadow-md transition-shadow">
+                        <div className="flex items-center justify-between mb-2">
+                            <p className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">
+                                En attente de Visa Finance
+                            </p>
+                            <div className="w-8 h-8 rounded-md bg-tertiary-soft flex items-center justify-center">
+                                <Clock className="w-4 h-4 text-tertiary" />
+                            </div>
+                        </div>
+                        <p className="text-2xl font-black text-tertiary">
+                            {pendingCount}{' '}
+                            <span className="text-base font-bold text-gray-500">
+                                dossier(s)
+                            </span>
+                        </p>
                     </div>
-                    <div className="border-l-4 border-[#10B981] bg-white p-4 shadow-sm border border-[#B2BED6] rounded-r">
-                        <p className="text-[10px] uppercase font-bold text-gray-500">Validées par Finance</p>
-                        <p className="text-2xl font-black text-[#10B981] mt-1">{approvedCount}</p>
+
+                    <div className="bg-white p-5 shadow-card border border-outline-soft rounded-lg border-l-4 border-l-success hover:shadow-md transition-shadow">
+                        <div className="flex items-center justify-between mb-2">
+                            <p className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">
+                                Validées par Finance
+                            </p>
+                            <div className="w-8 h-8 rounded-md bg-success-soft flex items-center justify-center">
+                                <CheckCircle2 className="w-4 h-4 text-success" />
+                            </div>
+                        </div>
+                        <p className="text-2xl font-black text-success">
+                            {approvedCount}{' '}
+                            <span className="text-base font-bold text-gray-500">
+                                dossier(s)
+                            </span>
+                        </p>
                     </div>
-                    <div className="border-l-4 border-red-500 bg-white p-4 shadow-sm border border-[#B2BED6] rounded-r">
-                        <p className="text-[10px] uppercase font-bold text-gray-500">Renvoyées en correction</p>
-                        <p className="text-2xl font-black text-red-700 mt-1">{returnedCount}</p>
+
+                    <div className="bg-white p-5 shadow-card border border-outline-soft rounded-lg border-l-4 border-l-error hover:shadow-md transition-shadow">
+                        <div className="flex items-center justify-between mb-2">
+                            <p className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">
+                                Renvoyées en correction
+                            </p>
+                            <div className="w-8 h-8 rounded-md bg-error-soft flex items-center justify-center">
+                                <AlertCircle className="w-4 h-4 text-error" />
+                            </div>
+                        </div>
+                        <p className="text-2xl font-black text-error">
+                            {returnedCount}{' '}
+                            <span className="text-base font-bold text-gray-500">
+                                dossier(s)
+                            </span>
+                        </p>
                     </div>
                 </div>
 
-                {/* NAVIGATION PAR ONGLETS (GÉNÉRAL / PAR PROJET / PAR UTILISATEUR) */}
-                <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
-                    <div className="border-b border-[#E2E8F0] px-4 pt-3 flex flex-wrap items-center justify-between gap-3 bg-[#F9F9FF]">
-                        {/* Les 3 Onglets */}
-                        <div className="flex gap-2 text-xs font-bold">
+                {/* Onglets */}
+                <div className="bg-white border border-outline-soft rounded-lg shadow-card overflow-hidden">
+                    <div className="border-b border-outline-soft px-4 pt-3 flex flex-wrap items-center justify-between gap-3 bg-surface-muted">
+                        <div className="flex gap-1">
                             <button
                                 type="button"
                                 onClick={() => setActiveTab('tous')}
-                                className={`pb-3 px-3 border-b-2 transition ${activeTab === 'tous' ? 'border-[#04326D] text-[#04326D]' : 'border-transparent text-gray-500 hover:text-[#0B192C]'}`}
+                                className={tabClass('tous')}
                             >
-                                Vue Générale (Toutes)
+                                <ListFilter className="w-3.5 h-3.5" />
+                                Vue Générale
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setActiveTab('par_projet')}
-                                className={`pb-3 px-3 border-b-2 transition ${activeTab === 'par_projet' ? 'border-[#04326D] text-[#04326D]' : 'border-transparent text-gray-500 hover:text-[#0B192C]'}`}
+                                className={tabClass('par_projet')}
                             >
+                                <FolderKanban className="w-3.5 h-3.5" />
                                 Par Projet
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setActiveTab('par_utilisateur')}
-                                className={`pb-3 px-3 border-b-2 transition ${activeTab === 'par_utilisateur' ? 'border-[#04326D] text-[#04326D]' : 'border-transparent text-gray-500 hover:text-[#0B192C]'}`}
+                                className={tabClass('par_utilisateur')}
                             >
+                                <UserIcon className="w-3.5 h-3.5" />
                                 Par Utilisateur
                             </button>
                         </div>
 
-                        {/* Filtre par État */}
                         <div className="flex items-center gap-2 pb-2 text-xs">
-                            <span className="text-gray-500">Statut :</span>
+                            <span className="text-gray-500 font-semibold">Statut :</span>
                             <select
                                 value={statusFilter}
                                 onChange={(e) => setStatusFilter(e.target.value)}
-                                className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-gray-700 focus:outline-none"
+                                className="border border-outline-variant rounded-md px-2.5 py-1.5 text-xs bg-white text-gray-700 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                             >
                                 <option value="all">Tous les états</option>
                                 <option value="pending">À valider uniquement</option>
@@ -302,44 +434,53 @@ export default function FinanceDashboard({
                         </div>
                     </div>
 
-                    {/* SOUS-FILTRE SPÉCIFIQUE À L'ONGLET */}
                     {activeTab === 'par_projet' && (
-                        <div className="p-3 bg-blue-50/50 border-b border-blue-100 flex items-center gap-3 text-xs">
-                            <span className="font-bold text-[#04326D]">Sélectionnez le Projet :</span>
+                        <div className="p-3.5 bg-primary-soft/60 border-b border-primary/15 flex flex-wrap items-center gap-3 text-xs">
+                            <span className="font-bold text-primary flex items-center gap-1.5">
+                                <FolderKanban className="w-3.5 h-3.5" />
+                                Sélectionnez le Projet :
+                            </span>
                             <select
                                 value={selectedProjectId}
                                 onChange={(e) => setSelectedProjectId(e.target.value)}
-                                className="border border-[#04326D] rounded p-1.5 text-xs bg-white font-bold text-[#04326D]"
+                                className="border border-primary rounded-md px-3 py-1.5 text-xs bg-white font-bold text-primary focus:outline-none focus:ring-1 focus:ring-primary/30 transition"
                             >
                                 <option value="all">Tous les projets</option>
-                                {projects.map(p => (
-                                    <option key={p.id} value={p.name}>{p.name}</option>
+                                {projects.map((p) => (
+                                    <option key={p.id} value={p.name}>
+                                        {p.name}
+                                    </option>
                                 ))}
                             </select>
                         </div>
                     )}
 
                     {activeTab === 'par_utilisateur' && (
-                        <div className="p-3 bg-blue-50/50 border-b border-blue-100 flex items-center gap-3 text-xs">
-                            <span className="font-bold text-[#04326D]">Sélectionnez le Demandeur :</span>
+                        <div className="p-3.5 bg-primary-soft/60 border-b border-primary/15 flex flex-wrap items-center gap-3 text-xs">
+                            <span className="font-bold text-primary flex items-center gap-1.5">
+                                <UserIcon className="w-3.5 h-3.5" />
+                                Sélectionnez le Demandeur :
+                            </span>
                             <select
                                 value={selectedUserId}
                                 onChange={(e) => setSelectedUserId(e.target.value)}
-                                className="border border-[#04326D] rounded p-1.5 text-xs bg-white font-bold text-[#04326D]"
+                                className="border border-primary rounded-md px-3 py-1.5 text-xs bg-white font-bold text-primary focus:outline-none focus:ring-1 focus:ring-primary/30 transition"
                             >
                                 <option value="all">Tous les utilisateurs</option>
-                                {usersList.map(u => (
-                                    <option key={u.id} value={u.name}>{u.name} ({u.email})</option>
+                                {usersList.map((u) => (
+                                    <option key={u.id} value={u.name}>
+                                        {u.name} ({u.email})
+                                    </option>
                                 ))}
                             </select>
                         </div>
                     )}
 
-                    {/* Tableau Réel */}
+                    {/* Tableau */}
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs border-collapse">
                             <thead>
-                                <tr className="bg-[#0B192C] text-white uppercase text-[10px] font-bold tracking-wider">
+                                <tr className="bg-sidebar text-white uppercase text-[10px] font-bold tracking-wider">
                                     <th className="px-4 py-3">Numéro</th>
                                     <th className="px-4 py-3">Demandeur</th>
                                     <th className="px-4 py-3">Projet</th>
@@ -350,53 +491,67 @@ export default function FinanceDashboard({
                                     <th className="px-4 py-3 text-right">Action</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
+                            <tbody className="divide-y divide-outline-soft text-gray-700">
                                 {filteredRequisitions.length === 0 ? (
                                     <tr>
-                                        <td colSpan={8} className="py-8 text-center text-gray-400 italic">
-                                            Aucune réquisition dans cette sélection.
+                                        <td colSpan={8} className="py-12 text-center">
+                                            <FileText
+                                                className="w-10 h-10 mx-auto text-gray-300 mb-2"
+                                                strokeWidth={1.5}
+                                            />
+                                            <p className="text-gray-500 font-medium text-sm">
+                                                Aucune réquisition dans cette sélection
+                                            </p>
+                                            <p className="text-gray-400 text-[11px] mt-1">
+                                                Modifiez les filtres ou l'onglet actif.
+                                            </p>
                                         </td>
                                     </tr>
                                 ) : (
                                     filteredRequisitions.map((item) => (
-                                        <tr key={item.id} className="hover:bg-[#F9F9FF] transition">
-                                            <td className="px-4 py-3.5 font-mono font-bold text-[#04326D] whitespace-nowrap">
+                                        <tr
+                                            key={item.id}
+                                            className="hover:bg-primary-soft/40 transition-colors"
+                                        >
+                                            <td className="px-4 py-3.5 font-mono font-bold text-primary whitespace-nowrap">
                                                 {item.numero}
                                             </td>
                                             <td className="px-4 py-3.5 whitespace-nowrap">
-                                                <p className="font-bold text-[#0B192C]">{item.initiateurNom}</p>
-                                                <p className="text-[10px] text-gray-400">{item.initiateurRole}</p>
+                                                <p className="font-semibold text-on-surface">
+                                                    {item.initiateurNom}
+                                                </p>
+                                                <p className="text-[10px] text-gray-400">
+                                                    {item.initiateurRole}
+                                                </p>
                                             </td>
                                             <td className="px-4 py-3.5 font-semibold text-gray-700">
                                                 {item.projet}
                                             </td>
-                                            <td className="px-4 py-3.5 max-w-xs truncate" title={item.observation || ''}>
-                                                {item.observation || item.lignes.map(l => l.activite).join(', ')}
+                                            <td
+                                                className="px-4 py-3.5 max-w-xs truncate"
+                                                title={item.observation || ''}
+                                            >
+                                                {item.observation ||
+                                                    item.lignes
+                                                        .map((l) => l.activite)
+                                                        .join(', ')}
                                             </td>
-                                            <td className="px-4 py-3.5 text-right font-mono font-bold whitespace-nowrap text-[#0B192C]">
+                                            <td className="px-4 py-3.5 text-right font-mono font-bold whitespace-nowrap text-on-surface">
                                                 {money(item.montantTotal, item.devise)}
                                             </td>
                                             <td className="px-4 py-3.5 text-center whitespace-nowrap">
                                                 {item.is_urgent ? (
-                                                    <span className="bg-red-100 text-red-800 px-2 py-0.5 rounded font-black text-[9px] uppercase">
+                                                    <span className="bg-error-soft text-error-dark px-2 py-0.5 rounded font-black text-[9px] uppercase">
                                                         URGENT
                                                     </span>
                                                 ) : (
-                                                    <span className="text-gray-400 text-[10px]">Normal</span>
+                                                    <span className="text-gray-400 text-[10px]">
+                                                        Normal
+                                                    </span>
                                                 )}
                                             </td>
                                             <td className="px-4 py-3.5 text-center whitespace-nowrap">
-                                                <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                                                    item.canDecide 
-                                                        ? 'bg-amber-100 text-amber-900' 
-                                                        : item.statusCode === 'controle_finance' 
-                                                            ? 'bg-emerald-100 text-emerald-800' 
-                                                            : item.financeRejected 
-                                                                ? 'bg-red-100 text-red-800' 
-                                                                : 'bg-gray-100 text-gray-700'
-                                                }`}>
-                                                    {item.statusLabel}
-                                                </span>
+                                                {renderStatutBadge(item)}
                                             </td>
                                             <td className="px-4 py-3.5 text-right whitespace-nowrap">
                                                 <button
@@ -406,9 +561,19 @@ export default function FinanceDashboard({
                                                         setRejecting(false);
                                                         setRejectionReason('');
                                                     }}
-                                                    className="px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow-sm transition"
+                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary-light text-white rounded-md font-semibold text-xs shadow-sm transition"
                                                 >
-                                                    {item.canDecide ? 'Examiner & Viser' : 'Consulter Dossier'}
+                                                    {item.canDecide ? (
+                                                        <>
+                                                            <ShieldCheck className="w-3 h-3" />
+                                                            Examiner & Viser
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <FileText className="w-3 h-3" />
+                                                            Consulter
+                                                        </>
+                                                    )}
                                                 </button>
                                             </td>
                                         </tr>
@@ -420,72 +585,113 @@ export default function FinanceDashboard({
                 </div>
             </div>
 
-            {/* MODALE DE CONTRÔLE BUDGÉTAIRE ET VISA FINANCIER */}
+            {/* MODALE CONTRÔLE BUDGÉTAIRE */}
             {selected && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-                    <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-5">
-                        
-                        <header className="flex items-start justify-between border-b pb-3">
-                            <div>
-                                <span className="text-[10px] uppercase font-bold text-[#F58F20] tracking-wider">
-                                    CONTRÔLE BUDGÉTAIRE & VISA FINANCIER
-                                </span>
-                                <h2 className="text-base font-bold text-[#0B192C]">
-                                    Réquisition N° {selected.numero} ({selected.nature})
-                                </h2>
-                                <p className="text-xs text-gray-500">
-                                    Initiée par <strong>{selected.initiateurNom}</strong> • Projet : {selected.projet} • Date : {selected.dateSoumission}
-                                </p>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+                    <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white border border-outline-soft shadow-modal rounded-lg p-6 space-y-5 animate-slide-down">
+                        <header className="flex items-start justify-between border-b border-outline-soft pb-3">
+                            <div className="flex items-start gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-primary-soft flex items-center justify-center shrink-0">
+                                    <Wallet className="w-5 h-5 text-primary" />
+                                </div>
+                                <div>
+                                    <span className="text-[10px] uppercase font-bold text-tertiary tracking-wider">
+                                        Contrôle Budgétaire & Visa Financier
+                                    </span>
+                                    <h2 className="text-base font-bold text-on-surface">
+                                        Réquisition N° {selected.numero}{' '}
+                                        <span className="text-xs font-normal text-gray-500">
+                                            ({selected.nature})
+                                        </span>
+                                    </h2>
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                        Initiée par{' '}
+                                        <strong className="text-on-surface">
+                                            {selected.initiateurNom}
+                                        </strong>{' '}
+                                        • Projet : {selected.projet} • Date :{' '}
+                                        {selected.dateSoumission}
+                                    </p>
+                                </div>
                             </div>
                             <button
                                 type="button"
                                 onClick={() => setSelected(null)}
-                                className="text-gray-400 hover:text-gray-600 text-xl font-bold leading-none p-1"
+                                className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100 transition"
+                                aria-label="Fermer"
                             >
-                                &times;
+                                <X className="w-4 h-4" />
                             </button>
                         </header>
 
                         {selected.observation && (
-                            <div className="p-3 bg-amber-50 border-l-4 border-[#F58F20] text-xs text-gray-800">
-                                <strong>Observation / Contexte :</strong> {selected.observation}
+                            <div className="p-3 bg-tertiary-soft border-l-4 border-tertiary text-xs text-gray-800 rounded-r-md">
+                                <strong className="text-on-surface">
+                                    Observation / Contexte :
+                                </strong>{' '}
+                                {selected.observation}
                             </div>
                         )}
 
-                        {/* TABLEAU DES DEMANDES (CODE BUDGET DU MP AFFICHÉ STRICTEMENT EN LECTURE SEULE) */}
+                        {/* Tableau */}
                         <div>
                             <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
                                 Articles & Devis Attachés (Vérification Soubassements)
                             </h3>
-                            <table className="w-full text-left text-xs border border-gray-200">
-                                <thead className="bg-[#F1F5F9] font-bold text-gray-600">
+                            <table className="w-full text-left text-xs border border-outline-soft rounded-md overflow-hidden">
+                                <thead className="bg-surface-muted font-bold text-gray-600">
                                     <tr>
                                         <th className="p-2">Désignation</th>
-                                        <th className="p-2">Code Budget (Attribué par MP)</th>
+                                        <th className="p-2">Code Budget (MP)</th>
                                         <th className="p-2 text-right">Qté/Durée</th>
-                                        <th className="p-2 text-right">Prix Unitaire</th>
+                                        <th className="p-2 text-right">Prix Unit.</th>
                                         <th className="p-2 text-right">Total</th>
                                         <th className="p-2">Pièces Jointes</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y text-gray-700">
+                                <tbody className="divide-y divide-outline-soft text-gray-700">
                                     {selected.lignes.map((line) => (
                                         <tr key={line.id}>
-                                            <td className="p-2 font-medium">{line.activite}</td>
-                                            <td className="p-2 font-mono font-bold text-[#04326D]">
-                                                {line.codeAllocation || line.codeBudget || 'Non attribué'}
+                                            <td className="p-2 font-medium">
+                                                {line.activite}
                                             </td>
-                                            <td className="p-2 text-right">{line.quantiteOuDuree} {line.unite}</td>
-                                            <td className="p-2 text-right">{money(line.prixUnitaire, selected.devise)}</td>
-                                            <td className="p-2 text-right font-bold">{money(line.total, selected.devise)}</td>
+                                            <td className="p-2 font-mono font-bold text-primary">
+                                                {line.codeAllocation ||
+                                                    line.codeBudget ||
+                                                    'Non attribué'}
+                                            </td>
+                                            <td className="p-2 text-right">
+                                                {line.quantiteOuDuree} {line.unite}
+                                            </td>
+                                            <td className="p-2 text-right">
+                                                {money(line.prixUnitaire, selected.devise)}
+                                            </td>
+                                            <td className="p-2 text-right font-bold">
+                                                {money(line.total, selected.devise)}
+                                            </td>
                                             <td className="p-2">
                                                 {line.justificatifs.length > 0 ? (
                                                     <div className="space-y-1">
-                                                        {line.justificatifs.map(f => (
-                                                            <div key={f.id} className="bg-blue-50 text-[#04326D] px-2 py-0.5 rounded text-[10px] flex items-center justify-between">
-                                                                <span className="truncate max-w-[120px]" title={f.description}>{f.nom}</span>
+                                                        {line.justificatifs.map((f) => (
+                                                            <div
+                                                                key={f.id}
+                                                                className="bg-primary-soft text-primary px-2 py-1 rounded-md text-[10px] flex items-center justify-between gap-1"
+                                                            >
+                                                                <span
+                                                                    className="truncate max-w-[120px] flex items-center gap-1"
+                                                                    title={f.description}
+                                                                >
+                                                                    <Paperclip className="w-2.5 h-2.5 shrink-0" />
+                                                                    {f.nom}
+                                                                </span>
                                                                 {f.fileUrl && (
-                                                                    <a href={f.fileUrl} target="_blank" rel="noreferrer" className="underline font-bold ml-1">
+                                                                    <a
+                                                                        href={f.fileUrl}
+                                                                        target="_blank"
+                                                                        rel="noreferrer"
+                                                                        className="inline-flex items-center gap-0.5 font-bold hover:underline"
+                                                                    >
+                                                                        <Download className="w-2.5 h-2.5" />
                                                                         Ouvrir
                                                                     </a>
                                                                 )}
@@ -493,60 +699,66 @@ export default function FinanceDashboard({
                                                         ))}
                                                     </div>
                                                 ) : (
-                                                    <span className="text-gray-400 italic text-[10px]">Aucun justificatif</span>
+                                                    <span className="text-gray-400 italic text-[10px]">
+                                                        Aucun justificatif
+                                                    </span>
                                                 )}
                                             </td>
                                         </tr>
                                     ))}
                                 </tbody>
-                                <tfoot className="bg-gray-50 font-bold border-t">
+                                <tfoot className="bg-surface-muted font-bold border-t border-outline-soft">
                                     <tr>
-                                        <td colSpan={4} className="p-2 text-right">Montant Total Général :</td>
-                                        <td className="p-2 text-right text-[#04326D] text-sm font-mono">
+                                        <td colSpan={4} className="p-2 text-right">
+                                            Montant Total Général :
+                                        </td>
+                                        <td className="p-2 text-right text-primary text-sm font-mono">
                                             {money(selected.montantTotal, selected.devise)}
                                         </td>
-                                        <td></td>
+                                        <td />
                                     </tr>
                                 </tfoot>
                             </table>
                         </div>
 
-                        {/* ZONE DE DÉCISION FINANCE */}
+                        {/* Décision */}
                         {selected.canDecide && (
-                            <div className="border-t pt-4 space-y-3">
+                            <div className="border-t border-outline-soft pt-4 space-y-3">
                                 {!rejecting ? (
-                                    <div className="flex items-center justify-between">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
                                         <button
                                             type="button"
                                             onClick={() => setRejecting(true)}
-                                            className="px-3.5 py-1.5 border border-red-300 text-red-600 hover:bg-red-50 rounded text-xs font-bold transition"
+                                            className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-error/40 text-error rounded-md text-xs font-semibold hover:bg-error-soft transition"
                                         >
-                                            Rejeter (Problème budgétaire / Devis non conforme)
+                                            <Ban className="w-3.5 h-3.5" />
+                                            Rejeter (problème budgétaire)
                                         </button>
 
                                         <div className="flex gap-2">
                                             <button
                                                 type="button"
                                                 onClick={() => setSelected(null)}
-                                                className="px-3 py-1.5 border rounded text-xs text-gray-600 hover:bg-gray-50"
+                                                className="px-3 py-2 border border-outline-variant rounded-md text-xs text-gray-600 hover:bg-gray-50 transition"
                                             >
                                                 Fermer
                                             </button>
                                             <button
                                                 type="button"
                                                 onClick={handleTriggerApprove}
-                                                className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white rounded text-xs font-bold shadow flex items-center gap-1.5 transition"
+                                                className="inline-flex items-center gap-2 px-4 py-2 bg-success hover:bg-success-dark text-white rounded-md text-xs font-semibold shadow-sm hover:shadow-md transition-all active:scale-[0.98]"
                                             >
-                                                <span>Accorder Visa Financier (Signature Électronique)</span>
-                                                <span>&rarr;</span>
+                                                <ShieldCheck className="w-4 h-4" />
+                                                Accorder Visa Financier
                                             </button>
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="bg-red-50 p-4 rounded border border-red-200 space-y-3">
+                                    <div className="bg-error-soft p-4 rounded-md border border-error/20 space-y-3">
                                         <div className="flex justify-between items-center">
-                                            <h4 className="text-xs font-bold text-red-800 uppercase">
-                                                Motif du Rejet Financier (Obligatoire)
+                                            <h4 className="text-xs font-bold text-error-dark uppercase flex items-center gap-1.5">
+                                                <AlertCircle className="w-3.5 h-3.5" />
+                                                Motif du Rejet Financier (obligatoire)
                                             </h4>
                                             <button
                                                 type="button"
@@ -559,16 +771,18 @@ export default function FinanceDashboard({
                                         <textarea
                                             rows={3}
                                             value={rejectionReason}
-                                            onChange={(e) => setRejectionReason(e.target.value)}
-                                            placeholder="Précisez le problème comptable (dépassement ligne budgétaire, prix unitaire excessif, pièces manquantes)..."
-                                            className="w-full border border-red-300 rounded p-2 text-xs focus:outline-none bg-white"
+                                            onChange={(e) =>
+                                                setRejectionReason(e.target.value)
+                                            }
+                                            placeholder="Précisez le problème comptable (dépassement ligne budgétaire, prix unitaire excessif, pièces manquantes)…"
+                                            className="w-full border border-error/30 rounded-md p-2.5 text-xs focus:outline-none focus:border-error focus:ring-1 focus:ring-error/20 bg-white transition"
                                             required
-                                        ></textarea>
+                                        />
                                         <div className="flex justify-end gap-2">
                                             <button
                                                 type="button"
                                                 onClick={() => setRejecting(false)}
-                                                className="px-3 py-1.5 border rounded text-xs bg-white text-gray-700"
+                                                className="px-3 py-2 border border-outline-variant rounded-md text-xs bg-white text-gray-700 hover:bg-gray-50 transition"
                                             >
                                                 Annuler
                                             </button>
@@ -576,9 +790,12 @@ export default function FinanceDashboard({
                                                 type="button"
                                                 onClick={handleRejectFinance}
                                                 disabled={processing}
-                                                className="px-4 py-1.5 bg-[#DC2626] hover:bg-[#b91c1c] text-white rounded text-xs font-bold shadow"
+                                                className="inline-flex items-center gap-1.5 px-4 py-2 bg-error hover:bg-error-dark text-white rounded-md text-xs font-semibold shadow-sm transition disabled:opacity-60"
                                             >
-                                                Confirmer le Rejet Financier
+                                                {processing && (
+                                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                )}
+                                                Confirmer le Rejet
                                             </button>
                                         </div>
                                     </div>
@@ -587,68 +804,88 @@ export default function FinanceDashboard({
                         )}
 
                         {!selected.canDecide && (
-                            <footer className="flex justify-end border-t pt-3">
+                            <footer className="flex justify-end border-t border-outline-soft pt-3">
                                 <button
                                     type="button"
                                     onClick={() => setSelected(null)}
-                                    className="px-4 py-1.5 bg-gray-800 text-white text-xs font-bold rounded"
+                                    className="px-4 py-2 bg-sidebar text-white text-xs font-semibold rounded-md hover:bg-primary transition"
                                 >
                                     Fermer
                                 </button>
                             </footer>
                         )}
-
                     </div>
                 </div>
             )}
 
-            {/* SÉCURITÉ : MODALE D'AUTHENTIFICATION DE MOT DE PASSE DU FINANCIER */}
+            {/* MODALE SIGNATURE ÉLECTRONIQUE */}
             {passwordModalOpen && selected && (
-                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4">
-                    <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-sm w-full p-5 space-y-4">
-                        <div className="text-center border-b pb-2">
-                            <h3 className="text-xs font-black uppercase text-[#0B192C] tracking-wider">
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
+                    <div className="bg-white rounded-lg border-2 border-primary shadow-modal max-w-sm w-full p-6 space-y-4 animate-slide-down">
+                        <div className="text-center border-b border-outline-soft pb-3">
+                            <div className="w-12 h-12 mx-auto rounded-full bg-primary-soft flex items-center justify-center mb-2">
+                                <Lock className="w-5 h-5 text-primary" />
+                            </div>
+                            <h3 className="text-sm font-black uppercase text-on-surface tracking-wider">
                                 Visa de Contrôle Financier
                             </h3>
-                            <p className="text-[10px] text-gray-500 mt-0.5">
-                                Signataire : <strong>{user.name}</strong> (Manager des Finances)
+                            <p className="text-[11px] text-gray-500 mt-1">
+                                Signataire :{' '}
+                                <strong className="text-on-surface">{user.name}</strong> (Manager
+                                des Finances)
                             </p>
                         </div>
 
                         <form onSubmit={handleConfirmSignature} className="space-y-3">
                             <div>
-                                <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                                <label className="block text-[11px] font-bold text-gray-700 mb-1.5">
                                     Saisissez votre mot de passe pour signer le visa :
                                 </label>
-                                <input
-                                    type="password"
-                                    placeholder="••••••••"
-                                    value={passwordSaisi}
-                                    onChange={(e) => setPasswordSaisi(e.target.value)}
-                                    className="w-full border border-gray-300 rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
-                                    autoFocus
-                                    required
-                                />
+                                <div className="relative">
+                                    <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                                    <input
+                                        type="password"
+                                        placeholder="••••••••"
+                                        value={passwordSaisi}
+                                        onChange={(e) => setPasswordSaisi(e.target.value)}
+                                        className="w-full border border-outline-variant rounded-md p-2.5 pl-9 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+                                        autoFocus
+                                        required
+                                    />
+                                </div>
                             </div>
 
-                            <p className="text-[9px] text-gray-400">
-                                Cette signature électronique infalsifiable atteste de la disponibilité des crédits budgétaires pour la réquisition {selected.numero}.
+                            <p className="text-[10px] text-gray-400 leading-relaxed flex items-start gap-1.5">
+                                <ShieldCheck className="w-3 h-3 shrink-0 mt-0.5" />
+                                Cette signature électronique infalsifiable atteste de la
+                                disponibilité des crédits budgétaires pour la réquisition{' '}
+                                {selected.numero}.
                             </p>
 
-                            <div className="flex justify-end gap-2 pt-2 border-t">
+                            <div className="flex justify-end gap-2 pt-2 border-t border-outline-soft">
                                 <button
                                     type="button"
                                     onClick={() => setPasswordModalOpen(false)}
-                                    className="px-3 py-1.5 border rounded text-xs text-gray-600 hover:bg-gray-50"
+                                    className="px-3 py-2 border border-outline-variant rounded-md text-xs text-gray-600 hover:bg-gray-50 transition"
                                 >
                                     Annuler
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={processing}
-                                    className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded shadow disabled:opacity-50"
+                                    className="inline-flex items-center gap-2 px-4 py-2 bg-success hover:bg-success-dark text-white font-semibold text-xs rounded-md shadow-sm transition disabled:opacity-50"
                                 >
-                                    {processing ? 'Signature en cours...' : 'Signer & Valider'}
+                                    {processing ? (
+                                        <>
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                            Signature…
+                                        </>
+                                    ) : (
+                                        <>
+                                            <ShieldCheck className="w-3.5 h-3.5" />
+                                            Signer & Valider
+                                        </>
+                                    )}
                                 </button>
                             </div>
                         </form>

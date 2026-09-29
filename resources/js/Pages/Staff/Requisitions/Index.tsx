@@ -1,9 +1,28 @@
 import { useState, useMemo } from 'react';
 import { Head, Link, router } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
-import { mockRequisitionsStaff, RequisitionSuivi, WorkflowStep, DetailArticle } from '@/types/requisitionsList';
+import {
+    mockRequisitionsStaff,
+    RequisitionSuivi,
+    WorkflowStep,
+    DetailArticle,
+} from '@/types/requisitionsList';
 import { numberToWordsFR } from '@/lib/numberToWords';
 import OfficialPrintSheet from '@/Components/OfficialPrintSheet';
+import {
+    Search,
+    Plus,
+    Eye,
+    Printer,
+    Pencil,
+    Trash2,
+    X,
+    FileText,
+    RotateCcw,
+    ChevronRight,
+    Paperclip,
+    Download,
+} from 'lucide-react';
 
 interface RequisitionIndexProps {
     requisitions?: RequisitionSuivi[];
@@ -16,7 +35,7 @@ const WORKFLOW_STEPS: { key: WorkflowStep; label: string; role: string }[] = [
     { key: 'visa_admin', label: 'Administration', role: 'Manager Admin' },
     { key: 'approbation_direction', label: 'Direction', role: 'Directrice' },
     { key: 'decaissement_caisse', label: 'Caisse', role: 'Caisse / Banque' },
-    { key: 'cloture', label: 'Clôture', role: 'Return Form' }
+    { key: 'cloture', label: 'Clôture', role: 'Return Form' },
 ];
 
 const CAISSES_DISPONIBLES = [
@@ -24,15 +43,17 @@ const CAISSES_DISPONIBLES = [
     'Caisse principale',
     'Saint Jean Eudes',
     'Local Fund 1 (Boulangerie)',
-    'Local Fund 2'
+    'Local Fund 2',
 ];
 
-export default function RequisitionsIndex({ requisitions: initialRequisitions }: RequisitionIndexProps) {
+export default function RequisitionsIndex({
+    requisitions: initialRequisitions,
+}: RequisitionIndexProps) {
     const [requisitions, setRequisitions] = useState<RequisitionSuivi[]>(
         (initialRequisitions ?? []).map((req) => ({
             ...req,
             montantLettres: req.montantLettres || numberToWordsFR(req.montantTotal, req.devise),
-        }))
+        })),
     );
 
     const [search, setSearch] = useState('');
@@ -46,8 +67,9 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
     const [savingEdit, setSavingEdit] = useState(false);
 
     const filteredList = useMemo(() => {
-        return requisitions.filter(r => {
-            const matchesSearch = r.numero.toLowerCase().includes(search.toLowerCase()) ||
+        return requisitions.filter((r) => {
+            const matchesSearch =
+                r.numero.toLowerCase().includes(search.toLowerCase()) ||
                 (r.observation && r.observation.toLowerCase().includes(search.toLowerCase())) ||
                 r.caisse.toLowerCase().includes(search.toLowerCase());
 
@@ -61,7 +83,7 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
 
     const handleDelete = (id: string, numero: string) => {
         if (confirm(`Confirmez-vous la suppression de la réquisition ${numero} ?`)) {
-            setRequisitions(prev => prev.filter(r => r.id !== id));
+            setRequisitions((prev) => prev.filter((r) => r.id !== id));
             if (viewReq?.id === id) setViewReq(null);
             if (editReq?.id === id) setEditReq(null);
             if (printReq?.id === id) setPrintReq(null);
@@ -85,34 +107,40 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
         const updated: RequisitionSuivi = {
             ...editReq,
             montantTotal: total,
-            montantLettres: enLettres
+            montantLettres: enLettres,
         };
 
-        router.patch(route('requisitions.update', updated.id), {
-            caisse_decaissement: updated.caisse,
-            devise: updated.devise,
-            observation: updated.observation || null,
-            articles: updated.articles.map((article) => ({
-                id: article.id,
-                activite: article.activite,
-                quantiteOuDuree: article.quantiteOuDuree,
-                prixUnitaire: article.prixUnitaire,
-            })),
-        }, {
-            preserveScroll: true,
-            onStart: () => setSavingEdit(true),
-            onFinish: () => setSavingEdit(false),
-            onSuccess: () => {
-                setRequisitions(prev => prev.map(r => r.id === updated.id ? updated : r));
-                if (viewReq?.id === updated.id) setViewReq(updated);
-                setEditReq(null);
+        router.patch(
+            route('requisitions.update', updated.id),
+            {
+                caisse_decaissement: updated.caisse,
+                devise: updated.devise,
+                observation: updated.observation || null,
+                articles: updated.articles.map((article) => ({
+                    id: article.id,
+                    activite: article.activite,
+                    quantiteOuDuree: article.quantiteOuDuree,
+                    prixUnitaire: article.prixUnitaire,
+                })),
             },
-        });
+            {
+                preserveScroll: true,
+                onStart: () => setSavingEdit(true),
+                onFinish: () => setSavingEdit(false),
+                onSuccess: () => {
+                    setRequisitions((prev) =>
+                        prev.map((r) => (r.id === updated.id ? updated : r)),
+                    );
+                    if (viewReq?.id === updated.id) setViewReq(updated);
+                    setEditReq(null);
+                },
+            },
+        );
     };
 
     const handleUpdateEditArticle = (artId: string, field: keyof DetailArticle, val: any) => {
         if (!editReq) return;
-        const newArticles = editReq.articles.map(art => {
+        const newArticles = editReq.articles.map((art) => {
             if (art.id !== artId) return art;
             const item = { ...art, [field]: val };
             if (field === 'quantiteOuDuree' || field === 'prixUnitaire') {
@@ -125,17 +153,54 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
             ...editReq,
             articles: newArticles,
             montantTotal: newTotal,
-            montantLettres: numberToWordsFR(newTotal, editReq.devise)
+            montantLettres: numberToWordsFR(newTotal, editReq.devise),
         });
     };
 
     const getStepClasses = (currentStep: WorkflowStep, stepIndex: number) => {
-        const order: WorkflowStep[] = ['brouillon', 'visa_mp', 'controle_finance', 'visa_admin', 'approbation_direction', 'decaissement_caisse', 'cloture'];
+        const order: WorkflowStep[] = [
+            'brouillon',
+            'visa_mp',
+            'controle_finance',
+            'visa_admin',
+            'approbation_direction',
+            'decaissement_caisse',
+            'cloture',
+        ];
         const currentIndex = order.indexOf(currentStep);
 
-        if (stepIndex < currentIndex) return 'bg-[#10B981] text-white border-[#10B981]';
-        if (stepIndex === currentIndex) return 'bg-[#F58F20] text-white border-[#F58F20] ring-4 ring-[#F58F20]/20';
+        if (stepIndex < currentIndex) return 'bg-success text-white border-success';
+        if (stepIndex === currentIndex)
+            return 'bg-tertiary text-white border-tertiary ring-4 ring-tertiary/20';
         return 'bg-gray-100 text-gray-400 border-gray-200';
+    };
+
+    const renderEtapeBadge = (etape: string) => {
+        const badges: Record<string, string> = {
+            brouillon: 'bg-gray-100 text-gray-700',
+            visa_mp: 'bg-primary-soft text-primary',
+            controle_finance: 'bg-purple-100 text-purple-800',
+            visa_admin: 'bg-indigo-100 text-indigo-800',
+            approbation_direction: 'bg-amber-100 text-amber-900',
+            decaissement_caisse: 'bg-success-soft text-success-dark',
+            cloture: 'bg-sidebar text-white',
+        };
+        const labels: Record<string, string> = {
+            brouillon: 'Brouillon',
+            visa_mp: 'Visa Chef Projet',
+            controle_finance: 'Contrôle Finances',
+            visa_admin: 'Administration',
+            approbation_direction: 'Approbation Direction',
+            decaissement_caisse: 'Caisse (Prêt)',
+            cloture: 'Clôturé',
+        };
+        return (
+            <span
+                className={`${badges[etape] || 'bg-gray-100 text-gray-700'} px-2.5 py-1 rounded-full text-[10px] font-bold`}
+            >
+                {labels[etape] || etape}
+            </span>
+        );
     };
 
     return (
@@ -164,53 +229,49 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
                     }
                 }
                 @media screen {
-                    #bon-pasteur-print-zone {
-                        display: none;
-                    }
+                    #bon-pasteur-print-zone { display: none; }
                 }
             `}</style>
 
             <div className="space-y-6 no-print-zone">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E2E8F0] pb-4">
+                {/* En-tête */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-outline-soft pb-5">
                     <div>
                         <nav className="text-[11px] text-gray-500 font-medium mb-1 flex items-center gap-1">
-                            <Link href={route('dashboard')} className="hover:underline">Dashboard</Link>
-                            <span>&rsaquo;</span>
-                            <span className="text-[#0B192C] font-bold">Mes Réquisitions</span>
+                            <Link href={route('dashboard')} className="hover:text-primary transition">
+                                Dashboard
+                            </Link>
+                            <ChevronRight className="w-3 h-3" />
+                            <span className="text-on-surface font-bold">Mes Réquisitions</span>
                         </nav>
-                        <h1 className="text-xl font-bold text-[#0B192C] tracking-tight">
+                        <h1 className="text-xl font-bold text-on-surface tracking-tight">
                             Suivi des Réquisitions & Workflow
                         </h1>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                            Visualisez l'état d'avancement des signatures hiérarchiques et gérez vos bons de demande.
+                        <p className="text-xs text-gray-500 mt-1">
+                            Visualisez l'état d'avancement des signatures hiérarchiques et gérez vos
+                            bons de demande.
                         </p>
                     </div>
 
                     <Link
                         href={route('requisitions.create')}
-                        className="bg-[#04326D] hover:bg-[#06428f] text-white px-4 py-2 rounded text-xs font-bold flex items-center gap-2 shadow-sm transition"
+                        className="inline-flex items-center gap-2 bg-primary hover:bg-primary-light text-white px-4 py-2.5 rounded-md text-xs font-semibold shadow-sm hover:shadow-md transition-all active:scale-[0.98]"
                     >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-                        </svg>
+                        <Plus className="w-4 h-4" strokeWidth={2.5} />
                         <span>Nouvelle Réquisition</span>
                     </Link>
                 </div>
 
                 {/* Filtres */}
-                <div className="bg-white border border-[#B2BED6] rounded p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
+                <div className="bg-white border border-outline-soft rounded-lg p-4 shadow-card flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
                     <div className="relative w-full md:w-80">
-                        <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400 pointer-events-none">
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                        </span>
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                         <input
                             type="text"
-                            placeholder="Rechercher numéro, caisse, motif..."
+                            placeholder="Rechercher numéro, caisse, motif…"
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            className="w-full pl-9 pr-3 py-1.5 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D]"
+                            className="w-full pl-9 pr-3 py-2 border border-outline-variant rounded-md text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                         />
                     </div>
 
@@ -218,9 +279,9 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
                         <select
                             value={filterEtape}
                             onChange={(e) => setFilterEtape(e.target.value)}
-                            className="border border-[#B2BED6] rounded px-2.5 py-1.5 bg-white text-gray-700 text-xs focus:outline-none focus:border-[#04326D]"
+                            className="border border-outline-variant rounded-md px-2.5 py-2 bg-white text-gray-700 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                         >
-                            <option value="all">Toutes les étapes (Workflow)</option>
+                            <option value="all">Toutes les étapes</option>
                             <option value="brouillon">Brouillon</option>
                             <option value="visa_mp">Visa Manager Projet</option>
                             <option value="controle_finance">Contrôle Finances</option>
@@ -233,9 +294,9 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
                         <select
                             value={filterNature}
                             onChange={(e) => setFilterNature(e.target.value)}
-                            className="border border-[#B2BED6] rounded px-2.5 py-1.5 bg-white text-gray-700 text-xs focus:outline-none focus:border-[#04326D]"
+                            className="border border-outline-variant rounded-md px-2.5 py-2 bg-white text-gray-700 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                         >
-                            <option value="all">Toutes Natures</option>
+                            <option value="all">Toutes natures</option>
                             <option value="Achat">Achat</option>
                             <option value="Service">Service</option>
                         </select>
@@ -243,9 +304,9 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
                         <select
                             value={filterDevise}
                             onChange={(e) => setFilterDevise(e.target.value)}
-                            className="border border-[#B2BED6] rounded px-2.5 py-1.5 bg-white text-gray-700 text-xs focus:outline-none focus:border-[#04326D]"
+                            className="border border-outline-variant rounded-md px-2.5 py-2 bg-white text-gray-700 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                         >
-                            <option value="all">Toutes Devises</option>
+                            <option value="all">Toutes devises</option>
                             <option value="USD">USD ($)</option>
                             <option value="FC">FC (CDF)</option>
                             <option value="EUR">EUR (€)</option>
@@ -253,21 +314,27 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
 
                         {(search || filterEtape !== 'all' || filterDevise !== 'all' || filterNature !== 'all') && (
                             <button
-                                onClick={() => { setSearch(''); setFilterEtape('all'); setFilterDevise('all'); setFilterNature('all'); }}
-                                className="text-[11px] font-semibold text-red-600 hover:underline px-2"
+                                onClick={() => {
+                                    setSearch('');
+                                    setFilterEtape('all');
+                                    setFilterDevise('all');
+                                    setFilterNature('all');
+                                }}
+                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-error hover:bg-error-soft px-2.5 py-1.5 rounded-md transition"
                             >
+                                <RotateCcw className="w-3.5 h-3.5" />
                                 Réinitialiser
                             </button>
                         )}
                     </div>
                 </div>
 
-                {/* Tableau des réquisitions */}
-                <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
+                {/* Tableau */}
+                <div className="bg-white border border-outline-soft rounded-lg shadow-card overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs border-collapse">
                             <thead>
-                                <tr className="bg-[#0B192C] text-white uppercase text-[10px] font-bold tracking-wider">
+                                <tr className="bg-sidebar text-white uppercase text-[10px] font-bold tracking-wider">
                                     <th className="py-3 px-4">Numéro</th>
                                     <th className="py-3 px-4">Date & Nature</th>
                                     <th className="py-3 px-4">Projet / Caisse</th>
@@ -277,93 +344,109 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
                                     <th className="py-3 px-4 text-right">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
+                            <tbody className="divide-y divide-outline-soft text-gray-700">
                                 {filteredList.length === 0 ? (
                                     <tr>
-                                        <td colSpan={7} className="text-center py-10 text-gray-400 italic">
-                                            Aucune réquisition trouvée.
+                                        <td colSpan={7} className="text-center py-12">
+                                            <FileText
+                                                className="w-10 h-10 mx-auto text-gray-300 mb-2"
+                                                strokeWidth={1.5}
+                                            />
+                                            <p className="text-gray-500 font-medium text-sm">
+                                                Aucune réquisition trouvée
+                                            </p>
+                                            <p className="text-gray-400 text-[11px] mt-1">
+                                                Modifiez vos filtres ou créez une nouvelle demande.
+                                            </p>
                                         </td>
                                     </tr>
                                 ) : (
                                     filteredList.map((req) => (
-                                        <tr key={req.id} className="hover:bg-[#F9F9FF] transition">
-                                            <td className="py-3.5 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
+                                        <tr key={req.id} className="hover:bg-primary-soft/40 transition-colors">
+                                            <td className="py-3.5 px-4 font-mono font-bold text-primary whitespace-nowrap">
                                                 {req.numero}
                                             </td>
                                             <td className="py-3.5 px-4 whitespace-nowrap">
-                                                <p className="font-semibold text-gray-800">{req.dateSoumission}</p>
-                                                <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold mt-0.5 ${
-                                                    req.nature === 'Achat' ? 'bg-blue-100 text-[#04326D]' : 'bg-orange-100 text-[#F58F20]'
-                                                }`}>
+                                                <p className="font-semibold text-gray-800">
+                                                    {req.dateSoumission}
+                                                </p>
+                                                <span
+                                                    className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold mt-0.5 ${
+                                                        req.nature === 'Achat'
+                                                            ? 'bg-primary-soft text-primary'
+                                                            : 'bg-tertiary-soft text-tertiary'
+                                                    }`}
+                                                >
                                                     {req.nature}
                                                 </span>
                                             </td>
                                             <td className="py-3.5 px-4 max-w-[180px]">
-                                                <p className="font-bold text-[#0B192C] truncate">{req.projet}</p>
-                                                <p className="text-[10px] text-gray-500 truncate">{req.caisse}</p>
+                                                <p className="font-bold text-on-surface truncate">
+                                                    {req.projet}
+                                                </p>
+                                                <p className="text-[10px] text-gray-500 truncate">
+                                                    {req.caisse}
+                                                </p>
                                             </td>
                                             <td className="py-3.5 px-4 max-w-xs">
-                                                <p className="text-gray-800 font-medium truncate">{req.observation || 'Sans observation'}</p>
+                                                <p className="text-gray-800 font-medium truncate">
+                                                    {req.observation || 'Sans observation'}
+                                                </p>
                                                 <span className="text-[10px] text-gray-400">
-                                                    {req.articles.length} demandes(s) • {req.articles.reduce((acc, a) => acc + a.justificatifsCount, 0)} piece (s) jointe (s)
+                                                    {req.articles.length} demande(s) •{' '}
+                                                    {req.articles.reduce(
+                                                        (acc, a) => acc + a.justificatifsCount,
+                                                        0,
+                                                    )}{' '}
+                                                    pièce(s) jointe(s)
                                                 </span>
                                             </td>
-                                            <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono font-bold text-sm text-[#0B192C]">
-                                                {req.montantTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} {req.devise}
+                                            <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono font-bold text-sm text-on-surface">
+                                                {req.montantTotal.toLocaleString('fr-FR', {
+                                                    minimumFractionDigits: 2,
+                                                })}{' '}
+                                                {req.devise}
                                             </td>
                                             <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                                                {req.etapeActuelle === 'brouillon' && <span className="bg-gray-100 text-gray-700 px-2.5 py-1 rounded-full text-[10px] font-bold">Brouillon</span>}
-                                                {req.etapeActuelle === 'visa_mp' && <span className="bg-blue-100 text-[#04326D] px-2.5 py-1 rounded-full text-[10px] font-bold">Visa Chef Projet</span>}
-                                                {req.etapeActuelle === 'controle_finance' && <span className="bg-purple-100 text-purple-800 px-2.5 py-1 rounded-full text-[10px] font-bold">Contrôle Finances</span>}
-                                                {req.etapeActuelle === 'visa_admin' && <span className="bg-indigo-100 text-indigo-800 px-2.5 py-1 rounded-full text-[10px] font-bold">Administration</span>}
-                                                {req.etapeActuelle === 'approbation_direction' && <span className="bg-amber-100 text-amber-900 px-2.5 py-1 rounded-full text-[10px] font-bold">Approbation Direction</span>}
-                                                {req.etapeActuelle === 'decaissement_caisse' && <span className="bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full text-[10px] font-bold">Caisse (Prêt)</span>}
-                                                {req.etapeActuelle === 'cloture' && <span className="bg-gray-800 text-white px-2.5 py-1 rounded-full text-[10px] font-bold">Clôturé</span>}
+                                                {renderEtapeBadge(req.etapeActuelle)}
                                             </td>
                                             <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                                                <div className="inline-flex items-center gap-1">
+                                                <div className="inline-flex items-center gap-0.5">
                                                     <button
                                                         type="button"
                                                         onClick={() => setViewReq(req)}
-                                                        className="p-1.5 text-gray-600 hover:text-[#04326D] hover:bg-blue-50 rounded"
+                                                        className="p-1.5 text-gray-600 hover:text-primary hover:bg-primary-soft rounded-md transition"
                                                         title="Consulter"
                                                     >
-                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                                        </svg>
+                                                        <Eye className="w-4 h-4" />
                                                     </button>
                                                     <button
                                                         type="button"
                                                         onClick={() => handleTriggerPrint(req)}
-                                                        className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded"
+                                                        className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition"
                                                         title="Imprimer"
                                                     >
-                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                                                        </svg>
+                                                        <Printer className="w-4 h-4" />
                                                     </button>
                                                     {req.etapeActuelle === 'brouillon' && (
                                                         <>
                                                             <button
                                                                 type="button"
-                                                                onClick={() => setEditReq(JSON.parse(JSON.stringify(req)))}
-                                                                className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded"
+                                                                onClick={() =>
+                                                                    setEditReq(JSON.parse(JSON.stringify(req)))
+                                                                }
+                                                                className="p-1.5 text-tertiary hover:text-tertiary-dark hover:bg-tertiary-soft rounded-md transition"
                                                                 title="Modifier"
                                                             >
-                                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                                                </svg>
+                                                                <Pencil className="w-4 h-4" />
                                                             </button>
                                                             <button
                                                                 type="button"
                                                                 onClick={() => handleDelete(req.id, req.numero)}
-                                                                className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded"
+                                                                className="p-1.5 text-error hover:bg-error-soft rounded-md transition"
                                                                 title="Supprimer"
                                                             >
-                                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                                                </svg>
+                                                                <Trash2 className="w-4 h-4" />
                                                             </button>
                                                         </>
                                                     )}
@@ -380,14 +463,16 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
 
             {/* MODALE VIEW */}
             {viewReq && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 no-print-zone">
-                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-3xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto">
-                        <div className="flex items-start justify-between border-b pb-3">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 no-print-zone animate-fade-in">
+                    <div className="bg-white rounded-lg border border-outline-soft shadow-modal max-w-3xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto animate-slide-down">
+                        <div className="flex items-start justify-between border-b border-outline-soft pb-3">
                             <div>
-                                <span className="text-[10px] text-gray-400 font-mono uppercase tracking-wider">Consultation Workflow</span>
-                                <h2 className="text-lg font-bold text-[#0B192C] flex items-center gap-2">
+                                <span className="text-[10px] text-gray-400 font-mono uppercase tracking-wider">
+                                    Consultation Workflow
+                                </span>
+                                <h2 className="text-lg font-bold text-on-surface flex items-center gap-2">
                                     <span>N° {viewReq.numero}</span>
-                                    <span className="text-xs px-2 py-0.5 rounded bg-blue-50 text-[#04326D] font-mono">
+                                    <span className="text-xs px-2 py-0.5 rounded bg-primary-soft text-primary font-mono">
                                         {viewReq.nature}
                                     </span>
                                 </h2>
@@ -396,34 +481,45 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
                                 <button
                                     type="button"
                                     onClick={() => handleTriggerPrint(viewReq)}
-                                    className="px-3 py-1.5 bg-[#04326D] text-white rounded text-xs font-bold hover:bg-[#06428f] flex items-center gap-1.5"
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white rounded-md text-xs font-semibold hover:bg-primary-light transition"
                                 >
-                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                                    </svg>
+                                    <Printer className="w-3.5 h-3.5" />
                                     Imprimer
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => setViewReq(null)}
-                                    className="text-gray-400 hover:text-gray-600 text-xl font-bold p-1 leading-none"
+                                    className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100 transition"
+                                    aria-label="Fermer"
                                 >
-                                    &times;
+                                    <X className="w-4 h-4" />
                                 </button>
                             </div>
                         </div>
 
                         {/* STEPPER */}
                         <div>
-                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Circuit d'approbation</h3>
+                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
+                                Circuit d'approbation
+                            </h3>
                             <div className="flex items-center justify-between relative">
-                                <div className="absolute left-0 top-3.5 h-0.5 w-full bg-gray-200 -z-0"></div>
+                                <div className="absolute left-0 top-3.5 h-0.5 w-full bg-gray-200 -z-0" />
                                 {WORKFLOW_STEPS.map((step, idx) => (
-                                    <div key={step.key} className="flex flex-col items-center text-center z-10">
-                                        <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs border-2 transition ${getStepClasses(viewReq.etapeActuelle, idx)}`}>
+                                    <div
+                                        key={step.key}
+                                        className="flex flex-col items-center text-center z-10"
+                                    >
+                                        <div
+                                            className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs border-2 transition ${getStepClasses(
+                                                viewReq.etapeActuelle,
+                                                idx,
+                                            )}`}
+                                        >
                                             {idx + 1}
                                         </div>
-                                        <span className="text-[10px] font-bold text-[#0B192C] mt-1.5">{step.label}</span>
+                                        <span className="text-[10px] font-bold text-on-surface mt-1.5">
+                                            {step.label}
+                                        </span>
                                         <span className="text-[9px] text-gray-400">{step.role}</span>
                                     </div>
                                 ))}
@@ -432,32 +528,46 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
 
                         {/* DEMANDES */}
                         <div>
-                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">DEMANDES</h3>
-                            <table className="w-full text-left text-xs border border-gray-200">
-                                <thead className="bg-gray-50 font-bold text-gray-600">
+                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                                Demandes
+                            </h3>
+                            <table className="w-full text-left text-xs border border-outline-soft rounded-md overflow-hidden">
+                                <thead className="bg-surface-muted font-bold text-gray-600">
                                     <tr>
                                         <th className="p-2">Désignation</th>
                                         <th className="p-2">Code Budget</th>
-                                        <th className="p-2 text-center">{viewReq.nature === 'Achat' ? 'Qté' : 'Durée'}</th>
+                                        <th className="p-2 text-center">
+                                            {viewReq.nature === 'Achat' ? 'Qté' : 'Durée'}
+                                        </th>
                                         <th className="p-2 text-right">Prix Unitaire</th>
                                         <th className="p-2 text-right">Total</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y text-gray-700">
-                                    {viewReq.articles.map(art => (
+                                <tbody className="divide-y divide-outline-soft text-gray-700">
+                                    {viewReq.articles.map((art) => (
                                         <tr key={art.id}>
                                             <td className="p-2 font-medium">{art.activite}</td>
-                                            <td className="p-2 font-mono text-gray-500">{art.codeBudget}</td>
-                                            <td className="p-2 text-center">{art.quantiteOuDuree} {art.unite}</td>
-                                            <td className="p-2 text-right">{art.prixUnitaire.toLocaleString()} {viewReq.devise}</td>
-                                            <td className="p-2 text-right font-bold">{art.total.toLocaleString()} {viewReq.devise}</td>
+                                            <td className="p-2 font-mono text-gray-500">
+                                                {art.codeBudget}
+                                            </td>
+                                            <td className="p-2 text-center">
+                                                {art.quantiteOuDuree} {art.unite}
+                                            </td>
+                                            <td className="p-2 text-right">
+                                                {art.prixUnitaire.toLocaleString()} {viewReq.devise}
+                                            </td>
+                                            <td className="p-2 text-right font-bold">
+                                                {art.total.toLocaleString()} {viewReq.devise}
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
-                                <tfoot className="bg-gray-50 font-bold border-t">
+                                <tfoot className="bg-surface-muted font-bold border-t border-outline-soft">
                                     <tr>
-                                        <td colSpan={4} className="p-2 text-right text-gray-600">Total Général :</td>
-                                        <td className="p-2 text-right text-[#04326D] text-sm font-mono font-bold">
+                                        <td colSpan={4} className="p-2 text-right text-gray-600">
+                                            Total Général :
+                                        </td>
+                                        <td className="p-2 text-right text-primary text-sm font-mono font-bold">
                                             {viewReq.montantTotal.toLocaleString()} {viewReq.devise}
                                         </td>
                                     </tr>
@@ -466,33 +576,57 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
                         </div>
 
                         <div className="space-y-3">
-                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Fichiers joints par demande</h3>
+                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+                                <Paperclip className="w-3.5 h-3.5" />
+                                Fichiers joints par demande
+                            </h3>
                             {viewReq.articles.some((art) => (art.justificatifs ?? []).length > 0) ? (
                                 <div className="space-y-3">
                                     {viewReq.articles.map((art) => (
-                                        <div key={art.id} className="border border-gray-200 rounded p-3 bg-gray-50">
+                                        <div
+                                            key={art.id}
+                                            className="border border-outline-soft rounded-md p-3 bg-surface-muted"
+                                        >
                                             <div className="flex items-center justify-between gap-3 mb-2">
-                                                <p className="text-xs font-bold text-[#0B192C]">{art.activite}</p>
-                                                <span className="text-[10px] text-gray-500">{art.justificatifs?.length ?? 0} fichier(s)</span>
+                                                <p className="text-xs font-bold text-on-surface">
+                                                    {art.activite}
+                                                </p>
+                                                <span className="text-[10px] text-gray-500">
+                                                    {art.justificatifs?.length ?? 0} fichier(s)
+                                                </span>
                                             </div>
                                             <div className="space-y-2">
                                                 {(art.justificatifs ?? []).map((justif) => (
-                                                    <div key={justif.id} className="flex items-center justify-between gap-3 bg-white border border-gray-200 rounded px-2 py-2">
-                                                        <div>
-                                                            <p className="text-[11px] font-semibold text-gray-700">{justif.originalName || justif.description}</p>
-                                                            <p className="text-[10px] text-gray-500">{justif.date} • {justif.montant.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} {viewReq.devise}</p>
+                                                    <div
+                                                        key={justif.id}
+                                                        className="flex items-center justify-between gap-3 bg-white border border-outline-soft rounded-md px-2 py-2"
+                                                    >
+                                                        <div className="min-w-0">
+                                                            <p className="text-[11px] font-semibold text-gray-700 truncate">
+                                                                {justif.originalName || justif.description}
+                                                            </p>
+                                                            <p className="text-[10px] text-gray-500">
+                                                                {justif.date} •{' '}
+                                                                {justif.montant.toLocaleString('fr-FR', {
+                                                                    minimumFractionDigits: 2,
+                                                                })}{' '}
+                                                                {viewReq.devise}
+                                                            </p>
                                                         </div>
                                                         {justif.fileUrl ? (
                                                             <a
                                                                 href={justif.fileUrl}
                                                                 target="_blank"
                                                                 rel="noreferrer"
-                                                                className="inline-flex items-center gap-1 px-2 py-1 bg-[#04326D] text-white text-[10px] font-bold rounded hover:bg-[#06428f]"
+                                                                className="inline-flex items-center gap-1 px-2 py-1 bg-primary text-white text-[10px] font-semibold rounded-md hover:bg-primary-light transition"
                                                             >
+                                                                <Download className="w-3 h-3" />
                                                                 Consulter
                                                             </a>
                                                         ) : (
-                                                            <span className="text-[10px] text-gray-400">Fichier non disponible</span>
+                                                            <span className="text-[10px] text-gray-400">
+                                                                Indisponible
+                                                            </span>
                                                         )}
                                                     </div>
                                                 ))}
@@ -501,7 +635,7 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
                                     ))}
                                 </div>
                             ) : (
-                                <div className="border border-dashed border-gray-300 rounded p-3 text-[11px] text-gray-500">
+                                <div className="border border-dashed border-outline-variant rounded-md p-3 text-[11px] text-gray-500 text-center">
                                     Aucun fichier joint sur cette réquisition.
                                 </div>
                             )}
@@ -512,39 +646,52 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
 
             {/* MODALE EDIT */}
             {editReq && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 no-print-zone">
-                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-3xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-                        <div className="flex items-center justify-between border-b pb-3">
-                            <h2 className="text-base font-bold text-[#0B192C]">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 no-print-zone animate-fade-in">
+                    <div className="bg-white rounded-lg border border-outline-soft shadow-modal max-w-3xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto animate-slide-down">
+                        <div className="flex items-center justify-between border-b border-outline-soft pb-3">
+                            <h2 className="text-base font-bold text-on-surface">
                                 Modifier Réquisition : {editReq.numero}
                             </h2>
                             <button
                                 type="button"
                                 onClick={() => setEditReq(null)}
-                                className="text-gray-400 hover:text-gray-600 text-xl font-bold"
+                                className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100 transition"
+                                aria-label="Fermer"
                             >
-                                &times;
+                                <X className="w-4 h-4" />
                             </button>
                         </div>
 
                         <form onSubmit={handleSaveEdit} className="space-y-4 text-xs">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div>
-                                    <label className="block font-semibold text-gray-700 mb-1">Caisse</label>
+                                    <label className="block font-semibold text-gray-700 mb-1">
+                                        Caisse
+                                    </label>
                                     <select
                                         value={editReq.caisse}
-                                        onChange={(e) => setEditReq({ ...editReq, caisse: e.target.value })}
-                                        className="w-full border border-gray-300 rounded p-1.5 text-xs focus:outline-none"
+                                        onChange={(e) =>
+                                            setEditReq({ ...editReq, caisse: e.target.value })
+                                        }
+                                        className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                                     >
-                                        {CAISSES_DISPONIBLES.map(c => <option key={c} value={c}>{c}</option>)}
+                                        {CAISSES_DISPONIBLES.map((c) => (
+                                            <option key={c} value={c}>
+                                                {c}
+                                            </option>
+                                        ))}
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block font-semibold text-gray-700 mb-1">Devise</label>
+                                    <label className="block font-semibold text-gray-700 mb-1">
+                                        Devise
+                                    </label>
                                     <select
                                         value={editReq.devise}
-                                        onChange={(e) => setEditReq({ ...editReq, devise: e.target.value as any })}
-                                        className="w-full border border-gray-300 rounded p-1.5 text-xs font-bold focus:outline-none"
+                                        onChange={(e) =>
+                                            setEditReq({ ...editReq, devise: e.target.value as any })
+                                        }
+                                        className="w-full border border-outline-variant rounded-md p-2 text-xs font-bold focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                                     >
                                         <option value="USD">USD ($)</option>
                                         <option value="FC">FC (CDF)</option>
@@ -554,26 +701,41 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
                             </div>
 
                             <div>
-                                <label className="block font-semibold text-gray-700 mb-1">Observation</label>
+                                <label className="block font-semibold text-gray-700 mb-1">
+                                    Observation
+                                </label>
                                 <textarea
                                     rows={2}
                                     value={editReq.observation || ''}
-                                    onChange={(e) => setEditReq({ ...editReq, observation: e.target.value })}
-                                    className="w-full border border-gray-300 rounded p-1.5 text-xs focus:outline-none"
+                                    onChange={(e) =>
+                                        setEditReq({ ...editReq, observation: e.target.value })
+                                    }
+                                    className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                                 />
                             </div>
 
                             <div>
-                                <h3 className="font-bold text-gray-700 uppercase tracking-wider mb-2">Modifier les articles</h3>
+                                <h3 className="font-bold text-gray-700 uppercase tracking-wider mb-2">
+                                    Modifier les articles
+                                </h3>
                                 <div className="space-y-2">
-                                    {editReq.articles.map(art => (
-                                        <div key={art.id} className="p-3 border border-gray-200 rounded bg-gray-50 grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
+                                    {editReq.articles.map((art) => (
+                                        <div
+                                            key={art.id}
+                                            className="p-3 border border-outline-soft rounded-md bg-surface-muted grid grid-cols-1 md:grid-cols-12 gap-2 items-center"
+                                        >
                                             <div className="md:col-span-5">
                                                 <input
                                                     type="text"
                                                     value={art.activite}
-                                                    onChange={(e) => handleUpdateEditArticle(art.id, 'activite', e.target.value)}
-                                                    className="w-full border border-gray-300 rounded p-1 text-xs"
+                                                    onChange={(e) =>
+                                                        handleUpdateEditArticle(
+                                                            art.id,
+                                                            'activite',
+                                                            e.target.value,
+                                                        )
+                                                    }
+                                                    className="w-full border border-outline-variant rounded-md p-1.5 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                                                     required
                                                 />
                                             </div>
@@ -582,8 +744,14 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
                                                     type="number"
                                                     min="1"
                                                     value={art.quantiteOuDuree}
-                                                    onChange={(e) => handleUpdateEditArticle(art.id, 'quantiteOuDuree', Number(e.target.value))}
-                                                    className="w-full border border-gray-300 rounded p-1 text-xs text-center"
+                                                    onChange={(e) =>
+                                                        handleUpdateEditArticle(
+                                                            art.id,
+                                                            'quantiteOuDuree',
+                                                            Number(e.target.value),
+                                                        )
+                                                    }
+                                                    className="w-full border border-outline-variant rounded-md p-1.5 text-xs text-center focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                                                 />
                                             </div>
                                             <div className="md:col-span-2">
@@ -592,11 +760,17 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
                                                     min="0"
                                                     step="0.01"
                                                     value={art.prixUnitaire}
-                                                    onChange={(e) => handleUpdateEditArticle(art.id, 'prixUnitaire', Number(e.target.value))}
-                                                    className="w-full border border-gray-300 rounded p-1 text-xs text-right"
+                                                    onChange={(e) =>
+                                                        handleUpdateEditArticle(
+                                                            art.id,
+                                                            'prixUnitaire',
+                                                            Number(e.target.value),
+                                                        )
+                                                    }
+                                                    className="w-full border border-outline-variant rounded-md p-1.5 text-xs text-right focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                                                 />
                                             </div>
-                                            <div className="md:col-span-3 text-right font-mono font-bold text-xs text-[#0B192C]">
+                                            <div className="md:col-span-3 text-right font-mono font-bold text-xs text-on-surface">
                                                 {art.total.toLocaleString()} {editReq.devise}
                                             </div>
                                         </div>
@@ -604,31 +778,32 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
                                 </div>
                             </div>
 
-                            <div className="flex justify-end gap-2 pt-2 border-t">
+                            <div className="flex justify-end gap-2 pt-3 border-t border-outline-soft">
                                 <button
                                     type="button"
                                     onClick={() => setEditReq(null)}
-                                    className="px-3 py-1.5 border rounded text-xs text-gray-600 hover:bg-gray-50"
+                                    className="px-3 py-2 border border-outline-variant rounded-md text-xs text-gray-600 hover:bg-gray-50 transition"
                                 >
                                     Annuler
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={savingEdit}
-                                    className="px-4 py-1.5 bg-[#04326D] text-white rounded font-bold hover:bg-[#06428f] disabled:opacity-60"
+                                    className="px-4 py-2 bg-primary text-white rounded-md font-semibold hover:bg-primary-light disabled:opacity-60 transition"
                                 >
-                                    {savingEdit ? 'Enregistrement...' : 'Enregistrer'}
+                                    {savingEdit ? 'Enregistrement…' : 'Enregistrer'}
                                 </button>
                             </div>
                         </form>
                     </div>
                 </div>
             )}
-                {printReq && (
-                    <div id="bon-pasteur-print-zone">
-                        <OfficialPrintSheet requisition={printReq as any} />
-                    </div>
-                )}
+
+            {printReq && (
+                <div id="bon-pasteur-print-zone">
+                    <OfficialPrintSheet requisition={printReq as any} />
+                </div>
+            )}
         </AppLayout>
     );
 }
