@@ -125,13 +125,13 @@ class RoleAndDataSeeder extends Seeder
 
         $admin = User::updateOrCreate(
             [
-                'email' => 'othan@jibulab.com',
+                'email' => 'prolukeka@gmail.com',
             ],
             [
                 'name' => 'Administrateur',
-                'first_name' => 'Othan',
-                'last_name' => 'Semper',
-                'password' => Hash::make('Othan#010203'),
+                'first_name' => 'Prosper',
+                'last_name' => 'Lukeka',
+                'password' => Hash::make('password123'),
                 'role' => 'admin',
                 'status' => 'active',
                 'email_verified_at' => now(),

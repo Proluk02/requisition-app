@@ -1,193 +1,135 @@
 import { useState, useMemo } from 'react';
-import { Head, Link, usePage } from '@inertiajs/react';
+import { Head, Link, useForm, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
+import PettyCashVoucherPrint from '@/Components/PettyCashVoucherPrint';
+import { numberToWordsFR } from '@/lib/numberToWords';
 
-interface MouvementCourse {
-    id: string;
-    ordre: number;
-    date: string;
-    itineraire: string;
-    motif: string;
-    montantFC: number;
-}
-
-interface RequisitionTransportRef {
+interface RequisitionOption {
     id: string;
     code: string;
-    dateCreation: string;
     projet: string;
-    montantAlloueFC: number;
-    statut: 'attente_mp' | 'valide_mp' | 'decaisse';
-    agentNom: string;
-    managerProjetNom: string;
-    dateVisaMP?: string;
-    mouvements: MouvementCourse[];
+    nature: string;
+    montantTotal: number;
+    devise: string;
+    status: string;
+    demandeurNom: string;
 }
 
-const MOCK_REQUISITIONS_TRANSPORT: RequisitionTransportRef[] = [
-    {
-        id: 'trp-01',
-        code: 'UB/09/TRP-001',
-        dateCreation: '10/09/2026',
-        projet: 'USIMAMIZI BORA (Kanina)',
-        montantAlloueFC: 50000,
-        statut: 'valide_mp',
-        agentNom: 'Kasongo Mukendi',
-        managerProjetNom: 'Jean-Paul Ilunga',
-        dateVisaMP: '10/09/2026 à 11:30',
-        mouvements: [
-            {
-                id: 'm1',
-                ordre: 1,
-                date: '2026-09-10',
-                itineraire: 'BP - Centre-ville - BP',
-                motif: 'Pyt de transport A/R pour sensibilisation mariage précoce',
-                montantFC: 5000
-            },
-            {
-                id: 'm2',
-                ordre: 2,
-                date: '2026-09-11',
-                itineraire: 'BP - Site Minier Kasulo - BP',
-                motif: 'Visite des ménages et identification des enfants',
-                montantFC: 8000
-            }
-        ]
-    },
-    {
-        id: 'trp-02',
-        code: 'UB/09/TRP-002',
-        dateCreation: '14/09/2026',
-        projet: 'USIMAMIZI BORA (Kanina)',
-        montantAlloueFC: 35000,
-        statut: 'attente_mp',
-        agentNom: 'Mireille Kabange',
-        managerProjetNom: 'Jean-Paul Ilunga',
-        mouvements: []
-    }
-];
+interface PettyCashData {
+    id: string;
+    requisition_id: string;
+    requisition_code: string;
+    numero_voucher: string;
+    company_name: string;
+    date_voucher: string;
+    account_code: string;
+    description: string;
+    montant_cdf: number;
+    montant_usd: number;
+    montant_en_lettres: string;
+    checked_by?: string;
+    checked_at?: string;
+    authorized_by?: string;
+    recipient_signature?: string;
+    status: 'en_attente' | 'valide_mp' | 'apure';
+}
 
-export default function TransportIndex() {
+interface Props extends PageProps {
+    requisitions: RequisitionOption[];
+    vouchers: PettyCashData[];
+}
+
+export default function TransportIndex({ requisitions = [], vouchers = [] }: Props) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
     const isMP = user.role === 'project_manager';
 
-    const [requisitionsList, setRequisitionsList] = useState<RequisitionTransportRef[]>(MOCK_REQUISITIONS_TRANSPORT);
-    const [selectedReqId, setSelectedReqId] = useState<string>('trp-01');
+    const [selectedReqId, setSelectedReqId] = useState<string>(
+        requisitions.length > 0 ? requisitions[0].id : ''
+    );
 
-    const selectedReq = useMemo(() => {
-        return requisitionsList.find(r => r.id === selectedReqId) || null;
-    }, [requisitionsList, selectedReqId]);
+    const selectedRequisition = useMemo(() => {
+        return requisitions.find(r => r.id === selectedReqId) || null;
+    }, [requisitions, selectedReqId]);
 
-    const isValideParMP = selectedReq?.statut === 'valide_mp' || selectedReq?.statut === 'decaisse';
+    const vouchersDeLaRequisition = useMemo(() => {
+        if (!selectedReqId) return [];
+        return vouchers.filter(v => v.requisition_id === selectedReqId);
+    }, [vouchers, selectedReqId]);
 
-    const [dateCourse, setDateCourse] = useState(() => new Date().toISOString().split('T')[0]);
-    const [itineraire, setItineraire] = useState('');
-    const [motif, setMotif] = useState('');
-    const [montantFC, setMontantFC] = useState('');
+    const totalVouchersCDF = useMemo(() => {
+        return vouchersDeLaRequisition.reduce((acc, v) => acc + (v.montant_cdf || 0), 0);
+    }, [vouchersDeLaRequisition]);
 
-    const totalDepenseFC = useMemo(() => {
-        if (!selectedReq) return 0;
-        return selectedReq.mouvements.reduce((acc, m) => acc + (Number(m.montantFC) || 0), 0);
-    }, [selectedReq]);
+    const totalVouchersUSD = useMemo(() => {
+        return vouchersDeLaRequisition.reduce((acc, v) => acc + (v.montant_usd || 0), 0);
+    }, [vouchersDeLaRequisition]);
 
-    const soldeRestantFC = useMemo(() => {
-        if (!selectedReq) return 0;
-        return selectedReq.montantAlloueFC - totalDepenseFC;
-    }, [selectedReq, totalDepenseFC]);
+    const { data, setData, post, processing, errors, reset } = useForm({
+        requisition_id: selectedReqId,
+        date_voucher: new Date().toISOString().split('T')[0],
+        account_code: 'A/C-01',
+        description: '',
+        devise: 'FC' as 'FC' | 'USD',
+        montant: '',
+        montant_en_lettres: '',
+    });
 
-    const handleAccorderVisaMP = () => {
-        if (!selectedReq) return;
-        const now = new Date().toLocaleDateString('fr-FR') + ' à ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-
-        setRequisitionsList(requisitionsList.map(r => {
-            if (r.id === selectedReq.id) {
-                return {
-                    ...r,
-                    statut: 'valide_mp',
-                    managerProjetNom: user.name,
-                    dateVisaMP: now
-                };
-            }
-            return r;
-        }));
-
-        alert(`Visa accordé par le Manager de Projet (${user.name}) pour la réquisition ${selectedReq.code}. Le carnet de déplacement est déverrouillé.`);
+    const handleMontantChange = (val: string, dev: 'FC' | 'USD') => {
+        const num = parseFloat(val) || 0;
+        setData({
+            ...data,
+            montant: val,
+            devise: dev,
+            montant_en_lettres: numberToWordsFR(num, dev as any),
+            requisition_id: selectedReqId
+        });
     };
 
-    const handleAddMouvement = (e: React.FormEvent) => {
+    const handleCreerVoucher = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selectedReq) return;
-
-        if (!isValideParMP) {
-            alert("Action bloquée : Le Manager de Projet doit d'abord accorder son visa.");
-            return;
-        }
-
-        const nextOrdre = selectedReq.mouvements.length > 0 
-            ? Math.max(...selectedReq.mouvements.map(m => m.ordre)) + 1 
-            : 1;
-
-        const nouveau: MouvementCourse = {
-            id: Date.now().toString(),
-            ordre: nextOrdre,
-            date: dateCourse,
-            itineraire: itineraire,
-            motif: motif,
-            montantFC: parseFloat(montantFC)
-        };
-
-        setRequisitionsList(requisitionsList.map(r => {
-            if (r.id === selectedReq.id) {
-                return { ...r, mouvements: [...r.mouvements, nouveau] };
+        post(route('petty-cash.store'), {
+            onSuccess: () => {
+                reset('description', 'montant', 'montant_en_lettres');
             }
-            return r;
-        }));
-
-        setItineraire('');
-        setMotif('');
-        setMontantFC('');
+        });
     };
 
-    const handleDeleteMouvement = (mouvementId: string) => {
-        if (!selectedReq) return;
-        if (confirm('Supprimer ce mouvement ?')) {
-            setRequisitionsList(requisitionsList.map(r => {
-                if (r.id === selectedReq.id) {
-                    return { ...r, mouvements: r.mouvements.filter(m => m.id !== mouvementId) };
-                }
-                return r;
-            }));
-        }
+    const handleViserVoucherMP = (voucherId: string) => {
+        useForm({}).patch(route('petty-cash.visa-mp', voucherId));
+    };
+
+    const [selectedPrintVoucher, setSelectedPrintVoucher] = useState<PettyCashData | null>(null);
+
+    const handlePrintVoucher = (voucher: PettyCashData) => {
+        setSelectedPrintVoucher(voucher);
+        setTimeout(() => {
+            window.print();
+        }, 300);
     };
 
     return (
         <AppLayout>
-            <Head title="Cahier des Mouvements de Transport" />
-
+            <Head title="Petits Cash & Justifications de Dépenses" />
             <style>{`
                 @media print {
                     nav, aside, header, .no-print-area, button, select {
                         display: none !important;
                     }
-                    #releve-transport-print {
+                    #bon-pasteur-petty-cash-sheet {
                         display: block !important;
                         position: fixed;
-                        left: 0;
-                        top: 0;
-                        width: 100vw;
-                        padding: 30px;
-                        background: white;
-                        color: black;
-                        font-family: 'Inter', serif;
-                        z-index: 999999;
-                        -webkit-print-color-adjust: exact !important;
-                        print-color-adjust: exact !important;
+                        left: 50%;
+                        top: 20px;
+                        transform: translateX(-50%);
+                        width: 148mm !important;
+                        background: white !important;
+                        color: black !important;
                     }
                 }
                 @media screen {
-                    #releve-transport-print {
+                    #bon-pasteur-petty-cash-sheet {
                         display: none;
                     }
                 }
@@ -199,377 +141,280 @@ export default function TransportIndex() {
                         <nav className="text-[11px] text-gray-500 font-medium mb-1">
                             <Link href={route('dashboard')} className="hover:underline">Dashboard</Link>
                             <span className="mx-1.5">&rsaquo;</span>
-                            <span className="text-[#0B192C] font-bold">Transport Terrain</span>
+                            <span className="text-[#0B192C] font-bold">Justifications & Petits Cash</span>
                         </nav>
                         <h1 className="text-xl font-bold text-[#0B192C]">
-                            {isMP ? 'Contrôle & Visa des Déplacements de Terrain' : 'Relevé des Déplacements & Mouvements'}
+                            Justification par Petits Cash (&le; 20 USD / 30 000 FC)
                         </h1>
                         <p className="text-xs text-gray-500">
-                            {isMP 
-                                ? 'Examinez les courses de votre équipe, apposez votre visa et imprimez la décharge comptable.' 
-                                : 'Sélectionnez une réquisition validée pour justifier vos courses A/R.'}
+                            Sélectionnez une réquisition (Achat, Service ou Transport) pour justifier les menues dépenses sans facture.
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                        {isMP && selectedReq && !isValideParMP && (
-                            <button
-                                type="button"
-                                onClick={handleAccorderVisaMP}
-                                className="px-4 py-2 bg-[#10B981] hover:bg-[#059669] text-white text-xs font-bold rounded flex items-center gap-1.5 shadow transition"
-                            >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                </svg>
-                                <span>Accorder Visa MP sur ce Transport</span>
-                            </button>
-                        )}
-
-                        {isValideParMP ? (
-                            <button
-                                type="button"
-                                onClick={() => window.print()}
-                                className="px-4 py-2 bg-[#04326D] hover:bg-[#06428f] text-white text-xs font-bold rounded flex items-center gap-2 shadow-sm transition"
-                            >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                                </svg>
-                                <span>Imprimer Relevé de Déplacement (Décharge)</span>
-                            </button>
-                        ) : (
-                            <div className="px-3 py-2 bg-gray-100 border border-gray-300 text-gray-400 text-xs font-semibold rounded flex items-center gap-2 cursor-not-allowed">
-                                <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                                </svg>
-                                <span>Impression Verrouillée (Visa MP requis)</span>
-                            </div>
-                        )}
+                    <div className="text-right">
+                        <span className="text-[10px] text-gray-400 block uppercase">Plafond Légal :</span>
+                        <span className="text-xs font-bold text-[#F58F20] bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
+                            Max 20$ USD ou 30 000 FC
+                        </span>
                     </div>
                 </div>
 
-                {/* Sélecteur */}
                 <div className="bg-white border border-[#B2BED6] rounded p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex-1">
                         <label className="block text-xs font-bold text-[#0B192C] mb-1 uppercase tracking-wider">
-                            Réquisition de Transport sélectionnée :
+                            1. Choisissez la Réquisition à justifier (depuis MySQL) :
                         </label>
-                        <select
-                            value={selectedReqId}
-                            onChange={(e) => setSelectedReqId(e.target.value)}
-                            className="w-full md:max-w-md border border-[#04326D] rounded p-2 text-xs font-bold text-[#04326D] bg-blue-50/40 focus:outline-none"
-                        >
-                            {requisitionsList.map(req => (
-                                <option key={req.id} value={req.id}>
-                                    {req.code} — {req.agentNom} ({req.montantAlloueFC.toLocaleString()} FC) - [{req.statut === 'valide_mp' ? 'VALIDÉ MP' : 'EN ATTENTE VISA MP'}]
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                        {selectedReq && (
-                            <div className="text-right">
-                                <span className="text-[10px] text-gray-500 block">État :</span>
-                                {isValideParMP ? (
-                                    <span className="inline-flex items-center gap-1.5 bg-emerald-100 text-[#065F46] font-bold text-xs px-2.5 py-1 rounded-full">
-                                        <svg className="w-3.5 h-3.5 text-[#10B981]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                        Visé par {selectedReq.managerProjetNom} ({selectedReq.dateVisaMP})
-                                    </span>
-                                ) : (
-                                    <span className="inline-flex items-center gap-1.5 bg-amber-100 text-[#92400E] font-bold text-xs px-2.5 py-1 rounded-full">
-                                        <svg className="w-3.5 h-3.5 text-[#F58F20]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                        </svg>
-                                        En attente visa Manager de Projet
-                                    </span>
-                                )}
-                            </div>
+                        {requisitions.length === 0 ? (
+                            <p className="text-xs text-red-600 italic">
+                                Aucune réquisition trouvée en base de données. Veuillez d'abord créer une réquisition.
+                            </p>
+                        ) : (
+                            <select
+                                value={selectedReqId}
+                                onChange={(e) => {
+                                    setSelectedReqId(e.target.value);
+                                    setData('requisition_id', e.target.value);
+                                }}
+                                className="w-full md:max-w-xl border border-[#04326D] rounded p-2 text-xs font-bold text-[#04326D] bg-blue-50/40 focus:outline-none"
+                            >
+                                {requisitions.map((req) => (
+                                    <option key={req.id} value={req.id}>
+                                        {req.code} — {req.nature} • {req.projet} ({req.montantTotal.toLocaleString()} {req.devise}) - [{req.demandeurNom}]
+                                    </option>
+                                ))}
+                            </select>
                         )}
                     </div>
+
+                    {selectedRequisition && (
+                        <div className="text-right">
+                            <span className="text-[10px] text-gray-500 block">Enveloppe de la réquisition :</span>
+                            <span className="text-base font-black font-mono text-[#0B192C]">
+                                {selectedRequisition.montantTotal.toLocaleString()} {selectedRequisition.devise}
+                            </span>
+                        </div>
+                    )}
                 </div>
 
-                {/* Totaux */}
-                {selectedReq && (
+                {selectedRequisition && (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="bg-white border border-[#B2BED6] rounded p-4 shadow-sm">
-                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Avance Décaissée</span>
-                            <p className="text-2xl font-mono font-bold text-[#04326D] mt-1">
-                                {selectedReq.montantAlloueFC.toLocaleString('fr-FR')} FC
+                            <span className="text-[10px] font-bold text-gray-500 uppercase">Montant Initial Réquisition</span>
+                            <p className="text-2xl font-black text-[#04326D] mt-1">
+                                {selectedRequisition.montantTotal.toLocaleString()} {selectedRequisition.devise}
                             </p>
-                            <p className="text-[11px] text-gray-500 mt-1">
-                                Initiateur : <strong>{selectedReq.agentNom}</strong> • {selectedReq.projet}
-                            </p>
+                            <p className="text-[11px] text-gray-400 mt-1">Réf : {selectedRequisition.code}</p>
                         </div>
 
                         <div className="bg-white border border-[#B2BED6] rounded p-4 shadow-sm">
-                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Total Courses Justifiées</span>
-                            <p className="text-2xl font-mono font-bold text-[#0B192C] mt-1">
-                                {totalDepenseFC.toLocaleString('fr-FR')} FC
+                            <span className="text-[10px] font-bold text-gray-500 uppercase">Total Petits Cash Justifiés</span>
+                            <p className="text-2xl font-black text-[#0B192C] mt-1">
+                                {selectedRequisition.devise === 'FC' 
+                                    ? `${totalVouchersCDF.toLocaleString()} FC` 
+                                    : `$${totalVouchersUSD.toLocaleString()} USD`}
                             </p>
-                            <p className="text-[11px] text-gray-500 mt-1">
-                                {selectedReq.mouvements.length} déplacement(s) enregistré(s)
+                            <p className="text-[11px] text-gray-400 mt-1">
+                                {vouchersDeLaRequisition.length} voucher(s) rattaché(s)
                             </p>
                         </div>
 
                         <div className="bg-[#0B192C] text-white rounded p-4 shadow-sm flex flex-col justify-between">
-                            <div className="flex justify-between items-center">
-                                <span className="text-[10px] font-bold text-[#B2BED6] uppercase tracking-wider">Reliquat à Restituer</span>
-                                <span className="text-xs font-mono font-bold text-[#F58F20]">FC</span>
-                            </div>
-                            <div>
-                                <p className="text-2xl font-black mt-1">
-                                    {soldeRestantFC.toLocaleString('fr-FR')} FC
-                                </p>
-                                <p className="text-[10px] text-gray-300 mt-1">
-                                    {soldeRestantFC === 0 ? 'Enveloppe apurée' : 'À retourner à la caisse'}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Formulaire ajout course */}
-                {selectedReq && !isMP && (
-                    <div className="bg-white border border-[#B2BED6] rounded p-5 shadow-sm space-y-3">
-                        <div className="flex items-center justify-between border-b pb-2">
-                            <h2 className="text-xs font-bold text-[#0B192C] uppercase tracking-wider">
-                                Enregistrer un déplacement sur {selectedReq.code}
-                            </h2>
-                            {!isValideParMP && (
-                                <span className="text-xs font-bold text-[#DC2626]">
-                                    Saisie désactivée : Visa Manager de Projet requis
-                                </span>
-                            )}
-                        </div>
-
-                        {isValideParMP ? (
-                            <form onSubmit={handleAddMouvement} className="grid grid-cols-1 md:grid-cols-12 gap-3 text-xs">
-                                <div className="md:col-span-2">
-                                    <label className="block font-semibold text-gray-700 mb-1">Date</label>
-                                    <input
-                                        type="date"
-                                        value={dateCourse}
-                                        onChange={(e) => setDateCourse(e.target.value)}
-                                        className="w-full border border-gray-300 rounded p-1.5 text-xs focus:outline-none"
-                                        required
-                                    />
-                                </div>
-
-                                <div className="md:col-span-4">
-                                    <label className="block font-semibold text-gray-700 mb-1">Itinéraire</label>
-                                    <input
-                                        type="text"
-                                        placeholder="ex: BP - Centre-ville - BP"
-                                        value={itineraire}
-                                        onChange={(e) => setItineraire(e.target.value)}
-                                        className="w-full border border-gray-300 rounded p-1.5 text-xs focus:outline-none"
-                                        required
-                                    />
-                                </div>
-
-                                <div className="md:col-span-4">
-                                    <label className="block font-semibold text-gray-700 mb-1">Motif précis</label>
-                                    <input
-                                        type="text"
-                                        placeholder="ex: Pyt de transport A/R pour sensibilisation mariage précoce"
-                                        value={motif}
-                                        onChange={(e) => setMotif(e.target.value)}
-                                        className="w-full border border-gray-300 rounded p-1.5 text-xs focus:outline-none"
-                                        required
-                                    />
-                                </div>
-
-                                <div className="md:col-span-2 flex flex-col justify-end">
-                                    <label className="block font-semibold text-gray-700 mb-1">Coût A/R (FC)</label>
-                                    <div className="flex gap-2">
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            step="500"
-                                            placeholder="5000"
-                                            value={montantFC}
-                                            onChange={(e) => setMontantFC(e.target.value)}
-                                            className="w-full border border-gray-300 rounded p-1.5 text-xs font-bold text-[#0B192C]"
-                                            required
-                                        />
-                                        <button
-                                            type="submit"
-                                            className="bg-[#04326D] hover:bg-[#06428f] text-white px-3.5 py-1.5 rounded font-bold text-xs"
-                                        >
-                                            Ajouter
-                                        </button>
-                                    </div>
-                                </div>
-                            </form>
-                        ) : (
-                            <p className="text-xs text-amber-800 bg-amber-50 p-3 rounded">
-                                Le carnet de déplacement est verrouillé tant que le Manager de Projet n'a pas apposé son visa.
+                            <span className="text-[10px] font-bold text-[#B2BED6] uppercase">Nombre de Justificatifs</span>
+                            <p className="text-2xl font-black mt-1">
+                                {vouchersDeLaRequisition.length} Vouchers
                             </p>
-                        )}
+                            <p className="text-[10px] text-gray-300">
+                                Visés par le MP et archivés pour la Caisse
+                            </p>
+                        </div>
                     </div>
                 )}
 
-                {/* Tableau des courses */}
-                {selectedReq && (
-                    <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
-                        <div className="p-3.5 bg-[#0B192C] text-white flex items-center justify-between text-xs">
-                            <span className="font-bold uppercase tracking-wider">
-                                Relevé des Déplacements : {selectedReq.code} ({selectedReq.mouvements.length} lignes)
-                            </span>
-                            <span className="font-mono text-[#F58F20] font-bold">
-                                Total : {totalDepenseFC.toLocaleString('fr-FR')} FC
+                {selectedRequisition && (
+                    <div className="bg-white border border-[#B2BED6] rounded p-5 shadow-sm space-y-3">
+                        <div className="flex justify-between items-center border-b pb-2">
+                            <h2 className="text-xs font-bold text-[#0B192C] uppercase tracking-wider">
+                                + Émettre un Petit Cash sur la réquisition {selectedRequisition.code}
+                            </h2>
+                            <span className="text-[10px] text-gray-500 italic">
+                                Pour dépenses sans facture (ex: sac de marché 10 000 FC, transport taxi, réparations mineures)
                             </span>
                         </div>
 
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left text-xs border-collapse">
-                                <thead>
-                                    <tr className="bg-[#F1F5F9] text-gray-600 uppercase text-[10px] font-bold border-b border-[#B2BED6]">
-                                        <th className="py-2.5 px-3 w-12 text-center">N°</th>
-                                        <th className="py-2.5 px-3 w-28">Date</th>
-                                        <th className="py-2.5 px-4 min-w-[200px]">Itinéraire (A/R)</th>
-                                        <th className="py-2.5 px-4 min-w-[300px]">Motif du Déplacement</th>
-                                        <th className="py-2.5 px-4 text-right w-32">Montant Dépensé</th>
-                                        {!isMP && <th className="py-2.5 px-2 w-12 text-center"></th>}
+                        <form onSubmit={handleCreerVoucher} className="grid grid-cols-1 md:grid-cols-12 gap-3 text-xs">
+                            <div className="md:col-span-2">
+                                <label className="block font-semibold text-gray-700 mb-1">Date</label>
+                                <input
+                                    type="date"
+                                    value={data.date_voucher}
+                                    onChange={(e) => setData('date_voucher', e.target.value)}
+                                    className="w-full border border-gray-300 rounded p-1.5 text-xs focus:outline-none"
+                                    required
+                                />
+                            </div>
+
+                            <div className="md:col-span-2">
+                                <label className="block font-semibold text-gray-700 mb-1">A/C CODE</label>
+                                <input
+                                    type="text"
+                                    placeholder="ex: A/C-DEP"
+                                    value={data.account_code}
+                                    onChange={(e) => setData('account_code', e.target.value)}
+                                    className="w-full border border-gray-300 rounded p-1.5 text-xs font-mono focus:outline-none"
+                                    required
+                                />
+                            </div>
+
+                            <div className="md:col-span-5">
+                                <label className="block font-semibold text-gray-700 mb-1">Description / Motif de la dépense sans facture</label>
+                                <input
+                                    type="text"
+                                    placeholder="ex: Achat d'un sac de marché au centre-ville..."
+                                    value={data.description}
+                                    onChange={(e) => setData('description', e.target.value)}
+                                    className="w-full border border-gray-300 rounded p-1.5 text-xs focus:outline-none"
+                                    required
+                                />
+                                {errors.description && <p className="text-[10px] text-red-600 mt-0.5">{errors.description}</p>}
+                            </div>
+
+                            <div className="md:col-span-3 flex flex-col justify-end">
+                                <label className="block font-semibold text-gray-700 mb-1">Montant & Devise</label>
+                                <div className="flex gap-1.5">
+                                    <select
+                                        value={data.devise}
+                                        onChange={(e) => handleMontantChange(data.montant, e.target.value as any)}
+                                        className="border border-gray-300 rounded p-1.5 text-xs font-bold text-[#04326D] bg-white focus:outline-none"
+                                    >
+                                        <option value="FC">FC</option>
+                                        <option value="USD">USD</option>
+                                    </select>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max={data.devise === 'FC' ? 30000 : 20}
+                                        placeholder={data.devise === 'FC' ? "max 30000" : "max 20"}
+                                        value={data.montant}
+                                        onChange={(e) => handleMontantChange(e.target.value, data.devise)}
+                                        className="w-full border border-gray-300 rounded p-1.5 text-xs font-bold text-[#0B192C] focus:outline-none"
+                                        required
+                                    />
+                                    <button
+                                        type="submit"
+                                        disabled={processing}
+                                        className="bg-[#04326D] hover:bg-[#06428f] disabled:opacity-50 text-white px-3 py-1.5 rounded font-bold text-xs shrink-0"
+                                    >
+                                        Enregistrer
+                                    </button>
+                                </div>
+                                {errors.montant && <p className="text-[10px] text-red-600 mt-0.5">{errors.montant}</p>}
+                            </div>
+
+                            {data.montant_en_lettres && (
+                                <div className="md:col-span-12 p-2 bg-gray-50 border rounded text-[11px] italic text-gray-600">
+                                    Montant en lettres : <strong>{data.montant_en_lettres}</strong>
+                                </div>
+                            )}
+                        </form>
+                    </div>
+                )}
+
+                <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
+                    <div className="p-3.5 bg-[#0B192C] text-white flex items-center justify-between text-xs">
+                        <span className="font-bold uppercase tracking-wider">
+                            Petits Cash rattachés à cette réquisition ({vouchersDeLaRequisition.length})
+                        </span>
+                        <span className="text-gray-300">
+                            Base de données MySQL
+                        </span>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                                <tr className="bg-[#F1F5F9] text-gray-600 uppercase text-[10px] font-bold border-b border-[#B2BED6]">
+                                    <th className="py-2.5 px-3">N° Voucher</th>
+                                    <th className="py-2.5 px-3">Date</th>
+                                    <th className="py-2.5 px-3">A/C CODE</th>
+                                    <th className="py-2.5 px-4">Description (Dépense)</th>
+                                    <th className="py-2.5 px-4 text-right">Montant</th>
+                                    <th className="py-2.5 px-4 text-center">Visa MP (Checked by)</th>
+                                    <th className="py-2.5 px-4 text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
+                                {vouchersDeLaRequisition.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={7} className="text-center py-8 text-gray-400 italic">
+                                            Aucun petit cash enregistré pour cette réquisition.
+                                        </td>
                                     </tr>
-                                </thead>
-                                <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
-                                    {selectedReq.mouvements.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={6} className="text-center py-8 text-gray-400 italic">
-                                                Aucun mouvement enregistré pour cette réquisition.
+                                ) : (
+                                    vouchersDeLaRequisition.map((v) => (
+                                        <tr key={v.id} className="hover:bg-[#F9F9FF] transition">
+                                            <td className="py-3 px-3 font-mono font-bold text-[#04326D]">
+                                                {v.numero_voucher}
                                             </td>
-                                        </tr>
-                                    ) : (
-                                        selectedReq.mouvements.map((m) => (
-                                            <tr key={m.id} className="hover:bg-[#F9F9FF] transition">
-                                                <td className="py-3 px-3 text-center font-bold text-gray-400 font-mono">
-                                                    {m.ordre}
-                                                </td>
-                                                <td className="py-3 px-3 text-gray-600 whitespace-nowrap">
-                                                    {m.date}
-                                                </td>
-                                                <td className="py-3 px-4 font-bold text-[#04326D]">
-                                                    {m.itineraire}
-                                                </td>
-                                                <td className="py-3 px-4 text-gray-800">
-                                                    {m.motif}
-                                                </td>
-                                                <td className="py-3 px-4 text-right font-mono font-bold text-[#0B192C] whitespace-nowrap">
-                                                    {m.montantFC.toLocaleString('fr-FR')} FC
-                                                </td>
-                                                {!isMP && (
-                                                    <td className="py-3 px-2 text-center">
+                                            <td className="py-3 px-3 text-gray-500 whitespace-nowrap">
+                                                {v.date_voucher}
+                                            </td>
+                                            <td className="py-3 px-3 font-mono text-gray-600">
+                                                {v.account_code}
+                                            </td>
+                                            <td className="py-3 px-4 font-medium text-gray-800">
+                                                {v.description}
+                                            </td>
+                                            <td className="py-3 px-4 text-right font-mono font-bold text-[#0B192C] whitespace-nowrap">
+                                                {v.montant_cdf > 0 ? `${v.montant_cdf.toLocaleString()} FC` : `$${v.montant_usd} USD`}
+                                            </td>
+                                            <td className="py-3 px-4 text-center whitespace-nowrap">
+                                                {v.checked_by ? (
+                                                    <span className="bg-emerald-50 text-[#065F46] font-bold px-2 py-0.5 rounded text-[10px]">
+                                                        ✓ Visé par {v.checked_by}
+                                                    </span>
+                                                ) : (
+                                                    <span className="bg-amber-50 text-amber-800 px-2 py-0.5 rounded text-[10px]">
+                                                        En attente visa MP
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="py-3 px-4 text-right whitespace-nowrap">
+                                                <div className="inline-flex items-center gap-2">
+                                                    {isMP && !v.checked_by && (
                                                         <button
                                                             type="button"
-                                                            onClick={() => handleDeleteMouvement(m.id)}
-                                                            className="p-1 text-gray-400 hover:text-red-600 rounded transition"
-                                                            title="Supprimer"
+                                                            onClick={() => handleViserVoucherMP(v.id)}
+                                                            className="px-2 py-1 bg-[#10B981] hover:bg-[#059669] text-white rounded font-bold text-[10px]"
                                                         >
-                                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                                            </svg>
+                                                            Viser
                                                         </button>
-                                                    </td>
-                                                )}
-                                            </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
+                                                    )}
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handlePrintVoucher(v)}
+                                                        className="px-2.5 py-1 border border-[#04326D] text-[#04326D] hover:bg-blue-50 rounded font-bold text-[10px] flex items-center gap-1"
+                                                        title="Imprimer le Petty Cash Voucher (Photo 3)"
+                                                    >
+                                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                                                        </svg>
+                                                        <span>Imprimer</span>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
                     </div>
-                )}
+                </div>
             </div>
 
-            {/* BORDEREAU OFFICIEL D'IMPRESSION PRO */}
-            {selectedReq && isValideParMP && (
-                <div id="releve-transport-print">
-                    <div style={{ borderBottom: '2px solid black', paddingBottom: '12px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between' }}>
-                        <div>
-                            <h1 style={{ fontSize: '18px', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>
-                                ASBL BON PASTEUR KOLWEZI
-                            </h1>
-                            <p style={{ fontSize: '11px', margin: '3px 0 0 0' }}>
-                                Service de Gestion & Suivi des Activités Terrain
-                            </p>
-                            <p style={{ fontSize: '11px', margin: '2px 0 0 0' }}>
-                                Projet : <strong>{selectedReq.projet}</strong> (Agent : {selectedReq.agentNom})
-                            </p>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                            <h2 style={{ fontSize: '15px', fontWeight: 'bold', margin: 0, letterSpacing: '0.5px' }}>
-                                BORDEREAU DE DÉCHARGE TRANSPORT
-                            </h2>
-                            <p style={{ fontSize: '13px', fontWeight: 'bold', margin: '2px 0', fontFamily: 'monospace' }}>
-                                Réf : {selectedReq.code}
-                            </p>
-                            <p style={{ fontSize: '11px', margin: 0, color: '#555' }}>
-                                Date d'émission : {new Date().toLocaleDateString('fr-FR')}
-                            </p>
-                        </div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', fontSize: '11px', marginBottom: '16px' }}>
-                        <div>
-                            <p style={{ margin: '2px 0' }}><strong>Avance Décaissée :</strong> {selectedReq.montantAlloueFC.toLocaleString()} FC</p>
-                            <p style={{ margin: '2px 0' }}><strong>Total Justifié (Courses) :</strong> {totalDepenseFC.toLocaleString()} FC</p>
-                        </div>
-                        <div>
-                            <p style={{ margin: '2px 0' }}><strong>Reliquat / Reste à retourner :</strong> {soldeRestantFC.toLocaleString()} FC</p>
-                            <p style={{ margin: '2px 0' }}><strong>Visa Manager Projet :</strong> {selectedReq.managerProjetNom} ({selectedReq.dateVisaMP})</p>
-                        </div>
-                    </div>
-
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '24px' }}>
-                        <thead>
-                            <tr style={{ background: '#f2f2f2', textTransform: 'uppercase', textAlign: 'left' }}>
-                                <th style={{ border: '1px solid black', padding: '6px', width: '30px', textAlign: 'center' }}>N°</th>
-                                <th style={{ border: '1px solid black', padding: '6px', width: '80px' }}>Date</th>
-                                <th style={{ border: '1px solid black', padding: '6px', width: '160px' }}>Itinéraire</th>
-                                <th style={{ border: '1px solid black', padding: '6px' }}>Motif de la Mission / Déplacement</th>
-                                <th style={{ border: '1px solid black', padding: '6px', width: '100px', textAlign: 'right' }}>Montant (FC)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {selectedReq.mouvements.map((m) => (
-                                <tr key={m.id}>
-                                    <td style={{ border: '1px solid black', padding: '6px', textAlign: 'center' }}>{m.ordre}</td>
-                                    <td style={{ border: '1px solid black', padding: '6px' }}>{m.date}</td>
-                                    <td style={{ border: '1px solid black', padding: '6px', fontWeight: 'bold' }}>{m.itineraire}</td>
-                                    <td style={{ border: '1px solid black', padding: '6px' }}>{m.motif}</td>
-                                    <td style={{ border: '1px solid black', padding: '6px', textAlign: 'right', fontWeight: 'bold' }}>
-                                        {m.montantFC.toLocaleString()}
-                                    </td>
-                                </tr>
-                            ))}
-                            <tr>
-                                <td colSpan={4} style={{ border: '1px solid black', padding: '6px', textAlign: 'right', fontWeight: 'bold', textTransform: 'uppercase' }}>
-                                    Total Dépensé :
-                                </td>
-                                <td style={{ border: '1px solid black', padding: '6px', textAlign: 'right', fontWeight: 'bold', fontSize: '12px' }}>
-                                    {totalDepenseFC.toLocaleString()} FC
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px', textAlign: 'center', fontSize: '10px', marginTop: '30px' }}>
-                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '80px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                            <p style={{ fontWeight: 'bold', margin: 0 }}>L'Agent Terrain ({selectedReq.agentNom})</p>
-                            <p style={{ borderTop: '1px dashed black', paddingTop: '4px', margin: 0 }}>Date & Signature</p>
-                        </div>
-                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '80px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                            <p style={{ fontWeight: 'bold', margin: 0 }}>Le Manager de Projet ({selectedReq.managerProjetNom})</p>
-                            <p style={{ borderTop: '1px dashed black', paddingTop: '4px', margin: 0 }}>Visa Accordé</p>
-                        </div>
-                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '80px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                            <p style={{ fontWeight: 'bold', margin: 0 }}>Le Caissier (Vérification Décharge)</p>
-                            <p style={{ borderTop: '1px dashed black', paddingTop: '4px', margin: 0 }}>Apurement & Date</p>
-                        </div>
-                    </div>
+            {selectedPrintVoucher && (
+                <div id="bon-pasteur-petty-cash-sheet">
+                    <PettyCashVoucherPrint voucher={selectedPrintVoucher} />
                 </div>
             )}
         </AppLayout>

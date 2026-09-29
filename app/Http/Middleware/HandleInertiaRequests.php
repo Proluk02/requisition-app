@@ -7,26 +7,13 @@ use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
 {
-    /**
-     * The root template that is loaded on the first page visit.
-     *
-     * @var string
-     */
     protected $rootView = 'app';
 
-    /**
-     * Determine the current asset version.
-     */
     public function version(Request $request): ?string
     {
         return parent::version($request);
     }
 
-    /**
-     * Define the props that are shared by default.
-     *
-     * @return array<string, mixed>
-     */
     public function share(Request $request): array
     {
         $user = $request->user();
@@ -39,6 +26,28 @@ class HandleInertiaRequests extends Middleware
             ]);
         }
 
+        // CHARGEMENT EXCLUSIF DES NOTIFICATIONS NON LUES (DISPARAISSENT DÈS QU'ELLES SONT LUES)
+        $userNotifications = [];
+        if ($user) {
+            $userNotifications = $user->unreadNotifications()
+                ->latest()
+                ->limit(20)
+                ->get()
+                ->map(function ($n) {
+                    $payload = is_array($n->data) ? $n->data : (json_decode($n->data, true) ?: []);
+
+                    return [
+                        'id' => (string) $n->id,
+                        'titre' => $payload['titre'] ?? 'Notification Système',
+                        'message' => $payload['message'] ?? '',
+                        'date' => $n->created_at?->format('d/m/Y H:i') ?? '',
+                        'lu' => false,
+                        'urgent' => (bool) ($payload['urgent'] ?? false),
+                    ];
+                })
+                ->all();
+        }
+
         // Langue de session ou de cookie ou par défaut 'fr'
         $locale = $request->session()->get('locale', $request->cookie('locale', 'fr'));
         app()->setLocale($locale);
@@ -48,20 +57,7 @@ class HandleInertiaRequests extends Middleware
             'auth' => [
                 'user' => $user,
             ],
-            'notifications' => fn () => $user?->notifications()
-                ->latest()
-                ->limit(10)
-                ->get()
-                ->map(fn ($notification) => [
-                    'id' => $notification->id,
-                    'titre' => $notification->data['titre'] ?? 'Notification',
-                    'message' => $notification->data['message'] ?? '',
-                    'date' => $notification->created_at?->diffForHumans() ?? '',
-                    'lu' => $notification->read_at !== null,
-                    'urgent' => $notification->data['urgent'] ?? false,
-                ])
-                ->values()
-                ->all() ?? [],
+            'notifications' => $userNotifications,
             'locale' => $locale,
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),

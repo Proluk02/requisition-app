@@ -28,12 +28,18 @@ class Requisition extends Model
         'observation',
         'montant_total',
         'status',
+        'is_urgent',
+        'date_paiement',
+        'date_livraison',
     ];
 
     protected function casts(): array
     {
         return [
             'montant_total' => 'float',
+            'is_urgent' => 'boolean',
+            'date_paiement' => 'date',
+            'date_livraison' => 'date',
         ];
     }
 
@@ -50,5 +56,17 @@ class Requisition extends Model
     public function demandes(): HasMany
     {
         return $this->hasMany(Demande::class);
+    }
+
+    // Relation avec les signatures électroniques horodatées
+    public function signatures(): HasMany
+    {
+        return $this->hasMany(RequisitionSignature::class)->orderBy('signed_at', 'asc');
+    }
+
+    // Relation avec les vouchers de petite caisse pour justification transport
+    public function pettyCashVouchers(): HasMany
+    {
+        return $this->hasMany(PettyCashVoucher::class)->orderBy('created_at', 'asc');
     }
 }

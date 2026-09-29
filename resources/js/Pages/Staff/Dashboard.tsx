@@ -1,8 +1,37 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Head, Link, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
-import { RequisitionItem, StaffStats } from '@/types/staff';
+
+interface EtapeWorkflow {
+    nom: string;
+    statut: string;
+    validateurActuel: string;
+}
+
+interface RequisitionItem {
+    id: string;
+    code: string;
+    motif: string;
+    projet: string;
+    is_urgent?: boolean;
+    dateSoumission: string;
+    montant: string;
+    devise: string;
+    articlesCount: number;
+    etapeWorkflow: EtapeWorkflow;
+}
+
+interface StaffStats {
+    enCoursCount: number;
+    valideesPretesCount: number;
+    valideesPretesMontantUSD: number;
+    vouchersMoisCount: number;
+    vouchersMoisTotalUSD: number;
+    justificatifsADeposerCount: number;
+    activiteEnSouffrance: string;
+    dechargeRef: string;
+}
 
 interface StaffDashboardProps {
     stats?: StaffStats;
@@ -15,7 +44,9 @@ export default function StaffDashboard({ stats: initialStats, requisitions: init
 
     const [filtreEtat, setFiltreEtat] = useState<string>('all');
     const [requisitions] = useState<RequisitionItem[]>(initialReqs ?? []);
-    const stats = initialStats ?? {
+    
+    // Statistiques réelles envoyées par DashboardController
+    const stats: StaffStats = initialStats ?? {
         enCoursCount: 0,
         valideesPretesCount: 0,
         valideesPretesMontantUSD: 0,
@@ -26,24 +57,25 @@ export default function StaffDashboard({ stats: initialStats, requisitions: init
         dechargeRef: '#DCH-000',
     };
 
-    const filteredReqs = filtreEtat === 'all'
-        ? requisitions
-        : requisitions.filter(r => r.etapeWorkflow.statut === filtreEtat);
+    const filteredReqs = useMemo(() => {
+        if (filtreEtat === 'all') return requisitions;
+        return requisitions.filter(r => r.etapeWorkflow.statut === filtreEtat);
+    }, [requisitions, filtreEtat]);
 
     return (
         <AppLayout>
             <Head title="Espace Collaborateur - Mes Demandes & Activités" />
 
             {/* Breadcrumb + Titre principal */}
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-[#E2E8F0] pb-4">
                 <div>
                     <nav className="text-[11px] text-gray-500 font-medium mb-1 flex items-center gap-1">
                         <span>Espace Opérationnel</span> <span>&rsaquo;</span> <span>{user.project?.name || 'Projets Kolwezi'}</span>
                     </nav>
-                    <h1 className="text-2xl font-bold text-[#0B192C] tracking-tight">
+                    <h1 className="text-xl font-bold text-[#0B192C] tracking-tight">
                         Espace Collaborateur - Mes Demandes & Activités
                     </h1>
-                    <p className="text-xs text-gray-600 mt-1">
+                    <p className="text-xs text-gray-600 mt-0.5">
                         Suivi rigoureux des décaissements, engagements d'activités et apurements de fonds sur site.
                     </p>
                 </div>
@@ -52,12 +84,12 @@ export default function StaffDashboard({ stats: initialStats, requisitions: init
                 <div className="flex flex-col sm:flex-row gap-2">
                     <Link
                         href={route('requisitions.create')}
-                        className="bg-[#0B192C] text-white hover:bg-[#152842] px-3.5 py-2 rounded text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition"
+                        className="bg-[#04326D] hover:bg-[#06428f] text-white px-3.5 py-2 rounded text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition"
                     >
                         <svg className="w-4 h-4 text-[#F58F20]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
                         </svg>
-                        <span>Nouvelle Réquisition (Standard / Multi-articles)</span>
+                        <span>Nouvelle Réquisition</span>
                     </Link>
                     <Link
                         href={route('transport.index')}
@@ -66,12 +98,12 @@ export default function StaffDashboard({ stats: initialStats, requisitions: init
                         <svg className="w-4 h-4 text-[#04326D]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                         </svg>
-                        <span>Cahier des Mouvements Transport</span>
+                        <span>Transport & Petits Cash</span>
                     </Link>
                 </div>
             </div>
 
-            {/* BENTO GRID - 4 CARTES KPI STATS */}
+            {/* BENTO GRID - 4 CARTES KPI STATS RÉELLES DE MYSQL */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white border border-[#B2BED6] rounded p-4 flex flex-col justify-between shadow-sm">
                     <div className="flex items-center justify-between">
@@ -82,12 +114,10 @@ export default function StaffDashboard({ stats: initialStats, requisitions: init
                             </svg>
                         </div>
                     </div>
-                    <div className="my-3">
-                        <span className="text-2xl font-bold text-[#0B192C]">{stats.enCoursCount} réquisitions</span>
+                    <div className="my-2">
+                        <span className="text-2xl font-black text-[#0B192C]">{stats.enCoursCount} réquisition(s)</span>
                     </div>
-                    <p className="text-[11px] text-gray-500 flex items-center gap-1.5">
-                        En circuit de signatures hiérarchiques
-                    </p>
+                    <p className="text-[11px] text-gray-500">En circuit d'approbation</p>
                 </div>
 
                 <div className="bg-white border border-[#B2BED6] rounded p-4 flex flex-col justify-between shadow-sm">
@@ -99,14 +129,14 @@ export default function StaffDashboard({ stats: initialStats, requisitions: init
                             </svg>
                         </div>
                     </div>
-                    <div className="my-3">
-                        <span className="text-2xl font-bold text-[#0B192C]">{stats.valideesPretesCount} réquisition</span>
+                    <div className="my-2">
+                        <span className="text-2xl font-black text-[#0B192C]">{stats.valideesPretesCount} prête(s)</span>
                     </div>
                     <div className="flex items-center justify-between text-[11px]">
-                        <span className="bg-[#D1FAE5] text-[#065F46] font-bold px-1.5 py-0.5 rounded text-[10px]">
-                            ${stats.valideesPretesMontantUSD.toFixed(2)} USD à retirer
+                        <span className="bg-emerald-50 text-[#065F46] font-bold px-1.5 py-0.5 rounded text-[10px]">
+                            ${stats.valideesPretesMontantUSD.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} USD
                         </span>
-                        <span className="text-gray-500">Guichet Caisse</span>
+                        <span className="text-gray-400">Guichet Caisse</span>
                     </div>
                 </div>
 
@@ -119,11 +149,11 @@ export default function StaffDashboard({ stats: initialStats, requisitions: init
                             </svg>
                         </div>
                     </div>
-                    <div className="my-3">
-                        <span className="text-2xl font-bold text-[#0B192C]">{stats.vouchersMoisCount} ce mois</span>
+                    <div className="my-2">
+                        <span className="text-2xl font-black text-[#0B192C]">{stats.vouchersMoisCount} ce mois</span>
                     </div>
                     <p className="text-[11px] text-gray-500">
-                        Cumul: <span className="font-semibold text-gray-800">${stats.vouchersMoisTotalUSD} USD total</span>
+                        Plafond : <strong className="text-gray-700">&le; 20$ ou 30 000 FC</strong>
                     </p>
                 </div>
 
@@ -137,19 +167,16 @@ export default function StaffDashboard({ stats: initialStats, requisitions: init
                         </div>
                     </div>
                     <div className="my-2 flex items-baseline gap-2">
-                        <span className="text-2xl font-bold text-[#0B192C]">{stats.justificatifsADeposerCount} retour</span>
-                        <span className="bg-[#FEE2E2] text-[#DC2626] font-bold text-[10px] px-1.5 py-0.5 rounded">délai 48h</span>
+                        <span className="text-2xl font-black text-[#0B192C]">{stats.justificatifsADeposerCount} retour(s)</span>
+                        <span className="bg-red-100 text-red-700 font-bold text-[10px] px-1.5 py-0.5 rounded">délai 48h</span>
                     </div>
                     <p className="text-[11px] text-gray-600 truncate">
-                        Activité: {stats.activiteEnSouffrance}
-                    </p>
-                    <p className="text-[10px] text-gray-400">
-                        (Décharge {stats.dechargeRef})
+                        Décharge : {stats.dechargeRef}
                     </p>
                 </div>
             </div>
 
-            {/* TABLEAU HISTORIQUE */}
+            {/* TABLEAU HISTORIQUE DES RÉQUISITIONS */}
             <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-[#E2E8F0] flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white">
                     <div>
@@ -162,16 +189,16 @@ export default function StaffDashboard({ stats: initialStats, requisitions: init
                     </div>
 
                     <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500">Statut:</span>
+                        <span className="text-xs text-gray-500">Filtrer par étape :</span>
                         <select
                             value={filtreEtat}
                             onChange={(e) => setFiltreEtat(e.target.value)}
                             className="text-xs border border-[#B2BED6] rounded px-2.5 py-1 bg-white text-gray-700 focus:outline-none focus:border-[#04326D]"
                         >
-                            <option value="all">Tous les états</option>
-                            <option value="caisse_pret">Caisse (Prêt)</option>
+                            <option value="all">Toutes les étapes</option>
+                            <option value="chef_projet">Visa Manager Projet</option>
                             <option value="finance_budget">Finance & Budget</option>
-                            <option value="chef_projet">Chef Projet</option>
+                            <option value="caisse_pret">Caisse (Prêt)</option>
                         </select>
                     </div>
                 </div>
@@ -181,65 +208,60 @@ export default function StaffDashboard({ stats: initialStats, requisitions: init
                         <thead>
                             <tr className="bg-[#0B192C] text-white uppercase text-[10px] font-bold tracking-wider">
                                 <th className="py-3 px-4">Code Réquisition</th>
-                                <th className="py-3 px-4">Motif / Activité</th>
+                                <th className="py-3 px-4">Motif / Contexte</th>
                                 <th className="py-3 px-4">Date Soumission</th>
-                                <th className="py-3 px-4">Montant Estimé</th>
-                                <th className="py-3 px-4 text-center">Multi-articles</th>
+                                <th className="py-3 px-4">Montant</th>
+                                <th className="py-3 px-4 text-center">Demandes</th>
                                 <th className="py-3 px-4">Étape Actuelle (Workflow)</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
-                            {filteredReqs.map((req) => (
-                                <tr key={req.id} className="hover:bg-[#F9F9FF] transition">
-                                    <td className="py-4 px-4 font-bold text-[#04326D] whitespace-nowrap">
-                                        {req.code}
-                                    </td>
-                                    <td className="py-4 px-4 max-w-xs">
-                                        <p className="font-bold text-[#0B192C] leading-snug">{req.motif}</p>
-                                        <p className="text-[10px] text-gray-500 mt-0.5 leading-tight">{req.projet}</p>
-                                    </td>
-                                    <td className="py-4 px-4 whitespace-nowrap text-gray-600">
-                                        {req.dateSoumission}
-                                    </td>
-                                    <td className="py-4 px-4 font-bold text-[#0B192C] whitespace-nowrap">
-                                        {req.montant}
-                                    </td>
-                                    <td className="py-4 px-4 text-center whitespace-nowrap">
-                                        <span className="bg-[#E7EEFF] text-[#04326D] font-bold px-2 py-0.5 rounded text-[10px]">
-                                            {req.articlesCount} {req.articlesCount > 1 ? 'articles' : 'article'}
-                                        </span>
-                                    </td>
-                                    <td className="py-4 px-4 whitespace-nowrap">
-                                        {req.etapeWorkflow.statut === 'caisse_pret' && (
-                                            <div>
-                                                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#10B981]">
-                                                    <span className="w-2 h-2 rounded-full bg-[#10B981]"></span>
-                                                    {req.etapeWorkflow.nom}
-                                                </span>
-                                                <p className="text-[10px] text-gray-400 mt-0.5">{req.etapeWorkflow.validateurActuel}</p>
-                                            </div>
-                                        )}
-                                        {req.etapeWorkflow.statut === 'finance_budget' && (
-                                            <div>
-                                                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#F58F20]">
-                                                    <span className="w-2 h-2 rounded-full bg-[#F58F20]"></span>
-                                                    {req.etapeWorkflow.nom}
-                                                </span>
-                                                <p className="text-[10px] text-gray-400 mt-0.5">{req.etapeWorkflow.validateurActuel}</p>
-                                            </div>
-                                        )}
-                                        {req.etapeWorkflow.statut === 'chef_projet' && (
-                                            <div>
-                                                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#3B82F6]">
-                                                    <span className="w-2 h-2 rounded-full bg-[#3B82F6]"></span>
-                                                    {req.etapeWorkflow.nom}
-                                                </span>
-                                                <p className="text-[10px] text-gray-400 mt-0.5">{req.etapeWorkflow.validateurActuel}</p>
-                                            </div>
-                                        )}
+                            {filteredReqs.length === 0 ? (
+                                <tr>
+                                    <td colSpan={6} className="py-8 text-center text-gray-400 italic">
+                                        Aucune réquisition enregistrée pour le moment.
                                     </td>
                                 </tr>
-                            ))}
+                            ) : (
+                                filteredReqs.map((req) => (
+                                    <tr key={req.id} className="hover:bg-[#F9F9FF] transition">
+                                        <td className="py-4 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
+                                            {req.code}
+                                            {req.is_urgent && (
+                                                <span className="ml-2 bg-red-100 text-red-700 text-[9px] px-1.5 py-0.5 rounded font-black uppercase">
+                                                    URGENT
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="py-4 px-4 max-w-xs">
+                                            <p className="font-bold text-[#0B192C] leading-snug">{req.motif}</p>
+                                            <p className="text-[10px] text-gray-500 mt-0.5">{req.projet}</p>
+                                        </td>
+                                        <td className="py-4 px-4 whitespace-nowrap text-gray-600">
+                                            {req.dateSoumission}
+                                        </td>
+                                        <td className="py-4 px-4 font-bold text-[#0B192C] whitespace-nowrap font-mono">
+                                            {req.montant}
+                                        </td>
+                                        <td className="py-4 px-4 text-center whitespace-nowrap">
+                                            <span className="bg-blue-50 text-[#04326D] font-bold px-2 py-0.5 rounded text-[10px]">
+                                                {req.articlesCount} ligne(s)
+                                            </span>
+                                        </td>
+                                        <td className="py-4 px-4 whitespace-nowrap">
+                                            <div>
+                                                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#04326D]">
+                                                    <span className="w-2 h-2 rounded-full bg-[#04326D]"></span>
+                                                    {req.etapeWorkflow.nom}
+                                                </span>
+                                                <p className="text-[10px] text-gray-400 mt-0.5">
+                                                    {req.etapeWorkflow.validateurActuel}
+                                                </p>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
                         </tbody>
                     </table>
                 </div>

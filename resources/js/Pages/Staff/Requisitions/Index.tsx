@@ -3,6 +3,7 @@ import { Head, Link, router } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { mockRequisitionsStaff, RequisitionSuivi, WorkflowStep, DetailArticle } from '@/types/requisitionsList';
 import { numberToWordsFR } from '@/lib/numberToWords';
+import OfficialPrintSheet from '@/Components/OfficialPrintSheet';
 
 interface RequisitionIndexProps {
     requisitions?: RequisitionSuivi[];
@@ -623,86 +624,11 @@ export default function RequisitionsIndex({ requisitions: initialRequisitions }:
                     </div>
                 </div>
             )}
-
-            {/* ZONE D'IMPRESSION OFFICIELLE */}
-            {printReq && (
-                <div id="bon-pasteur-print-zone">
-                    <div style={{ borderBottom: '2px solid black', paddingBottom: '12px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between' }}>
-                        <div>
-                            <h1 style={{ fontSize: '18px', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>
-                                ASBL BON PASTEUR KOLWEZI
-                            </h1>
-                            <p style={{ fontSize: '11px', margin: '3px 0 0 0' }}>
-                                Service des Finances & Budget • Projet : {printReq.projet}
-                            </p>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                            <h2 style={{ fontSize: '15px', fontWeight: 'bold', margin: 0 }}>
-                                BON DE RÉQUISITION
-                            </h2>
-                            <p style={{ fontSize: '13px', fontWeight: 'bold', margin: '3px 0 0 0', fontFamily: 'monospace' }}>
-                                N° {printReq.numero}
-                            </p>
-                        </div>
+                {printReq && (
+                    <div id="bon-pasteur-print-zone">
+                        <OfficialPrintSheet requisition={printReq as any} />
                     </div>
-
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '20px' }}>
-                        <thead>
-                            <tr style={{ background: '#f0f0f0', textTransform: 'uppercase', textAlign: 'left' }}>
-                                <th style={{ border: '1px solid black', padding: '6px', textAlign: 'center' }}>#</th>
-                                <th style={{ border: '1px solid black', padding: '6px' }}>Désignation</th>
-                                <th style={{ border: '1px solid black', padding: '6px', textAlign: 'center' }}>Code</th>
-                                <th style={{ border: '1px solid black', padding: '6px', textAlign: 'center' }}>{printReq.nature === 'Achat' ? 'Qté' : 'Durée'}</th>
-                                <th style={{ border: '1px solid black', padding: '6px', textAlign: 'right' }}>Prix U.</th>
-                                <th style={{ border: '1px solid black', padding: '6px', textAlign: 'right' }}>Total ({printReq.devise})</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {printReq.articles.map((art, idx) => (
-                                <tr key={art.id}>
-                                    <td style={{ border: '1px solid black', padding: '6px', textAlign: 'center' }}>{idx + 1}</td>
-                                    <td style={{ border: '1px solid black', padding: '6px' }}>{art.activite}</td>
-                                    <td style={{ border: '1px solid black', padding: '6px', textAlign: 'center', fontFamily: 'monospace' }}>{art.codeBudget}</td>
-                                    <td style={{ border: '1px solid black', padding: '6px', textAlign: 'center' }}>{art.quantiteOuDuree} {art.unite}</td>
-                                    <td style={{ border: '1px solid black', padding: '6px', textAlign: 'right' }}>{art.prixUnitaire.toLocaleString()}</td>
-                                    <td style={{ border: '1px solid black', padding: '6px', textAlign: 'right', fontWeight: 'bold' }}>{art.total.toLocaleString()}</td>
-                                </tr>
-                            ))}
-                            <tr>
-                                <td colSpan={5} style={{ border: '1px solid black', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>
-                                    TOTAL GÉNÉRAL :
-                                </td>
-                                <td style={{ border: '1px solid black', padding: '8px', textAlign: 'right', fontWeight: 'bold', fontSize: '13px' }}>
-                                    {printReq.montantTotal.toLocaleString()} {printReq.devise}
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-
-                    <p style={{ fontSize: '11px', marginBottom: '35px' }}>
-                        <strong>Montant certifié :</strong> <em>{printReq.montantLettres}</em>
-                    </p>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', textAlign: 'center', fontSize: '10px' }}>
-                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '80px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                            <p style={{ fontWeight: 'bold', margin: 0 }}>1. L'Initiateur</p>
-                            <p style={{ borderTop: '1px dashed black', paddingTop: '4px', margin: 0 }}>Signature</p>
-                        </div>
-                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '80px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                            <p style={{ fontWeight: 'bold', margin: 0 }}>2. Manager Projet</p>
-                            <p style={{ borderTop: '1px dashed black', paddingTop: '4px', margin: 0 }}>Visa & Date</p>
-                        </div>
-                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '80px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                            <p style={{ fontWeight: 'bold', margin: 0 }}>3. Finances</p>
-                            <p style={{ borderTop: '1px dashed black', paddingTop: '4px', margin: 0 }}>Visa & Imputation</p>
-                        </div>
-                        <div style={{ border: '1px solid black', padding: '8px', minHeight: '80px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                            <p style={{ fontWeight: 'bold', margin: 0 }}>4. Direction</p>
-                            <p style={{ borderTop: '1px dashed black', paddingTop: '4px', margin: 0 }}>Bon à Payer</p>
-                        </div>
-                    </div>
-                </div>
-            )}
+                )}
         </AppLayout>
     );
 }

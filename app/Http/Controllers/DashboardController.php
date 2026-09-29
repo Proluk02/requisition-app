@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Demande;
 use App\Models\Project;
 use App\Models\Requisition;
+use App\Models\RequisitionSignature;
 use App\Models\Site;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -16,6 +17,7 @@ class DashboardController extends Controller
     {
         $user = $request->user();
 
+        // 1. DASHBOARD ADMINISTRATEUR
         if ($user->hasRole('admin')) {
             $usersCount = User::count();
             $projectsCount = Project::count();
@@ -33,14 +35,24 @@ class DashboardController extends Controller
             ]);
         }
 
+        // 2. DASHBOARD MANAGER DE PROJET
         if ($user->hasRole('project_manager')) {
-            $requisitionsQuery = Requisition::with('user', 'demandes.justificatifs')
+            $requisitionsQuery = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
                 ->orderByDesc('created_at');
 
-            if ($user->project_id === null) {
+            $projectName = $user->project?->name;
+
+            if ($user->project_id === null && ! $projectName) {
                 $requisitionsQuery->whereRaw('1 = 0');
             } else {
-                $requisitionsQuery->where('project_id', $user->project_id);
+                $requisitionsQuery->where(function ($query) use ($user, $projectName) {
+                    if ($user->project_id !== null) {
+                        $query->where('project_id', $user->project_id);
+                    }
+                    if ($projectName) {
+                        $query->orWhere('projet', $projectName);
+                    }
+                });
             }
 
             $requisitions = $requisitionsQuery->get();
@@ -50,16 +62,18 @@ class DashboardController extends Controller
             ]);
         }
 
+        // 3. DASHBOARD FINANCE
         if ($user->hasRole('finance')) {
             return $this->renderFinanceDashboard($user);
         }
 
+        // 4. DASHBOARD MANAGER ADMINISTRATION
         if ($user->hasRole('admin_manager')) {
             return $this->renderAdminManagerDashboard();
         }
 
         if ($user->hasRole('coordinator') || $user->hasRole('beneficiary')) {
-            $requisitions = Requisition::with('demandes.justificatifs')
+            $requisitions = Requisition::with(['demandes.justificatifs', 'signatures.user'])
                 ->where('user_id', $user->id)
                 ->orderByDesc('created_at')
                 ->get();
@@ -89,7 +103,7 @@ class DashboardController extends Controller
 
     private function renderAdminManagerDashboard()
     {
-        $requisitions = Requisition::with('user', 'demandes.justificatifs')
+        $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user'])
             ->where('status', 'controle_finance')
             ->orderByDesc('created_at')
             ->get();
@@ -106,11 +120,12 @@ class DashboardController extends Controller
                     'devise' => $requisition->devise,
                     'montantTotal' => (float) $requisition->montant_total,
                     'observation' => $requisition->observation,
+                    'is_urgent' => (bool) $requisition->is_urgent,
                     'statusCode' => $requisition->status,
                     'statusLabel' => 'Contrôle Administratif',
                     'canDecide' => true,
                     'dateSoumission' => $requisition->created_at?->format('d/m/Y') ?? '',
-                    'lignes' => $requisition->demandes->map(function (Demande $demande) use ($requisition) {
+                    'lignes' => $requisition->demandes->map(function (Demande $demande) {
                         return [
                             'id' => (string) $demande->id,
                             'activite' => $demande->activite,
@@ -139,16 +154,20 @@ class DashboardController extends Controller
         ]);
     }
 
-    
     private function renderFinanceDashboard(User $user)
     {
-        $requisitions = Requisition::with('user', 'demandes.justificatifs')
+        $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
             ->orderByDesc('created_at')
             ->get();
+
+        $projects = Project::orderBy('name')->get(['id', 'name']);
+        $users = User::orderBy('name')->get(['id', 'name', 'email']);
 
         return Inertia::render('Finance/Dashboard', [
             'projectName' => null,
             'scopeLabel' => 'Tous les projets',
+            'projects' => $projects,
+            'usersList' => $users,
             'requisitions' => $requisitions->map(function (Requisition $requisition) {
                 $financeRejected = $requisition->status === 'draft'
                     && str_contains($requisition->observation ?? '', 'Motif rejet Finance:');
@@ -157,12 +176,16 @@ class DashboardController extends Controller
                     'id' => (string) $requisition->id,
                     'numero' => $requisition->numero_requisition,
                     'projet' => $requisition->projet,
+                    'project_id' => $requisition->project_id,
+                    'user_id' => $requisition->user_id,
                     'initiateurNom' => $requisition->user?->name ?? 'Inconnu',
                     'initiateurRole' => $requisition->user?->role ?? 'Staff',
                     'nature' => strtolower($requisition->nature_requisition) === 'service' ? 'Service' : 'Achat',
                     'devise' => $requisition->devise,
                     'montantTotal' => (float) $requisition->montant_total,
                     'observation' => $requisition->observation,
+                    'caisseAttribuee' => $requisition->caisse_decaissement ?? 'Caisse principale',
+                    'is_urgent' => (bool) $requisition->is_urgent,
                     'statusCode' => $requisition->status,
                     'statusLabel' => $financeRejected
                         ? 'Renvoyée en correction'
@@ -170,70 +193,6 @@ class DashboardController extends Controller
                     'canDecide' => $requisition->status === 'visa_mp',
                     'financeRejected' => $financeRejected,
                     'dateSoumission' => $requisition->created_at?->format('d/m/Y') ?? '',
-                    'lignes' => $requisition->demandes->map(function (Demande $demande) use ($requisition) {
-                        return [
-                            'id' => (string) $demande->id,
-                            'activite' => $demande->activite,
-                            'codeBudget' => $demande->code_all_budget,
-                            'codeAllocation' => $demande->code_allocation,
-                            'nature' => strtolower($demande->nature ?? 'achat') === 'service' ? 'Service' : 'Achat',
-                            'quantiteOuDuree' => (float) ($demande->quantite ?: $demande->duree ?: 0),
-                            'unite' => $demande->unite ?: (($demande->duree ?? 0) > 0 ? 'Jour(s)' : 'Unité'),
-                            'prixUnitaire' => (float) $demande->frais_unitaire,
-                            'total' => (float) $demande->total_ligne,
-                            'justificatifs' => $demande->justificatifs->map(function ($justificatif) {
-                                return [
-                                    'id' => (string) $justificatif->id,
-                                    'nom' => $justificatif->original_name ?? $justificatif->description,
-                                    'description' => $justificatif->description,
-                                    'montant' => (float) ($justificatif->montant ?? 0),
-                                    'fileUrl' => $justificatif->file_path
-                                        ? route('requisitions.justificatif.show', ['justificatif' => $justificatif->id])
-                                        : null,
-                                ];
-                            })->values()->all(),
-                        ];
-                    })->values()->all(),
-                ];
-            })->values()->all(),
-        ]);
-    } 
-
-    /*private function renderFinanceDashboard(User $user)
-    {
-        $requisitions = Requisition::with('user', 'demandes.justificatifs')
-            ->orderByDesc('updated_at')
-            ->get();
-
-        return Inertia::render('Finance/Dashboard', [
-            'projectName' => null,
-            'scopeLabel' => 'Tous les projets',
-            'requisitions' => $requisitions->map(function (Requisition $requisition) {
-                // Vérifie si la réquisition a un historique de rejet Finance dans l'observation
-                $hasFinanceRejection = str_contains($requisition->observation ?? '', 'Motif rejet Finance:');
-                
-                // Le statut est à visa_pm (ou visa_mp selon votre convention de nommage exacte)
-                $isSubmittedByPm = in_array($requisition->status, ['visa_mp'], true);
-
-                return [
-                    'id' => (string) $requisition->id,
-                    'numero' => $requisition->numero_requisition,
-                    'projet' => $requisition->projet,
-                    'initiateurNom' => $requisition->user?->name ?? 'Inconnu',
-                    'initiateurRole' => $requisition->user?->role ?? 'Staff',
-                    'nature' => strtolower($requisition->nature_requisition) === 'service' ? 'Service' : 'Achat',
-                    'devise' => $requisition->devise,
-                    'montantTotal' => (float) $requisition->montant_total,
-                    'observation' => $requisition->observation,
-                    'statusCode' => $requisition->status,
-                    'statusLabel' => ($isSubmittedByPm && $hasFinanceRejection)
-                        ? 'Resoumise par le PM (Après correction)'
-                        : $this->financeStatusLabel($requisition->status),
-                    
-                    // Le Finance Manager peut valider/rejeter dès que le statut est visa_pm (ou visa_mp)
-                    'canDecide' => $isSubmittedByPm,
-                    'financeRejected' => $hasFinanceRejection,
-                    'dateSoumission' => $requisition->updated_at?->format('d/m/Y H:i') ?? '',
                     'lignes' => $requisition->demandes->map(function (Demande $demande) {
                         return [
                             'id' => (string) $demande->id,
@@ -261,13 +220,13 @@ class DashboardController extends Controller
                 ];
             })->values()->all(),
         ]);
-    }*/
-
+    }
 
     private function financeStatusLabel(string $status): string
     {
         return match ($status) {
             'draft' => 'Brouillon',
+            'urgent_direction' => 'Dérogation Urgente (Direction)',
             'visa_mp' => 'À valider par Finance',
             'controle_finance' => 'Validée par Finance',
             'rejetee_finance' => 'Rejetée par Finance',
@@ -320,6 +279,7 @@ class DashboardController extends Controller
                 'code' => $requisition->numero_requisition,
                 'motif' => $requisition->observation ?: 'Aucun motif détaillé',
                 'projet' => $requisition->projet,
+                'is_urgent' => (bool) $requisition->is_urgent,
                 'dateSoumission' => $requisition->created_at?->format('d M Y') ?? '',
                 'montant' => $this->formatAmount($requisition->montant_total, $requisition->devise),
                 'devise' => $requisition->devise,
@@ -361,18 +321,18 @@ class DashboardController extends Controller
                     'projet' => $requisition->projet,
                     'initiateurNom' => $requisition->user?->name ?? 'Inconnu',
                     'initiateurRole' => $requisition->user?->role ?? 'Staff',
-                    'nature' => $requisition->nature_requisition === 'service' ? 'Service' : 'Achat',
+                    'nature' => strtolower($requisition->nature_requisition) === 'service' ? 'Service' : 'Achat',
                     'devise' => $requisition->devise,
                     'montantTotal' => (float) $requisition->montant_total,
                     'caisseSouhaitee' => $requisition->caisse_decaissement ?? 'Caisse principale',
                     'caisseAttribuee' => $requisition->status === 'draft' ? null : $requisition->caisse_decaissement,
                     'observation' => $requisition->observation ?: 'Aucune observation',
+                    'is_urgent' => (bool) $requisition->is_urgent,
                     'statut' => $isReturnedForCorrection ? 'a_corriger' : $this->mapProjectManagerStatus($requisition->status),
                     'statusCode' => $requisition->status,
                     'statusLabel' => $isReturnedForCorrection
                         ? ($hasCorrection ? 'Correction apportée, en attente de visa MP' : 'Renvoyée pour correction')
                         : $this->projectManagerStatusLabel($requisition->status),
-                    #'canDecide' => $requisition->status === 'draft' && (! $isFinanceReturned || $hasCorrection),
                     'canDecide' => $requisition->status === 'draft' && (! $isReturnedForCorrection || $hasCorrection),
                     'canEdit' => $canEdit,
                     'financeReturned' => $isReturnedForCorrection,
@@ -385,6 +345,7 @@ class DashboardController extends Controller
                             'id' => (string) $demande->id,
                             'activite' => $demande->activite,
                             'codeAllBudget' => $demande->code_all_budget,
+                            'code_allocation' => $demande->code_allocation,
                             'nature' => $demande->nature ?? '',
                             'quantiteOuDuree' => (float) ($demande->quantite ?: $demande->duree ?: 0),
                             'unite' => $demande->unite ?: (($demande->duree ?? 0) > 0 ? 'Jour(s)' : 'Unité'),
@@ -413,9 +374,10 @@ class DashboardController extends Controller
     {
         return match ($status) {
             'draft' => ['key' => 'chef_projet', 'label' => 'Brouillon', 'validator' => 'Initiateur'],
+            'urgent_direction' => ['key' => 'urgent', 'label' => 'Dérogation Urgente', 'validator' => 'Directrice Générale'],
             'visa_mp' => ['key' => 'chef_projet', 'label' => 'Visa Chef Projet', 'validator' => 'Chef de Projet'],
             'controle_finance' => ['key' => 'finance_budget', 'label' => 'Finance & Budget', 'validator' => 'Manager Finances'],
-                'rejetee_finance' => ['key' => 'finance_budget', 'label' => 'Rejetée par Finance', 'validator' => 'Manager Finances'],
+            'rejetee_finance' => ['key' => 'finance_budget', 'label' => 'Rejetée par Finance', 'validator' => 'Manager Finances'],
             'visa_admin' => ['key' => 'finance_budget', 'label' => 'Administration', 'validator' => 'Admin'],
             'approbation_direction' => ['key' => 'finance_budget', 'label' => 'Approbation Direction', 'validator' => 'Direction'],
             'decaissement_caisse' => ['key' => 'caisse_pret', 'label' => 'Caisse (Prêt)', 'validator' => 'Caisse'],
@@ -428,10 +390,7 @@ class DashboardController extends Controller
     {
         return match ($status) {
             'draft' => 'en_attente_mp',
-            'rejete' => 'rejete_mp',
-            'rejetee' => 'rejete_mp',
-            'rejected' => 'rejete_mp',
-            'rejetee_finance' => 'rejete_mp',
+            'rejete', 'rejetee', 'rejected', 'rejetee_finance' => 'rejete_mp',
             'visa_mp', 'controle_finance', 'visa_admin', 'approbation_direction', 'decaissement_caisse', 'cloture' => 'valide_mp',
             default => 'autre',
         };
@@ -440,7 +399,8 @@ class DashboardController extends Controller
     private function projectManagerStatusLabel(string $status): string
     {
         return match ($status) {
-            'draft' => 'Brouillon',
+            'draft' => 'En attente Visa MP',
+            'urgent_direction' => 'Dérogation Urgente (Direction)',
             'visa_mp' => 'Visa Manager Projet',
             'controle_finance' => 'Contrôle Finances',
             'visa_admin' => 'Visa Administration',

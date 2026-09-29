@@ -1,5 +1,5 @@
 import { PropsWithChildren, useState, useRef, useEffect, ReactNode } from 'react';
-import { Link, usePage } from '@inertiajs/react';
+import { Link, usePage, router } from '@inertiajs/react';
 import { PageProps, User } from '@/types';
 import { useTranslation } from '@/lib/i18n';
 
@@ -51,12 +51,39 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     const [showHelpModal, setShowHelpModal] = useState(false);
 
+    // MODALE "VOIR" NOTIFICATION
+    const [selectedNotif, setSelectedNotif] = useState<NotificationItem | null>(null);
+
     const notifRef = useRef<HTMLDivElement>(null);
     const profileRef = useRef<HTMLDivElement>(null);
 
-    const notifications = sharedNotifications ?? [];
+    // Liste locale réactive : ne conserve que les notifications NON LUES
+    const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
-    const unreadCount = notifications.filter((n) => !n.lu).length;
+    useEffect(() => {
+        setNotifications((sharedNotifications ?? []).filter(n => !n.lu));
+    }, [sharedNotifications]);
+
+    const unreadCount = notifications.length;
+
+    // 1. MARQUER TOUT COMME LU -> LA BOÎTE DEVIENT TOTALEMENT VIDE IMMÉDIATEMENT
+    const handleMarkAllAsRead = () => {
+        setNotifications([]); // Boîte vidée instantanément
+        router.post(route('notifications.mark-all-read'), {}, {
+            preserveScroll: true,
+        });
+    };
+
+    // 2. VOIR UNE NOTIFICATION -> AFFICHE LE DÉTAIL ET LA RETIRE DU TIROIR
+    const handleViewNotification = (notif: NotificationItem) => {
+        setSelectedNotif(notif);
+        // La retirer immédiatement du tiroir
+        setNotifications(prev => prev.filter(n => n.id !== notif.id));
+        // L'enregistrer comme lue en base de données
+        router.post(`/notifications/${notif.id}/mark-read`, {}, {
+            preserveScroll: true,
+        });
+    };
 
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
@@ -121,7 +148,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                         <div className="p-4 shrink-0">
                             <div className="bg-[#04326D] p-3 rounded border border-white/10 shadow-inner">
                                 <span className="text-[9px] uppercase tracking-wider text-[#B2BED6] font-bold block">
-                                    {__('Projet Affecté')}
+                                    {__('Projet')}
                                 </span>
                                 <span className="text-xs font-bold text-white block mt-0.5 truncate" title={projetAffecte}>
                                     {projetAffecte}
@@ -246,6 +273,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </div>
                         )}
 
+                        {/* Finance */}
                         {isFinance && (
                             <div className="space-y-1">
                                 <Link
@@ -257,9 +285,9 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                     }`}
                                 >
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3v18h18M7 14l4-4 4 4 6-7" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                                     </svg>
-                                    <span>{__('Validation Finance')}</span>
+                                    <span>Contrôle Budgétaire & Visa</span>
                                 </Link>
                             </div>
                         )}
@@ -385,7 +413,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </svg>
                         </button>
 
-                        {/* Notifications */}
+                        {/* CENTRE DE NOTIFICATIONS AVEC DISPARITION DES NOTIFICATIONS LUES */}
                         <div className="relative" ref={notifRef}>
                             <button
                                 type="button"
@@ -406,25 +434,59 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 <div className="absolute right-0 mt-2 w-80 bg-white border border-[#B2BED6] rounded shadow-2xl z-50 text-xs overflow-hidden">
                                     <div className="p-3 bg-[#0B192C] text-white flex items-center justify-between">
                                         <span className="font-bold">{__('Notifications')} ({unreadCount})</span>
+                                        {unreadCount > 0 && (
+                                            <button
+                                                type="button"
+                                                onClick={handleMarkAllAsRead}
+                                                className="text-[10px] text-[#F58F20] hover:underline"
+                                            >
+                                                Tout marquer comme lu
+                                            </button>
+                                        )}
                                     </div>
+
+                                    {/* LISTE OU ÉTAT TOTALEMENT VIDE */}
                                     <div className="divide-y divide-gray-100 max-h-72 overflow-y-auto">
-                                        {notifications.map((n) => (
-                                            <div key={n.id} className="p-3 hover:bg-gray-50 transition">
-                                                <div className="flex items-center justify-between mb-1">
-                                                    <span className={`font-bold ${n.urgent ? 'text-[#DC2626]' : 'text-[#04326D]'}`}>
-                                                        {n.titre}
-                                                    </span>
-                                                    <span className="text-[10px] text-gray-400">{n.date}</span>
-                                                </div>
-                                                <p className="text-gray-600 text-[11px] leading-snug">{n.message}</p>
+                                        {notifications.length === 0 ? (
+                                            <div className="p-6 text-center text-gray-400">
+                                                <svg className="w-8 h-8 mx-auto text-gray-300 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                                                </svg>
+                                                <p className="text-[11px]">Aucune notification pour le moment.</p>
                                             </div>
-                                        ))}
+                                        ) : (
+                                            notifications.map((n) => (
+                                                <div
+                                                    key={n.id}
+                                                    className="p-3 hover:bg-gray-50 transition bg-blue-50/30"
+                                                >
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <span className={`font-bold ${n.urgent ? 'text-[#DC2626]' : 'text-[#04326D]'}`}>
+                                                            {n.titre}
+                                                        </span>
+                                                        <span className="text-[10px] text-gray-400">{n.date}</span>
+                                                    </div>
+                                                    <p className="text-gray-600 text-[11px] leading-snug">{n.message}</p>
+                                                    
+                                                    {/* BOUTON "VOIR" QUI FAIT DISPARAÎTRE LA NOTIFICATION APRÈS LECTURE */}
+                                                    <div className="mt-2 flex justify-end">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleViewNotification(n)}
+                                                            className="text-[10px] font-bold text-[#04326D] hover:underline bg-white border border-[#B2BED6] px-2 py-0.5 rounded shadow-xs"
+                                                        >
+                                                            Voir & marquer lu &rarr;
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        )}
                                     </div>
                                 </div>
                             )}
                         </div>
 
-                        {/* Profil avec Avatar ou Initiales */}
+                        {/* Profil */}
                         <div className="relative" ref={profileRef}>
                             <button
                                 onClick={() => setShowProfileMenu(!showProfileMenu)}
@@ -482,6 +544,41 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                     {children}
                 </main>
             </div>
+
+            {/* MODALE DE CONSULTATION DU DÉTAIL D'UNE NOTIFICATION (VIEW) */}
+            {selectedNotif && (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4">
+                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-sm w-full p-5 space-y-3">
+                        <div className="flex items-center justify-between border-b pb-2">
+                            <h3 className={`text-xs font-bold uppercase ${selectedNotif.urgent ? 'text-red-700' : 'text-[#04326D]'}`}>
+                                {selectedNotif.titre}
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedNotif(null)}
+                                className="text-gray-400 hover:text-gray-600 text-lg font-bold leading-none"
+                            >
+                                &times;
+                            </button>
+                        </div>
+                        <p className="text-xs text-gray-700 leading-relaxed">
+                            {selectedNotif.message}
+                        </p>
+                        <p className="text-[10px] text-gray-400">
+                            Reçue le : {selectedNotif.date}
+                        </p>
+                        <div className="flex justify-end pt-2 border-t">
+                            <button
+                                type="button"
+                                onClick={() => setSelectedNotif(null)}
+                                className="px-3 py-1 bg-[#04326D] text-white text-xs font-bold rounded hover:bg-[#06428f]"
+                            >
+                                Fermer
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Modale Procédures */}
             {showHelpModal && (
