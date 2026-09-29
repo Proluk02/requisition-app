@@ -84,6 +84,17 @@ class DashboardController extends Controller
             ]);
         }
 
+        if ($user->hasRole('director')) {
+            $requisitionsAValider = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
+                ->whereIn('status', ['visa_admin', 'urgent_direction'])
+                ->orderByDesc('created_at')
+                ->get();
+
+            return Inertia::render('Director/Dashboard', [
+                'requisitions' => $this->buildProjectManagerRequisitionList($requisitionsAValider, $user->id),
+            ]);
+        }
+
         return Inertia::render('Dashboard');
     }
 

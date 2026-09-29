@@ -602,9 +602,6 @@ class RequisitionController extends Controller
         ]);
     }
 
-    /**
-     * Envoie une notification réelle en base de données à tous les membres d'un rôle.
-     */
     protected function notifierRole(string $roleCible, ?string $projectId, string $titre, string $message, bool $urgent = false): void
     {
         $query = User::role($roleCible);
@@ -618,7 +615,6 @@ class RequisitionController extends Controller
 
         $users = $query->get();
 
-        // Secours si aucun MP n'est lié au projet : alerter tous les MP pour éviter toute perte
         if ($users->isEmpty() && $roleCible === 'project_manager') {
             $users = User::role('project_manager')->get();
         }
@@ -628,9 +624,172 @@ class RequisitionController extends Controller
         }
     }
 
-    /**
-     * Insère une notification réelle directement dans la table MySQL `notifications`.
-     */
+
+    public function adminDecision(Request $request, Requisition $requisition)
+    {
+        $user = $request->user();
+
+        abort_unless($user?->hasRole('admin_manager'), 403, 'Action réservée au Manager de l\'Administration.');
+        abort_unless($requisition->status === 'controle_finance', 403, 'Cette réquisition n’est pas en attente de visa administratif.');
+
+        $validated = $request->validate([
+            'decision' => ['required', 'in:approve,reject'],
+            'password' => ['required_if:decision,approve', 'nullable', 'string'],
+            'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
+        ]);
+
+        if ($validated['decision'] === 'approve') {
+            if (! Hash::check($validated['password'], $user->password)) {
+                return Redirect::back()->withErrors([
+                    'password' => 'Signature refusée : Le mot de passe administratif est incorrect.',
+                ]);
+            }
+        }
+
+        DB::transaction(function () use ($validated, $requisition, $user) {
+            $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
+
+            if ($validated['decision'] === 'approve') {
+                $lockedRequisition->update(['status' => 'visa_admin']);
+
+                $this->enregistrerSignature(
+                    $lockedRequisition,
+                    $user,
+                    'admin_manager',
+                    'approved',
+                    'Visa de contrôle administratif accordé.'
+                );
+
+                $this->notifierUtilisateur(
+                    userId: $user->id,
+                    titre: 'Visa Administratif accordé',
+                    message: "Vous avez visé administrativement la réquisition {$lockedRequisition->numero_requisition}."
+                );
+
+                $this->notifierUtilisateur(
+                    userId: $lockedRequisition->user_id,
+                    titre: 'Visa Administratif accordé',
+                    message: "Votre réquisition {$lockedRequisition->numero_requisition} a franchi le contrôle administratif."
+                );
+
+                $this->notifierRole(
+                    roleCible: 'director',
+                    projectId: null,
+                    titre: 'Dossier en attente d\'approbation finale (Directrice)',
+                    message: "La réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->montant_total} {$lockedRequisition->devise}) est prête pour votre approbation finale."
+                );
+
+                return;
+            }
+
+            $lockedRequisition->update([
+                'status' => 'draft',
+                'observation' => trim(($lockedRequisition->observation ? $lockedRequisition->observation . PHP_EOL : '') . 'Motif rejet Administratif: ' . $validated['motif_rejet']),
+            ]);
+
+            $this->enregistrerSignature(
+                $lockedRequisition,
+                $user,
+                'admin_manager',
+                'rejected',
+                $validated['motif_rejet']
+            );
+
+            $this->notifierUtilisateur(
+                userId: $lockedRequisition->user_id,
+                titre: 'Réquisition renvoyée par l\'Administration',
+                message: "La réquisition {$lockedRequisition->numero_requisition} a été renvoyée : {$validated['motif_rejet']}"
+            );
+        });
+
+        return Redirect::back()->with(
+            $validated['decision'] === 'approve' ? 'success' : 'error',
+            $validated['decision'] === 'approve'
+                ? 'Visa administratif accordé avec succès. Transmis à la Directrice Générale pour approbation finale.'
+                : 'Dossier renvoyé pour correction administrative.'
+        );
+    }
+
+    public function directorDecision(Request $request, Requisition $requisition)
+    {
+        $user = $request->user();
+
+        abort_unless($user?->hasRole('director'), 403, 'Action réservée exclusivement à la Directrice Générale.');
+        abort_unless($requisition->status === 'visa_admin', 403, 'Cette réquisition n’est pas en attente d’approbation finale.');
+
+        $validated = $request->validate([
+            'decision' => ['required', 'in:approve,reject'],
+            'password' => ['required_if:decision,approve', 'nullable', 'string'],
+            'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
+        ]);
+
+        if ($validated['decision'] === 'approve') {
+            if (! Hash::check($validated['password'], $user->password)) {
+                return Redirect::back()->withErrors([
+                    'password' => 'Signature refusée : Le mot de passe de la Directrice Générale est incorrect.',
+                ]);
+            }
+        }
+
+        DB::transaction(function () use ($validated, $requisition, $user) {
+            $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
+
+            if ($validated['decision'] === 'approve') {
+                $lockedRequisition->update(['status' => 'decaissement_caisse']);
+
+                $this->enregistrerSignature(
+                    $lockedRequisition,
+                    $user,
+                    'director',
+                    'approved',
+                    'Bon à payer accordé. Autorisation de décaissement transmise à la Caisse.'
+                );
+
+                $this->notifierRole(
+                    roleCible: 'cashier',
+                    projectId: null,
+                    titre: 'Nouveau bon à payer (Caisse)',
+                    message: "La réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->montant_total} {$lockedRequisition->devise}) a été approuvée par la Directrice. Décaissement autorisé au guichet."
+                );
+
+                $this->notifierUtilisateur(
+                    userId: $lockedRequisition->user_id,
+                    titre: 'Réquisition Approuvée (Prête pour Caisse)',
+                    message: "Votre réquisition {$lockedRequisition->numero_requisition} a été approuvée par la Directrice Générale. Les fonds sont prêts au guichet : {$lockedRequisition->caisse_decaissement}."
+                );
+
+                return;
+            }
+
+            $lockedRequisition->update([
+                'status' => 'draft',
+                'observation' => trim(($lockedRequisition->observation ? $lockedRequisition->observation . PHP_EOL : '') . 'Motif rejet Direction: ' . $validated['motif_rejet']),
+            ]);
+
+            $this->enregistrerSignature(
+                $lockedRequisition,
+                $user,
+                'director',
+                'rejected',
+                $validated['motif_rejet']
+            );
+
+            $this->notifierUtilisateur(
+                userId: $lockedRequisition->user_id,
+                titre: 'Réquisition refusée par la Directrice',
+                message: "Votre réquisition {$lockedRequisition->numero_requisition} a été refusée : {$validated['motif_rejet']}"
+            );
+        });
+
+        return Redirect::back()->with(
+            $validated['decision'] === 'approve' ? 'success' : 'error',
+            $validated['decision'] === 'approve'
+                ? 'Bon à payer accordé avec succès. Dossier transmis à la Caisse pour décaissement.'
+                : 'Dossier rejeté par la Directrice Générale.'
+        );
+    }
+
+
     protected function notifierUtilisateur(string $userId, string $titre, string $message, bool $urgent = false): void
     {
         DB::table('notifications')->insert([
