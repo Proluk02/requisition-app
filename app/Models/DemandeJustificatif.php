@@ -25,6 +25,14 @@ class DemandeJustificatif extends Model
         'mime_type',
     ];
 
+    protected function casts(): array
+    {
+        return [
+            'date' => 'date',
+            'montant' => 'float',
+        ];
+    }
+
     public function demande(): BelongsTo
     {
         return $this->belongsTo(Demande::class);

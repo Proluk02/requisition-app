@@ -1,35 +1,28 @@
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Head, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
+import OfficialPrintSheet from '@/Components/OfficialPrintSheet';
+import KpiCard from '@/Components/Director/KpiCard';
+import Toast, { ToastType } from '@/Components/Director/Toast';
+import EmptyState from '@/Components/Director/EmptyState';
+import PinSignatureModal from '@/Components/Director/PinSignatureModal';
+import RequisitionDetailModal from '@/Components/Director/RequisitionDetailModal';
 
-interface Justificatif {
-    id: string;
-    nom?: string;
-    description?: string;
-    montant: number;
-    scan?: string;
-    fileUrl: string | null;
-}
-
-interface LigneRequisition {
+interface WorkflowLevel { step: number; label: string; color: string; }
+interface Justificatif { id: string; nom: string; fileUrl: string | null; }
+interface LigneItem {
     id: string;
     activite: string;
-    codeBudget?: string;
-    codeAllBudget?: string;
-    codeAllocation?: string | null;
-    code_allocation?: string | null;
-    nature: string;
+    codeAllocation: string | null;
     quantiteOuDuree: number;
     unite: string;
-    frais: number;
-    prixUnitaire?: number;
+    prixUnitaire: number;
     total: number;
-    justificatifs?: Justificatif[];
-    justif?: Justificatif[];
+    justificatifs: Justificatif[];
 }
-
-interface RequisitionDirector {
+interface RequisitionDirectrice {
     id: string;
     numero: string;
     projet: string;
@@ -38,473 +31,468 @@ interface RequisitionDirector {
     nature: 'Achat' | 'Service';
     devise: 'USD' | 'FC' | 'EUR';
     montantTotal: number;
-    caisseAttribuee?: string;
+    caisseAttribuee: string;
     observation: string | null;
     is_urgent: boolean;
+    is_decaissee: boolean;
     statusCode: string;
-    statusLabel: string;
-    canDecide: boolean;
+    workflowLevel: WorkflowLevel;
     dateSoumission: string;
-    lignes: LigneRequisition[];
+    signatures: { role: string; nom: string; action: string; date: string; code?: string; hash: string; }[];
+    lignes: LigneItem[];
 }
+interface ProjectStat { id: string; name: string; count: number; total_usd: number; total_fc: number; }
+interface CaisseStat { caisse: string; count: number; total_usd: number; decaisse_usd: number; }
 
 interface Props extends PageProps {
-    requisitions?: RequisitionDirector[];
+    selectedPeriod: string;
+    projectsStats: ProjectStat[];
+    caissesStats: CaisseStat[];
+    decaisseesCount: number;
+    nonDecaisseesCount: number;
+    requisitions: RequisitionDirectrice[];
 }
 
-const money = (amount: number, currency: string) =>
-    `${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${currency}`;
+const money = (n: number, c: string) =>
+    `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${c}`;
 
-export default function DirectorDashboard({ requisitions: initialRequisitions = [] }: Props) {
+export default function DirectorDashboard({
+    selectedPeriod,
+    projectsStats = [],
+    caissesStats = [],
+    decaisseesCount = 0,
+    nonDecaisseesCount = 0,
+    requisitions = [],
+}: Props) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
 
-    const [dossiers, setDossiers] = useState<RequisitionDirector[]>(initialRequisitions);
+    const [period, setPeriod] = useState(selectedPeriod || new Date().toISOString().slice(0, 7));
+    const [selectedProject, setSelectedProject] = useState('all');
+    const [selectedCaisse, setSelectedCaisse] = useState('all');
+    const [decaissementFilter, setDecaissementFilter] = useState<'all' | 'decaissees' | 'non_decaissees'>('all');
 
-    // Modales
-    const [selected, setSelected] = useState<RequisitionDirector | null>(null);
-    const [rejecting, setRejecting] = useState(false);
-    const [rejectionReason, setRejectionReason] = useState('');
+    const [detailReq, setDetailReq] = useState<RequisitionDirectrice | null>(null);
+    const [printReq, setPrintReq] = useState<RequisitionDirectrice | null>(null);
+    const [signReq, setSignReq] = useState<RequisitionDirectrice | null>(null);
+    const [pinError, setPinError] = useState<string | null>(null);
+    const [signing, setSigning] = useState(false);
+    const [toast, setToast] = useState<{ type: ToastType; message: string } | null>(null);
 
-    // SÉCURITÉ : MOT DE PASSE POUR LE BON À PAYER FINAL
-    const [passwordModalOpen, setPasswordModalOpen] = useState(false);
-    const [passwordSaisi, setPasswordSaisi] = useState('');
-    const [processing, setProcessing] = useState(false);
-    const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-
-    // Séparation des urgences vs approbation standard
-    const dossiersUrgents = useMemo(() => dossiers.filter(d => d.statusCode === 'urgent_direction'), [dossiers]);
-    const dossiersStandard = useMemo(() => dossiers.filter(d => d.statusCode !== 'urgent_direction'), [dossiers]);
-
-    // Accord préalable pour dérogation urgente
-    const handleAccorderDerogationUrgente = (id: string) => {
-        router.patch(route('requisitions.urgent-director', id), {}, {
-            preserveScroll: true,
-            onSuccess: () => {
-                setDossiers(prev => prev.filter(d => d.id !== id));
-                setToast({ type: 'success', message: 'Dérogation urgente accordée. Dossier réinjecté en priorité.' });
-            }
-        });
+    const handlePeriodChange = (newPeriod: string) => {
+        setPeriod(newPeriod);
+        router.get(route('dashboard'), { period: newPeriod }, { preserveState: true, preserveScroll: true });
     };
 
-    // Déclencher modale mot de passe
-    const handleTriggerBonAPayer = () => {
-        if (!selected) return;
-        setPasswordSaisi('');
-        setPasswordModalOpen(true);
+    const filteredList = useMemo(() => {
+        return requisitions.filter((r) => {
+            if (selectedProject !== 'all' && r.projet !== selectedProject) return false;
+            if (selectedCaisse !== 'all' && r.caisseAttribuee !== selectedCaisse) return false;
+            if (decaissementFilter === 'decaissees' && !r.is_decaissee) return false;
+            if (decaissementFilter === 'non_decaissees' && r.is_decaissee) return false;
+            return true;
+        });
+    }, [requisitions, selectedProject, selectedCaisse, decaissementFilter]);
+
+    const volumeUSD = useMemo(
+        () => requisitions.reduce((acc, r) => acc + (r.devise === 'USD' ? r.montantTotal : 0), 0),
+        [requisitions]
+    );
+
+    const handleOpenSignature = (req: RequisitionDirectrice) => {
+        setPinError(null);
+        setSignReq(req);
     };
 
-    // Confirmer le Bon à Payer avec mot de passe de la Directrice
-    const handleConfirmBonAPayer = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!selected || !passwordSaisi) return;
-
-        setProcessing(true);
-
-        router.patch(route('requisitions.director-decision', selected.id), {
-            decision: 'approve',
-            password: passwordSaisi,
-        }, {
-            preserveScroll: true,
-            onFinish: () => setProcessing(false),
-            onSuccess: () => {
-                const updatedId = selected.id;
-                setPasswordModalOpen(false);
-                setSelected(null);
-                setPasswordSaisi('');
-
-                setDossiers(prev => prev.filter(d => d.id !== updatedId));
-
-                setToast({
-                    type: 'success',
-                    message: `Bon à payer accordé avec succès sur ${selected.numero}. Transmis à la Caisse.`
-                });
-            },
-            onError: (errors) => {
-                alert(errors.password || 'Erreur lors de la signature.');
+    const handleSubmitSignature = (pin: string) => {
+        if (!signReq) return;
+        setSigning(true);
+        setPinError(null);
+        router.patch(
+            route('requisitions.director-decision', signReq.id),
+            { decision: 'approve', pin },
+            {
+                preserveScroll: true,
+                onFinish: () => setSigning(false),
+                onSuccess: () => {
+                    setSignReq(null);
+                    setToast({
+                        type: 'success',
+                        message: 'Bon à payer accordé. Le dossier est transmis au guichet pour décaissement.',
+                    });
+                },
+                onError: (errs) => {
+                    setPinError(errs.pin || 'Code PIN incorrect.');
+                },
             }
-        });
+        );
     };
 
-    // Rejet Directrice
-    const handleReject = () => {
-        if (!selected || !rejectionReason.trim()) {
-            alert('Veuillez spécifier le motif du refus.');
-            return;
-        }
-
-        setProcessing(true);
-
-        router.patch(route('requisitions.director-decision', selected.id), {
-            decision: 'reject',
-            password: 'skip',
-            motif_rejet: rejectionReason,
-        }, {
-            preserveScroll: true,
-            onFinish: () => setProcessing(false),
-            onSuccess: () => {
-                const updatedId = selected.id;
-                setSelected(null);
-                setRejecting(false);
-                setRejectionReason('');
-
-                setDossiers(prev => prev.filter(d => d.id !== updatedId));
-
-                setToast({
-                    type: 'error',
-                    message: `Réquisition ${selected.numero} rejetée par la Direction.`
-                });
-            },
-            onError: (errors) => {
-                alert(errors.motif_rejet || 'Erreur lors du rejet.');
-            }
-        });
+    const handlePrint = (req: RequisitionDirectrice) => {
+        setPrintReq(req);
+        setTimeout(() => window.print(), 300);
     };
 
     return (
         <AppLayout>
-            <Head title="Direction Générale - Approbations" />
+            <Head title="Direction Générale — Supervision" />
 
-            <div className="space-y-6">
+            <div className="space-y-6 no-print">
                 {/* En-tête */}
-                <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-[#E2E8F0] pb-4">
+                <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
                     <div>
-                        <span className="text-[10px] uppercase font-bold text-[#F58F20] tracking-wider">
-                            DIRECTION GÉNÉRALE • ASBL BON PASTEUR
-                        </span>
+                        <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1.5">
+                            <span>Direction Générale</span>
+                            <span className="mx-1.5">/</span>
+                            <span className="text-[#04326D]">Supervision</span>
+                        </nav>
                         <h1 className="text-xl font-bold text-[#0B192C]">
-                            Supervision Financière & Approbation Finale
+                            Supervision des réquisitions
                         </h1>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                            Directrice Générale : <strong>{user.name}</strong> • Ordonnancement des dépenses et bons à payer.
+                        <p className="text-[12px] text-gray-500 mt-1">
+                            Connectée en tant que <strong className="text-[#0B192C]">{user.name}</strong>. Contrôle consolidé des projets et caisses.
                         </p>
                     </div>
-                    <span className="text-xs font-mono font-bold text-[#04326D] bg-blue-50 px-2.5 py-1 rounded border border-blue-200">
-                        {dossiers.length} dossier(s) en attente
-                    </span>
+
+                    <div className="flex items-center gap-2 bg-white border border-[#04326D] rounded px-3 py-2">
+                        <svg className="w-4 h-4 text-[#04326D]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                            <rect x="3" y="4" width="18" height="18" rx="2" />
+                            <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
+                        </svg>
+                        <label className="text-[11px] font-bold uppercase tracking-widest text-gray-600">Période</label>
+                        <input
+                            type="month"
+                            value={period}
+                            onChange={(e) => handlePeriodChange(e.target.value)}
+                            className="border-none bg-transparent text-[13px] font-bold text-[#04326D] focus:outline-none cursor-pointer"
+                        />
+                    </div>
                 </header>
 
-                {toast && (
-                    <div className={`p-3 rounded text-xs font-bold flex justify-between items-center ${toast.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-300' : 'bg-red-50 text-red-800 border border-red-300'}`}>
-                        <span>{toast.message}</span>
-                        <button type="button" onClick={() => setToast(null)} className="underline">Fermer</button>
-                    </div>
-                )}
-
-                {/* SECTION 1 : DOSSIERS URGENTS (CIRCUIT DÉROGATION PRIORITAIRE) */}
-                {dossiersUrgents.length > 0 && (
-                    <div className="bg-red-50 border-2 border-red-400 rounded p-4 shadow-sm space-y-3">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <span className="w-3 h-3 rounded-full bg-red-600 animate-ping"></span>
-                                <h2 className="text-xs font-black uppercase tracking-wider text-red-900">
-                                    Réquisitions Déclarées URGENTES ({dossiersUrgents.length})
-                                </h2>
-                            </div>
-                            <span className="text-[10px] text-red-700 italic">Accord préalable de la Directrice requis</span>
-                        </div>
-
-                        <div className="space-y-2">
-                            {dossiersUrgents.map(urgent => (
-                                <div key={urgent.id} className="bg-white p-3 rounded border border-red-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                                    <div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="font-mono font-bold text-[#04326D]">{urgent.numero}</span>
-                                            <span className="font-bold text-red-800">{urgent.projet}</span>
-                                            <span className="text-gray-400">• Par {urgent.initiateurNom}</span>
-                                        </div>
-                                        <p className="text-gray-600 mt-0.5">{urgent.observation || 'Sans motif détaillé'}</p>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <span className="font-mono font-black text-sm text-[#0B192C]">
-                                            {money(urgent.montantTotal, urgent.devise)}
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleAccorderDerogationUrgente(urgent.id)}
-                                            className="px-3 py-1.5 bg-[#DC2626] hover:bg-[#b91c1c] text-white rounded text-xs font-bold shadow"
-                                        >
-                                            Accorder Dérogation Urgente &rarr;
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {/* SECTION 2 : DOSSIERS PRÊTS POUR LE BON À PAYER FINAL (VISA 4) */}
-                <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
-                    <div className="p-4 border-b border-[#E2E8F0] bg-white">
-                        <h2 className="text-sm font-bold text-[#0B192C]">
-                            Dossiers Visés par l'Administration en Attente de Bon à Payer
-                        </h2>
-                        <p className="text-[11px] text-gray-500">
-                            Ces réquisitions ont reçu les 3 visas préalables (Manager Projet, Finance, Administration) et attendent votre autorisation de décaissement.
-                        </p>
-                    </div>
-
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs border-collapse">
-                            <thead>
-                                <tr className="bg-[#0B192C] text-white uppercase text-[10px] font-bold tracking-wider">
-                                    <th className="py-3 px-4">Numéro</th>
-                                    <th className="py-3 px-4">Projet</th>
-                                    <th className="py-3 px-4">Demandeur</th>
-                                    <th className="py-3 px-4">Observation</th>
-                                    <th className="py-3 px-4 text-right">Montant Total</th>
-                                    <th className="py-3 px-4 text-center">Urgence</th>
-                                    <th className="py-3 px-4 text-right">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
-                                {dossiersStandard.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={7} className="py-8 text-center text-gray-400 italic">
-                                            Aucun dossier en attente de Bon à Payer pour le moment.
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    dossiersStandard.map((item) => (
-                                        <tr key={item.id} className="hover:bg-[#F9F9FF] transition">
-                                            <td className="py-3.5 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
-                                                {item.numero}
-                                            </td>
-                                            <td className="py-3.5 px-4 font-semibold text-gray-800">
-                                                {item.projet}
-                                            </td>
-                                            <td className="py-3.5 px-4 whitespace-nowrap">
-                                                <p className="font-bold text-[#0B192C]">{item.initiateurNom}</p>
-                                                <p className="text-[10px] text-gray-400">{item.initiateurRole}</p>
-                                            </td>
-                                            <td className="py-3.5 px-4 max-w-xs truncate" title={item.observation || ''}>
-                                                {item.observation || item.lignes.map(l => l.activite).join(', ')}
-                                            </td>
-                                            <td className="py-3.5 px-4 text-right font-mono font-bold whitespace-nowrap text-[#0B192C]">
-                                                {money(item.montantTotal, item.devise)}
-                                            </td>
-                                            <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                                                {item.is_urgent ? (
-                                                    <span className="bg-red-100 text-red-800 px-2 py-0.5 rounded font-black text-[9px] uppercase">
-                                                        URGENT
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-gray-400 text-[10px]">Normal</span>
-                                                )}
-                                            </td>
-                                            <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setSelected(item);
-                                                        setRejecting(false);
-                                                        setRejectionReason('');
-                                                    }}
-                                                    className="px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow-sm transition"
-                                                >
-                                                    Examiner & Bon à Payer
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
+                {/* KPIs */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <KpiCard
+                        label="Réquisitions du mois"
+                        value={requisitions.length}
+                        hint={`Sur ${projectsStats.length} projet${projectsStats.length > 1 ? 's' : ''}`}
+                    />
+                    <KpiCard
+                        label="Décaissées"
+                        value={decaisseesCount}
+                        hint="Fonds remis au guichet"
+                        tone="emerald"
+                    />
+                    <KpiCard
+                        label="En attente"
+                        value={nonDecaisseesCount}
+                        hint="En cours d'approbation"
+                        tone="amber"
+                    />
+                    <KpiCard
+                        label="Volume (USD)"
+                        value={`$${volumeUSD.toLocaleString('fr-FR')}`}
+                        hint="Engagements consolidés"
+                        tone="dark"
+                    />
                 </div>
-            </div>
 
-            {/* MODALE D'EXAMEN FINAL ET BON À PAYER */}
-            {selected && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-                    <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-5">
-                        <header className="flex items-start justify-between border-b pb-3">
-                            <div>
-                                <span className="text-[10px] uppercase font-bold text-[#F58F20] tracking-wider">
-                                    VISA 4 : APPROBATION FINALE & BON À PAYER
-                                </span>
-                                <h2 className="text-base font-bold text-[#0B192C]">
-                                    Réquisition N° {selected.numero} ({selected.nature})
-                                </h2>
-                                <p className="text-xs text-gray-500">
-                                    Dossier complet visé par le Manager de Projet, les Finances et l'Administration.
-                                </p>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setSelected(null)}
-                                className="text-gray-400 hover:text-gray-600 text-xl font-bold leading-none p-1"
-                            >
-                                &times;
-                            </button>
+                {/* Synthèses */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                    <section className="lg:col-span-7 bg-white border border-[#B2BED6] rounded">
+                        <header className="px-4 py-3 border-b border-[#E2E8F0] flex items-center justify-between">
+                            <h2 className="text-[11px] font-bold uppercase tracking-widest text-[#0B192C]">
+                                Répartition par projet
+                            </h2>
+                            <span className="text-[10.5px] text-gray-400 font-bold uppercase">Période {period}</span>
                         </header>
+                        <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {projectsStats.length === 0 ? (
+                                <p className="col-span-full text-[12px] text-gray-400 italic py-3 text-center">
+                                    Aucune donnée pour cette période.
+                                </p>
+                            ) : (
+                                projectsStats.map((p) => (
+                                    <div
+                                        key={p.id}
+                                        className="p-3 bg-[#F9F9FF] border border-[#E2E8F0] rounded flex justify-between items-center gap-3"
+                                    >
+                                        <div className="min-w-0">
+                                            <p className="text-[12.5px] font-bold text-[#04326D] truncate">{p.name}</p>
+                                            <p className="text-[10.5px] text-gray-500 mt-0.5">
+                                                {p.count} réquisition{p.count > 1 ? 's' : ''}
+                                            </p>
+                                        </div>
+                                        <span className="text-[12.5px] font-mono tabular-nums font-bold text-[#0B192C] whitespace-nowrap">
+                                            ${p.total_usd.toLocaleString('fr-FR')}
+                                        </span>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </section>
 
-                        {/* Synthèse */}
-                        <div className="p-3.5 bg-[#F9F9FF] border rounded text-xs flex justify-between items-center">
-                            <div>
-                                <p className="font-bold text-[#0B192C]">{selected.projet}</p>
-                                <p className="text-gray-500">Caisse de paiement : <strong>{selected.caisseAttribuee || 'Caisse principale'}</strong></p>
-                            </div>
-                            <span className="text-xl font-black font-mono text-[#04326D]">
-                                {money(selected.montantTotal, selected.devise)}
-                            </span>
+                    <section className="lg:col-span-5 bg-white border border-[#B2BED6] rounded">
+                        <header className="px-4 py-3 border-b border-[#E2E8F0]">
+                            <h2 className="text-[11px] font-bold uppercase tracking-widest text-[#0B192C]">
+                                Situation par caisse
+                            </h2>
+                        </header>
+                        <div className="p-3 space-y-2">
+                            {caissesStats.length === 0 ? (
+                                <p className="text-[12px] text-gray-400 italic py-3 text-center">
+                                    Aucune donnée.
+                                </p>
+                            ) : (
+                                caissesStats.map((c, idx) => (
+                                    <div
+                                        key={idx}
+                                        className="p-2.5 border border-[#E2E8F0] rounded flex justify-between items-center gap-3"
+                                    >
+                                        <div className="min-w-0">
+                                            <p className="text-[12px] font-bold text-[#0B192C] truncate">{c.caisse}</p>
+                                            <p className="text-[10.5px] text-gray-500 mt-0.5">
+                                                {c.count} dossier{c.count > 1 ? 's' : ''}
+                                            </p>
+                                        </div>
+                                        <div className="text-right font-mono tabular-nums">
+                                            <p className="text-[12.5px] font-bold text-[#04326D]">
+                                                ${c.total_usd.toLocaleString('fr-FR')}
+                                            </p>
+                                            <p className="text-[10px] text-emerald-700 font-bold">
+                                                Décaissé : ${c.decaisse_usd.toLocaleString('fr-FR')}
+                                            </p>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </section>
+                </div>
+
+                {/* Tableau principal */}
+                <section className="bg-white border border-[#B2BED6] rounded overflow-hidden">
+                    <header className="px-4 py-3 border-b border-[#E2E8F0] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                            <h2 className="text-[13px] font-bold text-[#0B192C]">
+                                Niveau d'avancement des réquisitions
+                            </h2>
+                            <p className="text-[11px] text-gray-500 mt-0.5">
+                                Cliquez sur une ligne pour consulter le circuit complet et l'historique des visas.
+                            </p>
                         </div>
 
-                        {/* Lignes et devis */}
-                        <div>
-                            <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
-                                Articles, Prestations & Devis
-                            </h3>
-                            <table className="w-full text-left text-xs border border-gray-200">
-                                <thead className="bg-[#F1F5F9] font-bold text-gray-600">
-                                    <tr>
-                                        <th className="p-2">Désignation</th>
-                                        <th className="p-2">Code Allocation</th>
-                                        <th className="p-2 text-right">Qté/Durée</th>
-                                        <th className="p-2 text-right">Prix Unitaire</th>
-                                        <th className="p-2 text-right">Total</th>
-                                        <th className="p-2">Pièces</th>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <FilterSelect value={selectedProject} onChange={setSelectedProject} label="Projet">
+                                <option value="all">Tous les projets</option>
+                                {projectsStats.map((p) => (
+                                    <option key={p.id} value={p.name}>{p.name}</option>
+                                ))}
+                            </FilterSelect>
+
+                            <FilterSelect value={selectedCaisse} onChange={setSelectedCaisse} label="Caisse">
+                                <option value="all">Toutes les caisses</option>
+                                {caissesStats.map((c, i) => (
+                                    <option key={i} value={c.caisse}>{c.caisse}</option>
+                                ))}
+                            </FilterSelect>
+
+                            <FilterSelect
+                                value={decaissementFilter}
+                                onChange={(v) => setDecaissementFilter(v as 'all' | 'decaissees' | 'non_decaissees')}
+                                label="Décaissement"
+                            >
+                                <option value="all">Toutes</option>
+                                <option value="decaissees">Décaissées</option>
+                                <option value="non_decaissees">Non décaissées</option>
+                            </FilterSelect>
+                        </div>
+                    </header>
+
+                    {filteredList.length === 0 ? (
+                        <EmptyState
+                            title="Aucune réquisition"
+                            description="Modifiez les filtres pour afficher d'autres résultats."
+                        />
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left text-[12.5px] border-collapse">
+                                <thead>
+                                    <tr className="bg-[#0B192C] text-white text-[10px] uppercase tracking-widest font-bold">
+                                        <th className="py-2.5 px-4">Numéro</th>
+                                        <th className="py-2.5 px-4">Projet / Caisse</th>
+                                        <th className="py-2.5 px-4">Demandeur</th>
+                                        <th className="py-2.5 px-4 text-right">Montant</th>
+                                        <th className="py-2.5 px-4 text-center">Workflow</th>
+                                        <th className="py-2.5 px-4 text-center">Décaissement</th>
+                                        <th className="py-2.5 px-4 text-right">Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y text-gray-700">
-                                    {selected.lignes.map((line) => {
-                                        const unitPrice = line.frais ?? line.prixUnitaire ?? 0;
-                                        const justificatifsList = line.justificatifs ?? line.justif ?? [];
-
-                                        return (
-                                            <tr key={line.id}>
-                                                <td className="p-2 font-medium">{line.activite}</td>
-                                                <td className="p-2 font-mono font-bold text-[#04326D]">
-                                                    {line.codeAllocation || line.code_allocation || line.codeBudget || line.codeAllBudget || '—'}
-                                                </td>
-                                                <td className="p-2 text-right">{line.quantiteOuDuree} {line.unite}</td>
-                                                <td className="p-2 text-right">{money(unitPrice, selected.devise)}</td>
-                                                <td className="p-2 text-right font-bold">{money(line.total, selected.devise)}</td>
-                                                <td className="p-2">
-                                                    {justificatifsList.map((f, fIdx) => (
-                                                        <span key={f.id || fIdx} className="block text-[10px] text-blue-600 underline">
-                                                            {f.nom || f.scan || f.description}
-                                                        </span>
-                                                    ))}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
+                                <tbody className="divide-y divide-[#E2E8F0]">
+                                    {filteredList.map((req) => (
+                                        <tr
+                                            key={req.id}
+                                            className="hover:bg-[#F9F9FF] cursor-pointer"
+                                            onClick={() => setDetailReq(req)}
+                                        >
+                                            <td className="py-3 px-4 whitespace-nowrap">
+                                                <span className="font-mono font-bold text-[#04326D]">{req.numero}</span>
+                                                {req.is_urgent && (
+                                                    <span className="ml-2 text-[9px] font-bold text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                                                        Urgent
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="py-3 px-4">
+                                                <p className="font-bold text-[#0B192C]">{req.projet}</p>
+                                                <p className="text-[10.5px] text-gray-500 mt-0.5">{req.caisseAttribuee}</p>
+                                            </td>
+                                            <td className="py-3 px-4 whitespace-nowrap">
+                                                <p className="font-bold text-gray-800">{req.initiateurNom}</p>
+                                                <p className="text-[10.5px] text-gray-500 mt-0.5">{req.initiateurRole}</p>
+                                            </td>
+                                            <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-[#0B192C] whitespace-nowrap">
+                                                {money(req.montantTotal, req.devise)}
+                                            </td>
+                                            <td className="py-3 px-4 text-center whitespace-nowrap">
+                                                <WorkflowBadge level={req.workflowLevel} />
+                                            </td>
+                                            <td className="py-3 px-4 text-center whitespace-nowrap">
+                                                {req.is_decaissee ? (
+                                                    <span className="inline-flex items-center text-[10px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded uppercase tracking-wide">
+                                                        Décaissé
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 px-2 py-0.5 rounded uppercase tracking-wide">
+                                                        Non décaissé
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="py-3 px-4 text-right whitespace-nowrap">
+                                                <div
+                                                    className="inline-flex items-center gap-1"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                >
+                                                    {req.statusCode === 'visa_admin' && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleOpenSignature(req)}
+                                                            className="px-2.5 py-1 bg-[#10B981] hover:bg-[#059669] text-white rounded text-[11px] font-bold"
+                                                        >
+                                                            Bon à payer
+                                                        </button>
+                                                    )}
+                                                    <IconButton
+                                                        title="Consulter"
+                                                        onClick={() => setDetailReq(req)}
+                                                        icon={
+                                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
+                                                                <circle cx="12" cy="12" r="3" />
+                                                            </svg>
+                                                        }
+                                                    />
+                                                    <IconButton
+                                                        title="Imprimer"
+                                                        onClick={() => handlePrint(req)}
+                                                        icon={
+                                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                                                                <path d="M6 9V4a1 1 0 011-1h10a1 1 0 011 1v5M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v7H6z" strokeLinecap="round" strokeLinejoin="round" />
+                                                            </svg>
+                                                        }
+                                                    />
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
                                 </tbody>
                             </table>
                         </div>
+                    )}
+                </section>
+            </div>
 
-                        {/* Actions */}
-                        <div className="border-t pt-4 space-y-3">
-                            {!rejecting ? (
-                                <div className="flex items-center justify-between">
-                                    <button
-                                        type="button"
-                                        onClick={() => setRejecting(true)}
-                                        className="px-3.5 py-1.5 border border-red-300 text-red-600 hover:bg-red-50 rounded text-xs font-bold transition"
-                                    >
-                                        Rejeter (Refus d'ordonnancement)
-                                    </button>
+            <RequisitionDetailModal
+                open={!!detailReq}
+                requisition={detailReq}
+                onClose={() => setDetailReq(null)}
+                onPrint={(req) => handlePrint(req as RequisitionDirectrice)}
+            />
 
-                                    <div className="flex gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setSelected(null)}
-                                            className="px-3 py-1.5 border rounded text-xs text-gray-600 hover:bg-gray-50"
-                                        >
-                                            Fermer
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={handleTriggerBonAPayer}
-                                            className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white rounded text-xs font-bold shadow flex items-center gap-1.5 transition"
-                                        >
-                                            <span>Accorder Bon à Payer (Décaissement Caisse)</span>
-                                            <span>&rarr;</span>
-                                        </button>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="bg-red-50 p-4 rounded border border-red-200 space-y-3">
-                                    <div className="flex justify-between items-center">
-                                        <h4 className="text-xs font-bold text-red-800 uppercase">Motif du Refus de la Direction</h4>
-                                        <button type="button" onClick={() => setRejecting(false)} className="text-xs text-gray-500 hover:underline">Annuler</button>
-                                    </div>
-                                    <textarea
-                                        rows={3}
-                                        value={rejectionReason}
-                                        onChange={(e) => setRejectionReason(e.target.value)}
-                                        placeholder="Indiquez clairement le motif du refus..."
-                                        className="w-full border border-red-300 rounded p-2 text-xs focus:outline-none bg-white"
-                                        required
-                                    ></textarea>
-                                    <div className="flex justify-end gap-2">
-                                        <button type="button" onClick={() => setRejecting(false)} className="px-3 py-1.5 border rounded text-xs bg-white text-gray-700">Annuler</button>
-                                        <button type="button" onClick={handleReject} disabled={processing} className="px-4 py-1.5 bg-[#DC2626] text-white rounded text-xs font-bold shadow">
-                                            Confirmer le Refus
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
+            <PinSignatureModal
+                open={!!signReq}
+                requisitionNumero={signReq?.numero ?? ''}
+                amountLabel={signReq ? money(signReq.montantTotal, signReq.devise) : ''}
+                submitting={signing}
+                error={pinError}
+                onCancel={() => !signing && setSignReq(null)}
+                onSubmit={handleSubmitSignature}
+            />
 
-                    </div>
-                </div>
-            )}
+            {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} />}
 
-            {/* MODALE D'AUTHENTIFICATION DE MOT DE PASSE DE LA DIRECTRICE */}
-            {passwordModalOpen && selected && (
-                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4">
-                    <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-sm w-full p-5 space-y-4">
-                        <div className="text-center border-b pb-2">
-                            <h3 className="text-xs font-black uppercase text-[#0B192C] tracking-wider">
-                                Autorisation de Décaissement (Bon à Payer)
-                            </h3>
-                            <p className="text-[10px] text-gray-500 mt-0.5">
-                                Signataire : <strong>{user.name}</strong> (Directrice Générale)
-                            </p>
-                        </div>
-
-                        <form onSubmit={handleConfirmBonAPayer} className="space-y-3">
-                            <div>
-                                <label className="block text-[11px] font-bold text-gray-700 mb-1">
-                                    Saisissez votre mot de passe pour signer l'autorisation :
-                                </label>
-                                <input
-                                    type="password"
-                                    placeholder="••••••••"
-                                    value={passwordSaisi}
-                                    onChange={(e) => setPasswordSaisi(e.target.value)}
-                                    className="w-full border border-gray-300 rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
-                                    autoFocus
-                                    required
-                                />
-                            </div>
-
-                            <p className="text-[9px] text-gray-400">
-                                Cette signature électronique infalsifiable ordonne au Caissier de procéder au paiement immédiat des fonds.
-                            </p>
-
-                            <div className="flex justify-end gap-2 pt-2 border-t">
-                                <button
-                                    type="button"
-                                    onClick={() => setPasswordModalOpen(false)}
-                                    className="px-3 py-1.5 border rounded text-xs text-gray-600 hover:bg-gray-50"
-                                >
-                                    Annuler
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={processing}
-                                    className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded shadow disabled:opacity-50"
-                                >
-                                    {processing ? 'Signature...' : 'Signer & Ordonner Paiement'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
+            {printReq && (
+                <div id="bon-pasteur-print-zone">
+                    <OfficialPrintSheet requisition={printReq as any} />
                 </div>
             )}
         </AppLayout>
+    );
+}
+
+/* --- Sous-composants locaux --- */
+
+function FilterSelect({
+    value,
+    onChange,
+    label,
+    children,
+}: {
+    value: string;
+    onChange: (v: string) => void;
+    label: string;
+    children: ReactNode;
+}) {
+    return (
+        <label className="inline-flex items-center gap-1.5 text-[11px] text-gray-600 font-bold uppercase tracking-wide">
+            <span className="hidden sm:inline">{label}</span>
+            <select
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                className="border border-[#B2BED6] rounded px-2 py-1 text-[12px] bg-white text-[#0B192C] font-medium focus:outline-none focus:border-[#04326D] normal-case tracking-normal"
+            >
+                {children}
+            </select>
+        </label>
+    );
+}
+
+function IconButton({ title, onClick, icon }: { title: string; onClick: () => void; icon: ReactNode }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            title={title}
+            className="p-1.5 text-gray-500 hover:text-[#04326D] hover:bg-gray-100 rounded"
+        >
+            {icon}
+        </button>
+    );
+}
+
+function WorkflowBadge({ level }: { level: { step: number; label: string; color: string } }) {
+    const map: Record<string, string> = {
+        emerald: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+        green: 'bg-green-100 text-green-900 border-green-200',
+        amber: 'bg-amber-100 text-amber-900 border-amber-200',
+        purple: 'bg-purple-100 text-purple-800 border-purple-200',
+        blue: 'bg-blue-100 text-blue-800 border-blue-200',
+    };
+    const cls = map[level.color] ?? 'bg-gray-100 text-gray-700 border-gray-200';
+    return (
+        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wide ${cls}`}>
+            <span>Étape {level.step}</span>
+            <span className="opacity-50">·</span>
+            <span>{level.label}</span>
+        </span>
     );
 }

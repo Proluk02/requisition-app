@@ -44,6 +44,7 @@ class RequisitionController extends Controller
                     'observation' => $requisition->observation,
                     'etapeActuelle' => $this->mapStatusToWorkflow($requisition->status),
 
+                    // SIGNATURES RÉELLES AVEC CODE UNIQUE ET EMPREINTE SHA-256
                     'signatures' => $requisition->signatures->map(function (RequisitionSignature $sig) {
                         return [
                             'role' => $sig->role_signataire,
@@ -115,7 +116,6 @@ class RequisitionController extends Controller
             'Content-Disposition' => 'inline; filename="' . ($justificatif->original_name ?: basename($absolutePath)) . '"',
         ]);
     }
-
     public function update(Request $request, Requisition $requisition)
     {
         $user = $request->user();
@@ -197,7 +197,7 @@ class RequisitionController extends Controller
     }
 
     /**
-     * CRÉATION RÉELLE AVEC NOTIFICATION BILATÉRALE (INITIATEUR + VALIDATEUR).
+     * ENREGISTREMENT INITIAL AVEC NUMÉROTATION CHRONOLOGIQUE PAR PROJET ET PAR MOIS.
      */
     public function store(Request $request)
     {
@@ -230,7 +230,7 @@ class RequisitionController extends Controller
             abort_unless($user->project_id !== null && $user->project_id === $project->id, 403, 'Vous ne pouvez créer une réquisition que pour votre projet.');
         }
 
-        // Calcul du numéro chronologique officiel (ex: CH/09/001)
+        // Numérotation chronologique officielle (ex: CH/09/001)
         $initialesProjet = strtoupper(substr($project->name, 0, 2));
         $moisCourant = now()->format('m');
         $anneeCourante = now()->year;
@@ -271,7 +271,7 @@ class RequisitionController extends Controller
             $isUrgent ? 'Soumission URGENTE' : 'Soumission initiale'
         );
 
-        // 1. Notification pour l'initiateur lui-même (Confirmation instantanée)
+        // Notification initiateur
         $this->notifierUtilisateur(
             userId: $user->id,
             titre: 'Réquisition transmise',
@@ -279,7 +279,7 @@ class RequisitionController extends Controller
             urgent: $isUrgent
         );
 
-        // 2. Notification pour le Manager de Projet (Destinataire d'action)
+        // Notification Manager de Projet
         $this->notifierRole(
             roleCible: 'project_manager',
             projectId: $project->id,
@@ -334,7 +334,8 @@ class RequisitionController extends Controller
     }
 
     /**
-     * DÉCISION DU MANAGER DE PROJET AVEC NOTIFICATION BILATÉRALE.
+     * DÉCISION DU MANAGER DE PROJET (VISA 1) :
+     * Accepte le Code PIN personnel (ou le mot de passe en secours) + Attribution des codes budgétaires.
      */
     public function managerDecision(Request $request, Requisition $requisition)
     {
@@ -345,7 +346,8 @@ class RequisitionController extends Controller
 
         $validated = $request->validate([
             'decision' => ['required', 'in:approve,reject'],
-            'password' => ['required_if:decision,approve', 'nullable', 'string'],
+            'pin' => ['nullable', 'string'],
+            'password' => ['nullable', 'string'],
             'caisse_decaissement' => ['required_if:decision,approve', 'nullable', 'string', 'max:255'],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
             'allocations' => ['required_if:decision,approve', 'array', 'min:1'],
@@ -354,9 +356,11 @@ class RequisitionController extends Controller
         ]);
 
         if ($validated['decision'] === 'approve') {
-            if (! Hash::check($validated['password'], $user->password)) {
+            $secret = $validated['pin'] ?? $validated['password'] ?? null;
+            if (! $this->verifierSecretSignature($user, $secret)) {
                 return Redirect::back()->withErrors([
-                    'password' => 'Signature refusée : Le mot de passe du Manager de Projet est incorrect.',
+                    'pin' => 'Signature refusée : Code PIN (ou mot de passe) incorrect.',
+                    'password' => 'Signature refusée : Code PIN (ou mot de passe) incorrect.',
                 ]);
             }
         }
@@ -388,22 +392,18 @@ class RequisitionController extends Controller
                     'approved',
                     "Visa MP accordé. Caisse : {$validated['caisse_decaissement']}"
                 );
-
-                // 1. Notification au Manager lui-même
                 $this->notifierUtilisateur(
                     userId: $user->id,
                     titre: 'Visa MP accordé',
-                    message: "Vous avez apposé votre signature électronique sur la réquisition {$lockedRequisition->numero_requisition}."
+                    message: "Vous avez apposé votre signature certifiée sur la réquisition {$lockedRequisition->numero_requisition}."
                 );
 
-                // 2. Notification à l'initiateur (Staff)
                 $this->notifierUtilisateur(
                     userId: $lockedRequisition->user_id,
                     titre: 'Visa Manager de Projet accordé',
                     message: "Votre réquisition {$lockedRequisition->numero_requisition} a été visée par le MP et transmise aux Finances."
                 );
 
-                // 3. Notification aux Finances
                 $this->notifierRole(
                     roleCible: 'finance',
                     projectId: null,
@@ -428,7 +428,6 @@ class RequisitionController extends Controller
                 $validated['motif_rejet']
             );
 
-            // Notification rejet à l'initiateur
             $this->notifierUtilisateur(
                 userId: $lockedRequisition->user_id,
                 titre: 'Réquisition rejetée par le MP',
@@ -444,9 +443,6 @@ class RequisitionController extends Controller
         );
     }
 
-    /**
-     * DÉCISION DU MANAGER DES FINANCES AVEC NOTIFICATION BILATÉRALE.
-     */
     public function financeDecision(Request $request, Requisition $requisition)
     {
         $user = $request->user();
@@ -456,14 +452,17 @@ class RequisitionController extends Controller
 
         $validated = $request->validate([
             'decision' => ['required', 'in:approve,reject'],
-            'password' => ['required_if:decision,approve', 'nullable', 'string'],
+            'pin' => ['nullable', 'string'],
+            'password' => ['nullable', 'string'],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
         ]);
 
         if ($validated['decision'] === 'approve') {
-            if (! Hash::check($validated['password'], $user->password)) {
+            $secret = $validated['pin'] ?? $validated['password'] ?? null;
+            if (! $this->verifierSecretSignature($user, $secret)) {
                 return Redirect::back()->withErrors([
-                    'password' => 'Signature refusée : Le mot de passe financier est incorrect.',
+                    'pin' => 'Signature refusée : Code PIN financier (ou mot de passe) incorrect.',
+                    'password' => 'Signature refusée : Code PIN financier (ou mot de passe) incorrect.',
                 ]);
             }
         }
@@ -482,29 +481,18 @@ class RequisitionController extends Controller
                     'Visa de contrôle financier et budgétaire accordé.'
                 );
 
-                // 1. Notification au Financier lui-même
                 $this->notifierUtilisateur(
                     userId: $user->id,
                     titre: 'Visa Financier accordé',
                     message: "Vous avez apposé votre visa financier sur {$lockedRequisition->numero_requisition}."
                 );
 
-                // 2. Notification à l'initiateur
                 $this->notifierUtilisateur(
                     userId: $lockedRequisition->user_id,
                     titre: 'Visa Financier accordé',
                     message: "Le visa financier a été accordé pour votre réquisition {$lockedRequisition->numero_requisition}."
                 );
 
-                // 3. Notification au Manager de Projet
-                $this->notifierRole(
-                    roleCible: 'project_manager',
-                    projectId: $lockedRequisition->project_id,
-                    titre: 'Visa Financier accordé (Projet)',
-                    message: "La réquisition {$lockedRequisition->numero_requisition} a franchi le contrôle budgétaire."
-                );
-
-                // 4. Notification à l'Administration
                 $this->notifierRole(
                     roleCible: 'admin_manager',
                     projectId: null,
@@ -515,7 +503,6 @@ class RequisitionController extends Controller
                 return;
             }
 
-            // Rejet Finance
             $lockedRequisition->update([
                 'status' => 'draft',
                 'observation' => trim(($lockedRequisition->observation ? $lockedRequisition->observation . PHP_EOL : '') . 'Motif rejet Finance: ' . $validated['motif_rejet']),
@@ -544,87 +531,6 @@ class RequisitionController extends Controller
         );
     }
 
-    public function urgentDirectorApproval(Request $request, Requisition $requisition)
-    {
-        $user = $request->user();
-        abort_unless($user?->hasRole('director'), 403, 'Action réservée à la Directrice Générale.');
-        abort_unless($requisition->status === 'urgent_direction', 403, 'Cette réquisition n’est pas en attente de dérogation urgente.');
-
-        DB::transaction(function () use ($requisition, $user) {
-            $requisition->update([
-                'status' => 'draft',
-            ]);
-
-            $this->enregistrerSignature(
-                $requisition,
-                $user,
-                'director',
-                'approved',
-                'Accord de principe pour traitement d\'URGENCE prioritaire.'
-            );
-
-            $this->notifierUtilisateur(
-                userId: $requisition->user_id,
-                titre: 'Dérogation Urgente Accordée',
-                message: "La Directrice Générale a accordé la dérogation prioritaire pour votre réquisition {$requisition->numero_requisition}."
-            );
-        });
-
-        return Redirect::back()->with('success', 'Dérogation urgente accordée. Dossier réintégré dans le circuit prioritaire.');
-    }
-
-    protected function enregistrerSignature(Requisition $requisition, User $user, string $roleSignataire, string $action, ?string $commentaire = null): void
-    {
-        $now = now();
-        $hash = hash('sha256', $requisition->id . $user->id . $roleSignataire . $action . $now->toIso8601String() . config('app.key'));
-
-        $rolePrefix = match ($roleSignataire) {
-            'project_manager' => 'MP',
-            'finance' => 'MF',
-            'admin_manager' => 'MA',
-            'director' => 'DG',
-            default => 'INIT',
-        };
-
-        $userInitials = strtoupper(substr($user->name, 0, 2));
-        $signatureCode = sprintf('BP-SIG-%s-%s-%s-%s', $rolePrefix, $userInitials, $now->format('ymd'), strtoupper(substr($hash, 0, 4)));
-
-        RequisitionSignature::create([
-            'requisition_id' => $requisition->id,
-            'user_id' => $user->id,
-            'role_signataire' => $roleSignataire,
-            'nom_signataire' => $user->name,
-            'action' => $action,
-            'commentaire' => $commentaire,
-            'signature_code' => $signatureCode,
-            'signature_hash' => $hash,
-            'signed_at' => $now,
-        ]);
-    }
-
-    protected function notifierRole(string $roleCible, ?string $projectId, string $titre, string $message, bool $urgent = false): void
-    {
-        $query = User::role($roleCible);
-        
-        if ($projectId) {
-            $query->where(function ($q) use ($projectId) {
-                $q->where('project_id', $projectId)
-                  ->orWhereHas('project', fn ($p) => $p->where('id', $projectId));
-            });
-        }
-
-        $users = $query->get();
-
-        if ($users->isEmpty() && $roleCible === 'project_manager') {
-            $users = User::role('project_manager')->get();
-        }
-
-        foreach ($users as $u) {
-            $this->notifierUtilisateur($u->id, $titre, $message, $urgent);
-        }
-    }
-
-
     public function adminDecision(Request $request, Requisition $requisition)
     {
         $user = $request->user();
@@ -634,14 +540,17 @@ class RequisitionController extends Controller
 
         $validated = $request->validate([
             'decision' => ['required', 'in:approve,reject'],
-            'password' => ['required_if:decision,approve', 'nullable', 'string'],
+            'pin' => ['nullable', 'string'],
+            'password' => ['nullable', 'string'],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
         ]);
 
         if ($validated['decision'] === 'approve') {
-            if (! Hash::check($validated['password'], $user->password)) {
+            $secret = $validated['pin'] ?? $validated['password'] ?? null;
+            if (! $this->verifierSecretSignature($user, $secret)) {
                 return Redirect::back()->withErrors([
-                    'password' => 'Signature refusée : Le mot de passe administratif est incorrect.',
+                    'pin' => 'Signature refusée : Code PIN administratif (ou mot de passe) incorrect.',
+                    'password' => 'Signature refusée : Code PIN administratif (ou mot de passe) incorrect.',
                 ]);
             }
         }
@@ -719,14 +628,17 @@ class RequisitionController extends Controller
 
         $validated = $request->validate([
             'decision' => ['required', 'in:approve,reject'],
-            'password' => ['required_if:decision,approve', 'nullable', 'string'],
+            'pin' => ['nullable', 'string'],
+            'password' => ['nullable', 'string'],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
         ]);
 
         if ($validated['decision'] === 'approve') {
-            if (! Hash::check($validated['password'], $user->password)) {
+            $secret = $validated['pin'] ?? $validated['password'] ?? null;
+            if (! $this->verifierSecretSignature($user, $secret)) {
                 return Redirect::back()->withErrors([
-                    'password' => 'Signature refusée : Le mot de passe de la Directrice Générale est incorrect.',
+                    'pin' => 'Signature refusée : Code PIN de la Directrice (ou mot de passe) incorrect.',
+                    'password' => 'Signature refusée : Code PIN de la Directrice (ou mot de passe) incorrect.',
                 ]);
             }
         }
@@ -789,6 +701,103 @@ class RequisitionController extends Controller
         );
     }
 
+    public function urgentDirectorApproval(Request $request, Requisition $requisition)
+    {
+        $user = $request->user();
+        abort_unless($user?->hasRole('director'), 403, 'Action réservée à la Directrice Générale.');
+        abort_unless($requisition->status === 'urgent_direction', 403, 'Cette réquisition n’est pas en attente de dérogation urgente.');
+
+        DB::transaction(function () use ($requisition, $user) {
+            $requisition->update([
+                'status' => 'draft',
+            ]);
+
+            $this->enregistrerSignature(
+                $requisition,
+                $user,
+                'director',
+                'approved',
+                'Accord de principe pour traitement d\'URGENCE prioritaire.'
+            );
+
+            $this->notifierUtilisateur(
+                userId: $requisition->user_id,
+                titre: 'Dérogation Urgente Accordée',
+                message: "La Directrice Générale a accordé la dérogation prioritaire pour votre réquisition {$requisition->numero_requisition}."
+            );
+        });
+
+        return Redirect::back()->with('success', 'Dérogation urgente accordée. Dossier réintégré dans le circuit prioritaire.');
+    }
+
+    protected function verifierSecretSignature(User $user, ?string $secret): bool
+    {
+        if (empty($secret)) return false;
+        if (! empty($user->signature_pin) && Hash::check($secret, $user->signature_pin)) {
+            return true;
+        }
+
+        // 2. Vérification contre le mot de passe de compte en secours
+        if (Hash::check($secret, $user->password)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Enregistrement de la signature électronique avec code unique et empreinte SHA-256.
+     */
+    protected function enregistrerSignature(Requisition $requisition, User $user, string $roleSignataire, string $action, ?string $commentaire = null): void
+    {
+        $now = now();
+        $hash = hash('sha256', $requisition->id . $user->id . $roleSignataire . $action . $now->toIso8601String() . config('app.key'));
+
+        $rolePrefix = match ($roleSignataire) {
+            'project_manager' => 'MP',
+            'finance' => 'MF',
+            'admin_manager' => 'MA',
+            'director' => 'DG',
+            default => 'INIT',
+        };
+
+        $userInitials = strtoupper(substr($user->name, 0, 2));
+        $signatureCode = sprintf('BP-SIG-%s-%s-%s-%s', $rolePrefix, $userInitials, $now->format('ymd'), strtoupper(substr($hash, 0, 4)));
+
+        RequisitionSignature::create([
+            'requisition_id' => $requisition->id,
+            'user_id' => $user->id,
+            'role_signataire' => $roleSignataire,
+            'nom_signataire' => $user->name,
+            'action' => $action,
+            'commentaire' => $commentaire,
+            'signature_code' => $signatureCode,
+            'signature_hash' => $hash,
+            'signed_at' => $now,
+        ]);
+    }
+
+    protected function notifierRole(string $roleCible, ?string $projectId, string $titre, string $message, bool $urgent = false): void
+    {
+        $query = User::role($roleCible);
+        
+        if ($projectId) {
+            $query->where(function ($q) use ($projectId) {
+                $q->where('project_id', $projectId)
+                  ->orWhereHas('project', fn ($p) => $p->where('id', $projectId));
+            });
+        }
+
+        $users = $query->get();
+
+        if ($users->isEmpty() && $roleCible === 'project_manager') {
+            $users = User::role('project_manager')->get();
+        }
+
+        foreach ($users as $u) {
+            $this->notifierUtilisateur($u->id, $titre, $message, $urgent);
+        }
+    }
 
     protected function notifierUtilisateur(string $userId, string $titre, string $message, bool $urgent = false): void
     {

@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Traits\HasRoles;
@@ -17,14 +18,8 @@ class User extends Authenticatable
 
     protected $keyType = 'string';
 
-    /**
-     * Rôles ne nécessitant aucune affectation (projet ou site).
-     */
     public const UNASSIGNED_ROLES = ['admin', 'director'];
 
-    /**
-     * Rôles nécessitant une affectation à un SITE plutôt qu'à un projet.
-     */
     public const SITE_ASSIGNED_ROLES = ['coordinator'];
 
     protected $fillable = [
@@ -33,6 +28,8 @@ class User extends Authenticatable
         'last_name',
         'email',
         'password',
+        'signature_pin', 
+        'pin_set_at',
         'project_id',
         'site_id',
         'role',
@@ -44,6 +41,7 @@ class User extends Authenticatable
 
     protected $hidden = [
         'password',
+        'signature_pin',
         'remember_token',
     ];
 
@@ -52,7 +50,9 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'signature_pin' => 'hashed',
             'last_login_at' => 'datetime',
+            'pin_set_at' => 'datetime',
         ];
     }
 
@@ -64,6 +64,16 @@ class User extends Authenticatable
     public function site(): BelongsTo
     {
         return $this->belongsTo(Site::class);
+    }
+
+    public function requisitions(): HasMany
+    {
+        return $this->hasMany(Requisition::class);
+    }
+
+    public function signatures(): HasMany
+    {
+        return $this->hasMany(RequisitionSignature::class);
     }
 
     public static function roleRequiresSite(?string $role): bool
@@ -79,5 +89,9 @@ class User extends Authenticatable
     public function isActive(): bool
     {
         return $this->status === 'active';
+    }
+    public function hasSignaturePin(): bool
+    {
+        return ! empty($this->signature_pin);
     }
 }

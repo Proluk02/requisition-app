@@ -17,6 +17,10 @@ return new class extends Migration
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
 
+            // --- SIGNATURE ÉLECTRONIQUE PAR CODE PIN PERSONNEL (SPÉCIFICATION #6) ---
+            $table->string('signature_pin')->nullable(); // Code PIN haché (bcrypt)
+            $table->timestamp('pin_set_at')->nullable();
+
             $table->foreignUuid('project_id')->nullable()->index();
             $table->foreignUuid('site_id')->nullable()->index();
 

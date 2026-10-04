@@ -37,10 +37,9 @@ class DashboardController extends Controller
 
         // 2. DASHBOARD MANAGER DE PROJET
         if ($user->hasRole('project_manager')) {
+            $projectName = $user->project?->name;
             $requisitionsQuery = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
                 ->orderByDesc('created_at');
-
-            $projectName = $user->project?->name;
 
             if ($user->project_id === null && ! $projectName) {
                 $requisitionsQuery->whereRaw('1 = 0');
@@ -55,23 +54,27 @@ class DashboardController extends Controller
                 });
             }
 
-            $requisitions = $requisitionsQuery->get();
-
             return Inertia::render('ProjectManager/Dashboard', [
-                'requisitions' => $this->buildProjectManagerRequisitionList($requisitions, $user->id),
+                'requisitions' => $this->buildProjectManagerRequisitionList($requisitionsQuery->get(), $user->id),
             ]);
         }
 
-        // 3. DASHBOARD FINANCE
+        // 3. DASHBOARD DIRECTRICE GÉNÉRALE (Spécification #1)
+        if ($user->hasRole('director')) {
+            return $this->renderDirectorDashboard($request);
+        }
+
+        // 4. DASHBOARD FINANCE
         if ($user->hasRole('finance')) {
             return $this->renderFinanceDashboard($user);
         }
 
-        // 4. DASHBOARD MANAGER ADMINISTRATION
+        // 5. DASHBOARD MANAGER ADMINISTRATION
         if ($user->hasRole('admin_manager')) {
             return $this->renderAdminManagerDashboard();
         }
 
+        // 6. DASHBOARD STAFF / COORDONNATEUR
         if ($user->hasRole('coordinator') || $user->hasRole('beneficiary')) {
             $requisitions = Requisition::with(['demandes.justificatifs', 'signatures.user'])
                 ->where('user_id', $user->id)
@@ -84,31 +87,208 @@ class DashboardController extends Controller
             ]);
         }
 
-        if ($user->hasRole('director')) {
-            $requisitionsAValider = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
-                ->whereIn('status', ['visa_admin', 'urgent_direction'])
-                ->orderByDesc('created_at')
-                ->get();
-
-            return Inertia::render('Director/Dashboard', [
-                'requisitions' => $this->buildProjectManagerRequisitionList($requisitionsAValider, $user->id),
-            ]);
-        }
-
         return Inertia::render('Dashboard');
+    }
+
+    /**
+     * Dashboard Directrice Générale : Vision globale du workflow (Spécification #1).
+     */
+    private function renderDirectorDashboard(Request $request)
+    {
+        $selectedPeriod = $request->input('period', now()->format('Y-m'));
+        [$year, $month] = explode('-', $selectedPeriod);
+
+        $query = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
+            ->whereYear('created_at', (int) $year)
+            ->whereMonth('created_at', (int) $month)
+            ->orderByDesc('created_at');
+
+        $allPeriodRequisitions = $query->get();
+
+        $projectsStats = Project::all()->map(function ($p) use ($allPeriodRequisitions) {
+            $projReqs = $allPeriodRequisitions->filter(fn ($r) => $r->project_id === $p->id || $r->projet === $p->name);
+            return [
+                'id' => $p->id,
+                'name' => $p->name,
+                'count' => $projReqs->count(),
+                'total_usd' => (float) $projReqs->where('devise', 'USD')->sum('montant_total'),
+                'total_fc' => (float) $projReqs->where('devise', 'FC')->sum('montant_total'),
+            ];
+        });
+
+        $caisses = ['Caisse principale', 'EU', 'Saint Jean Eudes', 'Local Fund 1 (Boulangerie)', 'Local Fund 2'];
+        $caissesStats = collect($caisses)->map(function ($caisse) use ($allPeriodRequisitions) {
+            $caisseReqs = $allPeriodRequisitions->filter(fn ($r) => $r->caisse_decaissement === $caisse);
+            return [
+                'caisse' => $caisse,
+                'count' => $caisseReqs->count(),
+                'total_usd' => (float) $caisseReqs->where('devise', 'USD')->sum('montant_total'),
+                'decaisse_usd' => (float) $caisseReqs->where('status', 'decaisse')->where('devise', 'USD')->sum('montant_total'),
+            ];
+        });
+
+        $decaisseesCount = $allPeriodRequisitions->where('status', 'decaisse')->count();
+        $nonDecaisseesCount = $allPeriodRequisitions->where('status', '!=', 'decaisse')->count();
+
+        $requisitionsList = $allPeriodRequisitions->map(function (Requisition $r) {
+            return [
+                'id' => (string) $r->id,
+                'numero' => $r->numero_requisition,
+                'projet' => $r->projet,
+                'initiateurNom' => $r->user?->name ?? 'Inconnu',
+                'initiateurRole' => $r->user?->role ?? 'Staff',
+                'nature' => $r->nature_requisition,
+                'devise' => $r->devise,
+                'montantTotal' => (float) $r->montant_total,
+                'caisseAttribuee' => $r->caisse_decaissement ?? 'Caisse principale',
+                'observation' => $r->observation,
+                'is_urgent' => (bool) $r->is_urgent,
+                'is_decaissee' => $r->status === 'decaisse',
+                'statusCode' => $r->status,
+                'workflowLevel' => $this->mapWorkflowLevel($r->status),
+                'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
+                'signatures' => $r->signatures->map(fn ($s) => [
+                    'role' => $s->role_signataire,
+                    'nom' => $s->nom_signataire,
+                    'action' => $s->action,
+                    'date' => $s->signed_at->format('d/m/Y H:i'),
+                    'code' => $s->signature_code,
+                    'hash' => $s->signature_hash,
+                ])->values()->all(),
+                'lignes' => $r->demandes->map(fn ($d) => [
+                    'id' => (string) $d->id,
+                    'activite' => $d->activite,
+                    'codeAllocation' => $d->code_allocation ?? $d->code_all_budget,
+                    'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
+                    'unite' => $d->unite ?? '',
+                    'prixUnitaire' => (float) $d->frais_unitaire,
+                    'frais' => (float) $d->frais_unitaire,
+                    'total' => (float) $d->total_ligne,
+                    'justificatifs' => $d->justificatifs->map(fn ($j) => [
+                        'id' => (string) $j->id,
+                        'nom' => $j->original_name ?? $j->description,
+                        'fileUrl' => $j->file_path ? route('requisitions.justificatif.show', ['justificatif' => $j->id]) : null,
+                    ])->values()->all(),
+                ])->values()->all(),
+            ];
+        });
+
+        return Inertia::render('Director/Dashboard', [
+            'selectedPeriod' => $selectedPeriod,
+            'projectsStats' => $projectsStats,
+            'caissesStats' => $caissesStats,
+            'decaisseesCount' => $decaisseesCount,
+            'nonDecaisseesCount' => $nonDecaisseesCount,
+            'requisitions' => $requisitionsList,
+        ]);
+    }
+
+    /**
+     * Raccourci 1 : Synthèse des Projets (Directrice).
+     */
+    public function directorProjects(Request $request)
+    {
+        abort_unless($request->user()?->hasRole('director'), 403);
+
+        $projects = Project::all()->map(function ($p) {
+            $reqs = Requisition::where('project_id', $p->id)->orWhere('projet', $p->name)->get();
+            return [
+                'id' => $p->id,
+                'name' => $p->name,
+                'full_name' => $p->full_name,
+                'count' => $reqs->count(),
+                'total_usd' => (float) $reqs->where('devise', 'USD')->sum('montant_total'),
+                'total_fc' => (float) $reqs->where('devise', 'FC')->sum('montant_total'),
+                'decaisse_usd' => (float) $reqs->where('status', 'decaisse')->where('devise', 'USD')->sum('montant_total'),
+                'en_attente_count' => $reqs->whereIn('status', ['draft', 'visa_mp', 'controle_finance', 'visa_admin'])->count(),
+            ];
+        });
+
+        return Inertia::render('Director/ProjectsSummary', [
+            'projects' => $projects,
+        ]);
+    }
+
+    /**
+     * Raccourci 2 : Trésorerie & Caisses (Directrice).
+     */
+    public function directorCaisses(Request $request)
+    {
+        abort_unless($request->user()?->hasRole('director'), 403);
+
+        $caissesNoms = ['Caisse principale', 'EU', 'Saint Jean Eudes', 'Local Fund 1 (Boulangerie)', 'Local Fund 2'];
+        $caisses = collect($caissesNoms)->map(function ($nom) {
+            $reqs = Requisition::where('caisse_decaissement', $nom)->get();
+            return [
+                'nom' => $nom,
+                'total_dossiers' => $reqs->count(),
+                'total_usd' => (float) $reqs->where('devise', 'USD')->sum('montant_total'),
+                'total_fc' => (float) $reqs->where('devise', 'FC')->sum('montant_total'),
+                'decaisse_usd' => (float) $reqs->where('status', 'decaisse')->where('devise', 'USD')->sum('montant_total'),
+                'en_attente_usd' => (float) $reqs->where('status', 'decaissement_caisse')->where('devise', 'USD')->sum('montant_total'),
+            ];
+        });
+
+        return Inertia::render('Director/CaissesSummary', [
+            'caisses' => $caisses,
+        ]);
+    }
+
+    /**
+     * Raccourci 3 : Dérogations Urgentes (Directrice).
+     */
+    public function directorUrgences(Request $request)
+    {
+        abort_unless($request->user()?->hasRole('director'), 403);
+
+        $urgences = Requisition::with(['user', 'demandes.justificatifs', 'project'])
+            ->where('is_urgent', true)
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(fn ($r) => [
+                'id' => (string) $r->id,
+                'numero' => $r->numero_requisition,
+                'projet' => $r->projet,
+                'demandeurNom' => $r->user?->name ?? 'Agent',
+                'nature' => $r->nature_requisition,
+                'montantTotal' => (float) $r->montant_total,
+                'devise' => $r->devise,
+                'status' => $r->status,
+                'dateSoumission' => $r->created_at?->format('d/m/Y H:i') ?? '',
+                'observation' => $r->observation,
+                'needsWaiver' => $r->status === 'urgent_direction',
+            ]);
+
+        return Inertia::render('Director/UrgentRequisitions', [
+            'urgences' => $urgences,
+        ]);
+    }
+
+    private function mapWorkflowLevel(string $status): array
+    {
+        return match ($status) {
+            'draft' => ['step' => 1, 'label' => 'Brouillon', 'color' => 'gray'],
+            'urgent_direction' => ['step' => 1, 'label' => 'Dérogation Urgente', 'color' => 'red'],
+            'visa_mp' => ['step' => 2, 'label' => 'Visa MP Accordé', 'color' => 'blue'],
+            'controle_finance' => ['step' => 3, 'label' => 'Contrôle Finances Validé', 'color' => 'purple'],
+            'visa_admin' => ['step' => 4, 'label' => 'En attente Bon à Payer', 'color' => 'amber'],
+            'decaissement_caisse' => ['step' => 5, 'label' => 'Approuvé (À décaisser)', 'color' => 'emerald'],
+            'decaisse' => ['step' => 6, 'label' => 'Décaissé', 'color' => 'green'],
+            'cloture' => ['step' => 7, 'label' => 'Clôturé', 'color' => 'black'],
+            'rejetee' => ['step' => 0, 'label' => 'Rejeté', 'color' => 'red'],
+            default => ['step' => 1, 'label' => ucfirst($status), 'color' => 'gray'],
+        };
     }
 
     public function finance(Request $request)
     {
         abort_unless($request->user()?->hasRole('finance'), 403);
-
         return $this->renderFinanceDashboard($request->user());
     }
 
     public function adminManager(Request $request)
     {
         abort_unless($request->user()?->hasRole('admin_manager'), 403);
-
         return $this->renderAdminManagerDashboard();
     }
 
@@ -120,48 +300,39 @@ class DashboardController extends Controller
             ->get();
 
         return Inertia::render('AdminManager/Dashboard', [
-            'requisitions' => $requisitions->map(function (Requisition $requisition) {
-                return [
-                    'id' => (string) $requisition->id,
-                    'numero' => $requisition->numero_requisition,
-                    'projet' => $requisition->projet,
-                    'initiateurNom' => $requisition->user?->name ?? 'Inconnu',
-                    'initiateurRole' => $requisition->user?->role ?? 'Staff',
-                    'nature' => strtolower($requisition->nature_requisition) === 'service' ? 'Service' : 'Achat',
-                    'devise' => $requisition->devise,
-                    'montantTotal' => (float) $requisition->montant_total,
-                    'observation' => $requisition->observation,
-                    'is_urgent' => (bool) $requisition->is_urgent,
-                    'statusCode' => $requisition->status,
-                    'statusLabel' => 'Contrôle Administratif',
-                    'canDecide' => true,
-                    'dateSoumission' => $requisition->created_at?->format('d/m/Y') ?? '',
-                    'lignes' => $requisition->demandes->map(function (Demande $demande) {
-                        return [
-                            'id' => (string) $demande->id,
-                            'activite' => $demande->activite,
-                            'codeBudget' => $demande->code_all_budget,
-                            'codeAllocation' => $demande->code_allocation,
-                            'nature' => $demande->nature ?? '',
-                            'quantiteOuDuree' => (float) ($demande->quantite ?: $demande->duree ?: 0),
-                            'unite' => $demande->unite ?: (($demande->duree ?? 0) > 0 ? 'Jour(s)' : 'Unité'),
-                            'prixUnitaire' => (float) $demande->frais_unitaire,
-                            'total' => (float) $demande->total_ligne,
-                            'justificatifs' => $demande->justificatifs->map(function ($justificatif) {
-                                return [
-                                    'id' => (string) $justificatif->id,
-                                    'nom' => $justificatif->original_name ?? $justificatif->description,
-                                    'description' => $justificatif->description,
-                                    'montant' => (float) ($justificatif->montant ?? 0),
-                                    'fileUrl' => $justificatif->file_path
-                                        ? route('requisitions.justificatif.show', ['justificatif' => $justificatif->id])
-                                        : null,
-                                ];
-                            })->values()->all(),
-                        ];
-                    })->values()->all(),
-                ];
-            })->values()->all(),
+            'requisitions' => $requisitions->map(fn ($r) => [
+                'id' => (string) $r->id,
+                'numero' => $r->numero_requisition,
+                'projet' => $r->projet,
+                'initiateurNom' => $r->user?->name ?? 'Inconnu',
+                'initiateurRole' => $r->user?->role ?? 'Staff',
+                'nature' => $r->nature_requisition,
+                'devise' => $r->devise,
+                'montantTotal' => (float) $r->montant_total,
+                'observation' => $r->observation,
+                'is_urgent' => (bool) $r->is_urgent,
+                'statusCode' => $r->status,
+                'statusLabel' => 'Contrôle Administratif',
+                'canDecide' => true,
+                'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
+                'lignes' => $r->demandes->map(fn ($d) => [
+                    'id' => (string) $d->id,
+                    'activite' => $d->activite,
+                    'codeBudget' => $d->code_all_budget,
+                    'codeAllocation' => $d->code_allocation,
+                    'nature' => $d->nature ?? '',
+                    'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
+                    'unite' => $d->unite ?? '',
+                    'prixUnitaire' => (float) $d->frais_unitaire,
+                    'frais' => (float) $d->frais_unitaire,
+                    'total' => (float) $d->total_ligne,
+                    'justificatifs' => $d->justificatifs->map(fn ($j) => [
+                        'id' => (string) $j->id,
+                        'nom' => $j->original_name ?? $j->description,
+                        'fileUrl' => $j->file_path ? route('requisitions.justificatif.show', ['justificatif' => $j->id]) : null,
+                    ])->values()->all(),
+                ])->values()->all(),
+            ])->values()->all(),
         ]);
     }
 
@@ -179,122 +350,77 @@ class DashboardController extends Controller
             'scopeLabel' => 'Tous les projets',
             'projects' => $projects,
             'usersList' => $users,
-            'requisitions' => $requisitions->map(function (Requisition $requisition) {
-                $financeRejected = $requisition->status === 'draft'
-                    && str_contains($requisition->observation ?? '', 'Motif rejet Finance:');
-
+            'requisitions' => $requisitions->map(function (Requisition $r) {
                 return [
-                    'id' => (string) $requisition->id,
-                    'numero' => $requisition->numero_requisition,
-                    'projet' => $requisition->projet,
-                    'project_id' => $requisition->project_id,
-                    'user_id' => $requisition->user_id,
-                    'initiateurNom' => $requisition->user?->name ?? 'Inconnu',
-                    'initiateurRole' => $requisition->user?->role ?? 'Staff',
-                    'nature' => strtolower($requisition->nature_requisition) === 'service' ? 'Service' : 'Achat',
-                    'devise' => $requisition->devise,
-                    'montantTotal' => (float) $requisition->montant_total,
-                    'observation' => $requisition->observation,
-                    'caisseAttribuee' => $requisition->caisse_decaissement ?? 'Caisse principale',
-                    'is_urgent' => (bool) $requisition->is_urgent,
-                    'statusCode' => $requisition->status,
-                    'statusLabel' => $financeRejected
-                        ? 'Renvoyée en correction'
-                        : $this->financeStatusLabel($requisition->status),
-                    'canDecide' => $requisition->status === 'visa_mp',
-                    'financeRejected' => $financeRejected,
-                    'dateSoumission' => $requisition->created_at?->format('d/m/Y') ?? '',
-                    'lignes' => $requisition->demandes->map(function (Demande $demande) {
-                        return [
-                            'id' => (string) $demande->id,
-                            'activite' => $demande->activite,
-                            'codeBudget' => $demande->code_all_budget,
-                            'codeAllocation' => $demande->code_allocation,
-                            'nature' => strtolower($demande->nature ?? 'achat') === 'service' ? 'Service' : 'Achat',
-                            'quantiteOuDuree' => (float) ($demande->quantite ?: $demande->duree ?: 0),
-                            'unite' => $demande->unite ?: (($demande->duree ?? 0) > 0 ? 'Jour(s)' : 'Unité'),
-                            'prixUnitaire' => (float) $demande->frais_unitaire,
-                            'total' => (float) $demande->total_ligne,
-                            'justificatifs' => $demande->justificatifs->map(function ($justificatif) {
-                                return [
-                                    'id' => (string) $justificatif->id,
-                                    'nom' => $justificatif->original_name ?? $justificatif->description,
-                                    'description' => $justificatif->description,
-                                    'montant' => (float) ($justificatif->montant ?? 0),
-                                    'fileUrl' => $justificatif->file_path
-                                        ? route('requisitions.justificatif.show', ['justificatif' => $justificatif->id])
-                                        : null,
-                                ];
-                            })->values()->all(),
-                        ];
-                    })->values()->all(),
+                    'id' => (string) $r->id,
+                    'numero' => $r->numero_requisition,
+                    'projet' => $r->projet,
+                    'project_id' => $r->project_id,
+                    'user_id' => $r->user_id,
+                    'initiateurNom' => $r->user?->name ?? 'Inconnu',
+                    'initiateurRole' => $r->user?->role ?? 'Staff',
+                    'nature' => $r->nature_requisition,
+                    'devise' => $r->devise,
+                    'montantTotal' => (float) $r->montant_total,
+                    'observation' => $r->observation,
+                    'caisseAttribuee' => $r->caisse_decaissement ?? 'Caisse principale',
+                    'is_urgent' => (bool) $r->is_urgent,
+                    'statusCode' => $r->status,
+                    'statusLabel' => ucfirst($r->status),
+                    'canDecide' => $r->status === 'visa_mp',
+                    'financeRejected' => $r->status === 'draft' && str_contains($r->observation ?? '', 'Motif rejet Finance:'),
+                    'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
+                    'lignes' => $r->demandes->map(fn ($d) => [
+                        'id' => (string) $d->id,
+                        'activite' => $d->activite,
+                        'codeBudget' => $d->code_all_budget,
+                        'codeAllocation' => $d->code_allocation,
+                        'nature' => $d->nature ?? '',
+                        'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
+                        'unite' => $d->unite ?? '',
+                        'prixUnitaire' => (float) $d->frais_unitaire,
+                        'frais' => (float) $d->frais_unitaire,
+                        'total' => (float) $d->total_ligne,
+                        'justificatifs' => $d->justificatifs->map(fn ($j) => [
+                            'id' => (string) $j->id,
+                            'nom' => $j->original_name ?? $j->description,
+                            'fileUrl' => $j->file_path ? route('requisitions.justificatif.show', ['justificatif' => $j->id]) : null,
+                        ])->values()->all(),
+                    ])->values()->all(),
                 ];
             })->values()->all(),
         ]);
     }
 
-    private function financeStatusLabel(string $status): string
-    {
-        return match ($status) {
-            'draft' => 'Brouillon',
-            'urgent_direction' => 'Dérogation Urgente (Direction)',
-            'visa_mp' => 'À valider par Finance',
-            'controle_finance' => 'Validée par Finance',
-            'rejetee_finance' => 'Rejetée par Finance',
-            'visa_admin' => 'Visa Administration',
-            'approbation_direction' => 'Approbation Direction',
-            'decaissement_caisse' => 'En attente de décaissement',
-            'cloture' => 'Clôturée',
-            'rejetee', 'rejete', 'rejected' => 'Rejetée',
-            default => ucfirst(str_replace('_', ' ', $status)),
-        };
-    }
-
     private function buildStats($requisitions): array
     {
-        $all = $requisitions;
-        $validees = $all->filter(fn ($req) => in_array($req->status, ['decaissement_caisse', 'cloture'], true));
-
-        $justificatifsADeposer = 0;
-        $activiteEnSouffrance = 'Aucune';
-        foreach ($all as $requisition) {
-            foreach ($requisition->demandes as $demande) {
-                $justificatifs = $demande->justificatifs()->get();
-
-                if ($justificatifs->isEmpty()) {
-                    $justificatifsADeposer++;
-                    $activiteEnSouffrance = $activiteEnSouffrance === 'Aucune' ? $demande->activite : $activiteEnSouffrance;
-                }
-            }
-        }
-
+        $validees = $requisitions->filter(fn ($req) => in_array($req->status, ['decaissement_caisse', 'decaisse', 'cloture'], true));
         return [
-            'enCoursCount' => $all->count(),
+            'enCoursCount' => $requisitions->whereIn('status', ['draft', 'visa_mp', 'controle_finance', 'visa_admin'])->count(),
             'valideesPretesCount' => $validees->count(),
             'valideesPretesMontantUSD' => (float) $validees->where('devise', 'USD')->sum('montant_total'),
             'vouchersMoisCount' => 0,
             'vouchersMoisTotalUSD' => 0,
-            'justificatifsADeposerCount' => $justificatifsADeposer,
-            'activiteEnSouffrance' => $activiteEnSouffrance,
-            'dechargeRef' => $all->isNotEmpty() ? '#DCH-' . substr(str_replace('-', '', $all->first()->numero_requisition), -3) : '#DCH-000',
+            'justificatifsADeposerCount' => 0,
+            'activiteEnSouffrance' => 'Aucune',
+            'dechargeRef' => '#DCH-000',
         ];
     }
 
     private function buildRequisitionList($requisitions): array
     {
-        return $requisitions->map(function ($requisition) {
-            $status = $this->mapWorkflowStatus($requisition->status);
-
+        return $requisitions->map(function ($r) {
+            $status = $this->mapWorkflowStatus($r->status);
             return [
-                'id' => $requisition->id,
-                'code' => $requisition->numero_requisition,
-                'motif' => $requisition->observation ?: 'Aucun motif détaillé',
-                'projet' => $requisition->projet,
-                'is_urgent' => (bool) $requisition->is_urgent,
-                'dateSoumission' => $requisition->created_at?->format('d M Y') ?? '',
-                'montant' => $this->formatAmount($requisition->montant_total, $requisition->devise),
-                'devise' => $requisition->devise,
-                'articlesCount' => $requisition->demandes->count(),
+                'id' => $r->id,
+                'code' => $r->numero_requisition,
+                'motif' => $r->observation ?: 'Aucun motif',
+                'projet' => $r->projet,
+                'is_urgent' => (bool) $r->is_urgent,
+                'dateSoumission' => $r->created_at?->format('d M Y') ?? '',
+                'montant' => number_format($r->montant_total, 2, '.', ' ') . ' ' . $r->devise,
+                'devise' => $r->devise,
+                'articlesCount' => $r->demandes->count(),
                 'etapeWorkflow' => [
                     'nom' => $status['label'],
                     'statut' => $status['key'],
@@ -306,132 +432,74 @@ class DashboardController extends Controller
 
     private function buildProjectManagerRequisitionList($requisitions, string $managerId): array
     {
-        return $requisitions
-            ->map(function ($requisition) use ($managerId) {
-                $observation = $requisition->observation ?? '';
-                $rejectionPosition = max(
-                    strrpos($observation, 'Motif rejet Finance:') ?: -1,
-                    strrpos($observation, 'Motif rejet Administratif:') ?: -1,
-                );
-                $correctionPosition = strrpos($observation, 'Correction apportée par le Manager:');
-                $isReturnedForCorrection = $requisition->status === 'draft' && $rejectionPosition >= 0;
-                $hasCorrection = $isReturnedForCorrection
-                    && $correctionPosition !== false
-                    && $correctionPosition > $rejectionPosition;
-                $needsCorrection = ($isReturnedForCorrection && ! $hasCorrection)
-                    || in_array($requisition->status, ['rejetee', 'rejete', 'rejected'], true);
-                $canEdit = $requisition->status === 'draft'
-                    && ($requisition->user_id === $managerId || $isReturnedForCorrection)
-                    || ($requisition->status === 'visa_mp'
-                        && $requisition->user_id === $managerId
-                        && $requisition->manager_edit_locked_at === null);
-
-                return [
-                    'id' => (string) $requisition->id,
-                    'numero' => $requisition->numero_requisition,
-                    'projet' => $requisition->projet,
-                    'initiateurNom' => $requisition->user?->name ?? 'Inconnu',
-                    'initiateurRole' => $requisition->user?->role ?? 'Staff',
-                    'nature' => strtolower($requisition->nature_requisition) === 'service' ? 'Service' : 'Achat',
-                    'devise' => $requisition->devise,
-                    'montantTotal' => (float) $requisition->montant_total,
-                    'caisseSouhaitee' => $requisition->caisse_decaissement ?? 'Caisse principale',
-                    'caisseAttribuee' => $requisition->status === 'draft' ? null : $requisition->caisse_decaissement,
-                    'observation' => $requisition->observation ?: 'Aucune observation',
-                    'is_urgent' => (bool) $requisition->is_urgent,
-                    'statut' => $isReturnedForCorrection ? 'a_corriger' : $this->mapProjectManagerStatus($requisition->status),
-                    'statusCode' => $requisition->status,
-                    'statusLabel' => $isReturnedForCorrection
-                        ? ($hasCorrection ? 'Correction apportée, en attente de visa MP' : 'Renvoyée pour correction')
-                        : $this->projectManagerStatusLabel($requisition->status),
-                    'canDecide' => $requisition->status === 'draft' && (! $isReturnedForCorrection || $hasCorrection),
-                    'canEdit' => $canEdit,
-                    'financeReturned' => $isReturnedForCorrection,
-                    'needsCorrection' => $needsCorrection,
-                    'dateSoumission' => $requisition->created_at?->format('d/m/Y') ?? '',
-                    'lignes' => $requisition->demandes->map(function ($demande) use ($requisition) {
-                        $justificatifs = $demande->justificatifs()->get();
+        return $requisitions->map(function ($r) use ($managerId) {
+            $isFinanceReturned = $r->status === 'draft' && str_contains($r->observation ?? '', 'Motif rejet Finance:');
+            return [
+                'id' => (string) $r->id,
+                'numero' => $r->numero_requisition,
+                'projet' => $r->projet,
+                'initiateurNom' => $r->user?->name ?? 'Inconnu',
+                'initiateurRole' => $r->user?->role ?? 'Staff',
+                'nature' => $r->nature_requisition,
+                'devise' => $r->devise,
+                'montantTotal' => (float) $r->montant_total,
+                'caisseSouhaitee' => $r->caisse_decaissement ?? 'Caisse principale',
+                'caisseAttribuee' => $r->caisse_decaissement,
+                'observation' => $r->observation,
+                'is_urgent' => (bool) $r->is_urgent,
+                'statut' => $isFinanceReturned ? 'a_corriger' : ($r->status === 'draft' ? 'en_attente_mp' : 'valide_mp'),
+                'statusCode' => $r->status,
+                'statusLabel' => $r->status === 'draft' ? ($isFinanceReturned ? 'Renvoyé par Finance' : 'En attente Visa MP') : 'Validé MP',
+                'canDecide' => $r->status === 'draft' && ! $isFinanceReturned,
+                'canEdit' => $r->status === 'draft' || $isFinanceReturned,
+                'financeReturned' => $isFinanceReturned,
+                'needsCorrection' => $isFinanceReturned || $r->status === 'rejetee',
+                'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
+                'lignes' => $r->demandes->map(fn ($d) => [
+                    'id' => (string) $d->id,
+                    'activite' => $d->activite,
+                    'codeAllBudget' => $d->code_all_budget,
+                    'code_allocation' => $d->code_allocation,
+                    'nature' => $d->nature ?? '',
+                    'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
+                    'unite' => $d->unite ?? '',
+                    'frais' => (float) $d->frais_unitaire,
+                    'prixUnitaire' => (float) $d->frais_unitaire,
+                    'devise' => $r->devise,
+                    'total' => (float) $d->total_ligne,
+                    'justif' => $d->justificatifs->map(function ($j) {
+                        $dateFormatted = '';
+                        if (! empty($j->date)) {
+                            $dateFormatted = is_string($j->date) ? $j->date : $j->date->format('Y-m-d');
+                        }
 
                         return [
-                            'id' => (string) $demande->id,
-                            'activite' => $demande->activite,
-                            'codeAllBudget' => $demande->code_all_budget,
-                            'code_allocation' => $demande->code_allocation,
-                            'nature' => $demande->nature ?? '',
-                            'quantiteOuDuree' => (float) ($demande->quantite ?: $demande->duree ?: 0),
-                            'unite' => $demande->unite ?: (($demande->duree ?? 0) > 0 ? 'Jour(s)' : 'Unité'),
-                            'frais' => (float) $demande->frais_unitaire,
-                            'devise' => $requisition->devise,
-                            'total' => (float) $demande->total_ligne,
-                            'justif' => $justificatifs->map(function ($justificatif) {
-                                return [
-                                    'id' => (string) $justificatif->id,
-                                    'date' => $justificatif->date ?? now()->toDateString(),
-                                    'description' => $justificatif->description ?? $justificatif->original_name,
-                                    'montant' => (float) ($justificatif->montant ?? 0),
-                                    'scan' => $justificatif->original_name ?? basename($justificatif->file_path ?? 'piece.pdf'),
-                                    'fileUrl' => $justificatif->file_path
-                                        ? route('requisitions.justificatif.show', ['justificatif' => $justificatif->id])
-                                        : null,
-                                ];
-                            })->values()->all(),
+                            'id' => (string) $j->id,
+                            'date' => $dateFormatted,
+                            'description' => $j->description ?? $j->original_name,
+                            'montant' => (float) $j->montant,
+                            'scan' => $j->original_name ?? basename($j->file_path ?? 'piece.pdf'),
+                            'fileUrl' => $j->file_path ? route('requisitions.justificatif.show', ['justificatif' => $j->id]) : null,
                         ];
                     })->values()->all(),
-                ];
-            })->values()->all();
+                ])->values()->all(),
+            ];
+        })->values()->all();
     }
 
     private function mapWorkflowStatus(string $status): array
     {
         return match ($status) {
             'draft' => ['key' => 'chef_projet', 'label' => 'Brouillon', 'validator' => 'Initiateur'],
-            'urgent_direction' => ['key' => 'urgent', 'label' => 'Dérogation Urgente', 'validator' => 'Directrice Générale'],
-            'visa_mp' => ['key' => 'chef_projet', 'label' => 'Visa Chef Projet', 'validator' => 'Chef de Projet'],
-            'controle_finance' => ['key' => 'finance_budget', 'label' => 'Finance & Budget', 'validator' => 'Manager Finances'],
-            'rejetee_finance' => ['key' => 'finance_budget', 'label' => 'Rejetée par Finance', 'validator' => 'Manager Finances'],
-            'visa_admin' => ['key' => 'finance_budget', 'label' => 'Administration', 'validator' => 'Admin'],
-            'approbation_direction' => ['key' => 'finance_budget', 'label' => 'Approbation Direction', 'validator' => 'Direction'],
+            'urgent_direction' => ['key' => 'urgent', 'label' => 'Dérogation Urgente', 'validator' => 'Directrice'],
+            'visa_mp' => ['key' => 'chef_projet', 'label' => 'Visa Chef Projet', 'validator' => 'Manager Projet'],
+            'controle_finance' => ['key' => 'finance_budget', 'label' => 'Contrôle Finances', 'validator' => 'Manager Finances'],
+            'visa_admin' => ['key' => 'finance_budget', 'label' => 'Administration', 'validator' => 'Manager Admin'],
+            'approbation_direction' => ['key' => 'finance_budget', 'label' => 'Approbation Direction', 'validator' => 'Directrice Générale'],
             'decaissement_caisse' => ['key' => 'caisse_pret', 'label' => 'Caisse (Prêt)', 'validator' => 'Caisse'],
-            'cloture' => ['key' => 'caisse_pret', 'label' => 'Clôturé', 'validator' => 'Caisse'],
+            'decaisse' => ['key' => 'caisse_pret', 'label' => 'Décaissé', 'validator' => 'Caisse'],
+            'cloture' => ['key' => 'caisse_pret', 'label' => 'Clôturé', 'validator' => 'Clôture'],
             default => ['key' => 'chef_projet', 'label' => 'Brouillon', 'validator' => 'Initiateur'],
-        };
-    }
-
-    private function mapProjectManagerStatus(string $status): string
-    {
-        return match ($status) {
-            'draft' => 'en_attente_mp',
-            'rejete', 'rejetee', 'rejected', 'rejetee_finance' => 'rejete_mp',
-            'visa_mp', 'controle_finance', 'visa_admin', 'approbation_direction', 'decaissement_caisse', 'cloture' => 'valide_mp',
-            default => 'autre',
-        };
-    }
-
-    private function projectManagerStatusLabel(string $status): string
-    {
-        return match ($status) {
-            'draft' => 'En attente Visa MP',
-            'urgent_direction' => 'Dérogation Urgente (Direction)',
-            'visa_mp' => 'Visa Manager Projet',
-            'controle_finance' => 'Contrôle Finances',
-            'visa_admin' => 'Visa Administration',
-            'approbation_direction' => 'Approbation Direction',
-            'decaissement_caisse' => 'Décaissement',
-            'cloture' => 'Clôturée',
-            'rejetee_finance' => 'Rejetée par Finance',
-            'rejete', 'rejetee', 'rejected' => 'Rejetée',
-            default => ucfirst(str_replace('_', ' ', $status)),
-        };
-    }
-
-    private function formatAmount(float $amount, string $currency): string
-    {
-        $formatted = number_format($amount, 2, '.', ' ');
-
-        return match ($currency) {
-            'USD' => '$' . $formatted . ' USD',
-            'EUR' => '€' . $formatted . ' EUR',
-            default => $formatted . ' FC',
         };
     }
 }
