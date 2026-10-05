@@ -2,6 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BudgetLine;
+use App\Models\CashMovement;
+use App\Models\CashRegister;
+use App\Models\CashRegisterSession;
 use App\Models\Demande;
 use App\Models\Requisition;
 use App\Models\RequisitionSignature;
@@ -17,145 +21,376 @@ use Inertia\Response;
 class CashierController extends Controller
 {
     /**
-     * Affiche le tableau de bord du guichet caisse avec les réquisitions prêtes pour décaissement.
+     * Module 1 : Vue d'ensemble du guichet et gestion de la session journalière (Ouverture / Clôture).
      */
     public function index(Request $request): Response
     {
         $user = $request->user();
-        abort_unless($user->hasRole('cashier') || $user->hasRole('admin'), 403, 'Accès réservé au service de caisse.');
+        abort_unless($user->hasRole('cashier') || $user->hasRole('admin'), 403, 'Accès réservé au guichet caisse.');
 
-        $selectedCaisse = $request->input('caisse', 'all');
+        $userCaisses = $this->getUserCaisses($user);
+        $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
+        $selectedCaisse = CashRegister::with('activeSession')->find($selectedCaisseId) ?? $userCaisses->first();
 
-        $queryADecaisser = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
-            ->where('status', 'decaissement_caisse')
-            ->orderByDesc('updated_at');
+        $activeSession = null;
+        $sessionMouvements = [];
 
-        if ($selectedCaisse !== 'all') {
-            $queryADecaisser->where('caisse_decaissement', $selectedCaisse);
+        if ($selectedCaisse) {
+            $activeSession = CashRegisterSession::where('cash_register_id', $selectedCaisse->id)
+                ->whereDate('date_session', now()->toDateString())
+                ->latest()
+                ->first();
+
+            if ($activeSession && $activeSession->status === 'ouverte') {
+                $sessionMouvements = CashMovement::where('session_id', $activeSession->id)
+                    ->orderByDesc('created_at')
+                    ->limit(10)
+                    ->get()
+                    ->map(fn (CashMovement $m) => $this->transformMovement($m));
+            }
         }
-
-        $aDecaisser = $queryADecaisser->get()->map(fn (Requisition $r) => $this->transformRequisition($r));
-
-        $queryHistorique = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project', 'cashier'])
-            ->where('status', 'decaisse')
-            ->orderByDesc('date_decaissement')
-            ->limit(50);
-
-        if ($selectedCaisse !== 'all') {
-            $queryHistorique->where('caisse_decaissement', $selectedCaisse);
-        }
-
-        $historique = $queryHistorique->get()->map(fn (Requisition $r) => $this->transformRequisition($r));
 
         $totalAttenteUSD = (float) Requisition::where('status', 'decaissement_caisse')->where('devise', 'USD')->sum('montant_total');
         $totalAttenteFC = (float) Requisition::where('status', 'decaissement_caisse')->where('devise', 'FC')->sum('montant_total');
-        $totalDecaisseMoisUSD = (float) Requisition::where('status', 'decaisse')
-            ->where('devise', 'USD')
-            ->whereMonth('date_decaissement', now()->month)
-            ->whereYear('date_decaissement', now()->year)
-            ->sum('montant_total');
-        $totalDecaisseMoisFC = (float) Requisition::where('status', 'decaisse')
-            ->where('devise', 'FC')
-            ->whereMonth('date_decaissement', now()->month)
-            ->whereYear('date_decaissement', now()->year)
-            ->sum('montant_total');
-
-        $caissesList = ['Caisse principale', 'EU', 'Saint Jean Eudes', 'Local Fund 1 (Boulangerie)', 'Local Fund 2'];
 
         return Inertia::render('Cashier/Dashboard', [
-            'selectedCaisse' => $selectedCaisse,
-            'caissesList' => $caissesList,
-            'aDecaisser' => $aDecaisser,
-            'historique' => $historique,
+            'userCaisses' => $userCaisses->map(fn ($c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'code' => $c->code,
+                'devise' => $c->devise,
+                'solde_actuel' => (float) $c->solde_actuel,
+                'is_active' => (bool) $c->is_active,
+                'is_ouverte' => $c->isOuverte(),
+            ]),
+            'selectedCaisse' => $selectedCaisse ? [
+                'id' => $selectedCaisse->id,
+                'name' => $selectedCaisse->name,
+                'code' => $selectedCaisse->code,
+                'devise' => $selectedCaisse->devise,
+                'solde_actuel' => (float) $selectedCaisse->solde_actuel,
+                'is_ouverte' => $selectedCaisse->isOuverte(),
+            ] : null,
+            'activeSession' => $activeSession ? [
+                'id' => $activeSession->id,
+                'status' => $activeSession->status,
+                'date_session' => $activeSession->date_session->format('d/m/Y'),
+                'solde_ouverture' => (float) $activeSession->solde_ouverture,
+                'solde_fermeture' => $activeSession->solde_fermeture ? (float) $activeSession->solde_fermeture : null,
+                'total_entrees' => (float) $activeSession->total_entrees,
+                'total_sorties' => (float) $activeSession->total_sorties,
+                'opened_at' => $activeSession->opened_at?->format('H:i'),
+                'observation_ouverture' => $activeSession->observation_ouverture,
+            ] : null,
+            'sessionMouvements' => $sessionMouvements,
             'stats' => [
-                'countAttente' => $aDecaisser->count(),
                 'totalAttenteUSD' => $totalAttenteUSD,
                 'totalAttenteFC' => $totalAttenteFC,
-                'totalDecaisseMoisUSD' => $totalDecaisseMoisUSD,
-                'totalDecaisseMoisFC' => $totalDecaisseMoisFC,
             ],
         ]);
     }
 
     /**
-     * Valide le décaissement effectif et la remise des fonds avec code PIN obligatoire du caissier.
+     * Module 2 : Bons à Décaisser (Réquisitions au statut decaissement_caisse et émission des BSC).
+     */
+    public function disbursements(Request $request): Response
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('cashier') || $user->hasRole('admin'), 403);
+
+        $userCaisses = $this->getUserCaisses($user);
+        $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
+        $selectedCaisse = CashRegister::with('activeSession')->find($selectedCaisseId) ?? $userCaisses->first();
+
+        $queryADecaisser = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
+            ->where('status', 'decaissement_caisse')
+            ->orderByDesc('updated_at');
+
+        if ($selectedCaisse) {
+            $queryADecaisser->where('caisse_decaissement', $selectedCaisse->name);
+        }
+
+        $aDecaisser = $queryADecaisser->get()->map(fn (Requisition $r) => $this->transformRequisition($r));
+
+        $recentDisbursementsQuery = CashMovement::with(['cashRegister', 'cashier'])
+            ->where('type', 'sortie')
+            ->orderByDesc('created_at')
+            ->limit(20);
+
+        if ($selectedCaisse) {
+            $recentDisbursementsQuery->where('cash_register_id', $selectedCaisse->id);
+        }
+
+        $recentDisbursements = $recentDisbursementsQuery->get()->map(fn (CashMovement $m) => $this->transformMovement($m));
+
+        return Inertia::render('Cashier/Disbursements/Index', [
+            'userCaisses' => $userCaisses->map(fn ($c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'devise' => $c->devise,
+                'solde_actuel' => (float) $c->solde_actuel,
+                'is_ouverte' => $c->isOuverte(),
+            ]),
+            'selectedCaisse' => $selectedCaisse ? [
+                'id' => $selectedCaisse->id,
+                'name' => $selectedCaisse->name,
+                'devise' => $selectedCaisse->devise,
+                'solde_actuel' => (float) $selectedCaisse->solde_actuel,
+                'is_ouverte' => $selectedCaisse->isOuverte(),
+            ] : null,
+            'aDecaisser' => $aDecaisser,
+            'recentDisbursements' => $recentDisbursements,
+        ]);
+    }
+
+    /**
+     * Module 3 : Entrées & Approvisionnements (Bons d'Entrée Caisse BEC et retours de fonds).
+     */
+    public function receipts(Request $request): Response
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('cashier') || $user->hasRole('admin'), 403);
+
+        $userCaisses = $this->getUserCaisses($user);
+        $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
+        $selectedCaisse = CashRegister::with('activeSession')->find($selectedCaisseId) ?? $userCaisses->first();
+
+        $receiptsQuery = CashMovement::with(['cashRegister', 'cashier'])
+            ->where('type', 'entree')
+            ->orderByDesc('created_at')
+            ->limit(30);
+
+        if ($selectedCaisse) {
+            $receiptsQuery->where('cash_register_id', $selectedCaisse->id);
+        }
+
+        $receipts = $receiptsQuery->get()->map(fn (CashMovement $m) => $this->transformMovement($m));
+
+        return Inertia::render('Cashier/Receipts/Index', [
+            'userCaisses' => $userCaisses->map(fn ($c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'devise' => $c->devise,
+                'solde_actuel' => (float) $c->solde_actuel,
+                'is_ouverte' => $c->isOuverte(),
+            ]),
+            'selectedCaisse' => $selectedCaisse ? [
+                'id' => $selectedCaisse->id,
+                'name' => $selectedCaisse->name,
+                'devise' => $selectedCaisse->devise,
+                'solde_actuel' => (float) $selectedCaisse->solde_actuel,
+                'is_ouverte' => $selectedCaisse->isOuverte(),
+            ] : null,
+            'receipts' => $receipts,
+        ]);
+    }
+
+    /**
+     * Module 4 : Grand Livre de Caisse mensuel (Journal chronologique consolidé BEC et BSC).
+     */
+    public function ledger(Request $request): Response
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('cashier') || $user->hasRole('admin') || $user->hasRole('finance'), 403);
+
+        $userCaisses = $user->hasRole('finance') || $user->hasRole('admin')
+            ? CashRegister::all()
+            : $user->cashRegisters;
+
+        $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
+        $selectedCaisse = CashRegister::find($selectedCaisseId) ?? $userCaisses->first();
+
+        $selectedPeriod = $request->input('period', now()->format('Y-m'));
+        [$year, $month] = explode('-', $selectedPeriod);
+
+        $mouvements = collect();
+        $totalEntreesMois = 0.0;
+        $totalSortiesMois = 0.0;
+        $soldeInitialMois = 0.0;
+
+        if ($selectedCaisse) {
+            $dateDebutMois = "{$year}-{$month}-01";
+
+            $entreesPassees = (float) CashMovement::where('cash_register_id', $selectedCaisse->id)
+                ->where('type', 'entree')
+                ->whereDate('date_mouvement', '<', $dateDebutMois)
+                ->sum('montant');
+
+            $sortiesPassees = (float) CashMovement::where('cash_register_id', $selectedCaisse->id)
+                ->where('type', 'sortie')
+                ->whereDate('date_mouvement', '<', $dateDebutMois)
+                ->sum('montant');
+
+            $soldeInitialMois = $entreesPassees - $sortiesPassees;
+
+            $moisMouvements = CashMovement::with('cashier')
+                ->where('cash_register_id', $selectedCaisse->id)
+                ->whereYear('date_mouvement', (int) $year)
+                ->whereMonth('date_mouvement', (int) $month)
+                ->orderBy('date_mouvement')
+                ->orderBy('created_at')
+                ->get();
+
+            $soldeCourant = $soldeInitialMois;
+
+            $mouvements = $moisMouvements->map(function (CashMovement $m) use (&$soldeCourant) {
+                if ($m->isEntree()) {
+                    $soldeCourant += $m->montant;
+                } else {
+                    $soldeCourant -= $m->montant;
+                }
+
+                $transformed = $this->transformMovement($m);
+                $transformed['solde_progressif'] = round($soldeCourant, 2);
+                return $transformed;
+            });
+
+            $totalEntreesMois = (float) $moisMouvements->where('type', 'entree')->sum('montant');
+            $totalSortiesMois = (float) $moisMouvements->where('type', 'sortie')->sum('montant');
+        }
+
+        return Inertia::render('Cashier/Ledger/Index', [
+            'userCaisses' => $userCaisses->map(fn ($c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'devise' => $c->devise,
+            ]),
+            'selectedCaisse' => $selectedCaisse ? [
+                'id' => $selectedCaisse->id,
+                'name' => $selectedCaisse->name,
+                'devise' => $selectedCaisse->devise,
+                'solde_actuel' => (float) $selectedCaisse->solde_actuel,
+            ] : null,
+            'selectedPeriod' => $selectedPeriod,
+            'soldeInitialMois' => round($soldeInitialMois, 2),
+            'totalEntreesMois' => $totalEntreesMois,
+            'totalSortiesMois' => $totalSortiesMois,
+            'soldeFinMois' => round($soldeInitialMois + $totalEntreesMois - $totalSortiesMois, 2),
+            'mouvements' => $mouvements,
+        ]);
+    }
+
+    /**
+     * Valide le décaissement, émet le Bon de Sortie Caisse (BSC) et impacte automatiquement la ligne budgétaire.
      */
     public function disburse(Request $request, Requisition $requisition)
     {
         $user = $request->user();
-        abort_unless($user->hasRole('cashier') || $user->hasRole('admin'), 403, 'Action réservée au caissier.');
-        abort_unless($requisition->status === 'decaissement_caisse', 403, 'Cette réquisition n’est pas en attente de décaissement.');
+        abort_unless($user->hasRole('cashier') || $user->hasRole('admin'), 403);
+        abort_unless($requisition->status === 'decaissement_caisse', 403, 'Réquisition non autorisée au décaissement.');
+
+        $cashRegister = CashRegister::where('name', $requisition->caisse_decaissement)->first() ?? CashRegister::first();
+
+        $session = $cashRegister?->activeSession;
+        if (! $session || $session->status !== 'ouverte') {
+            return Redirect::back()->with('error', "Impossible de décaisser : le guichet « {$requisition->caisse_decaissement} » n'est pas ouvert aujourd'hui.");
+        }
 
         $validated = $request->validate([
             'mode_paiement' => ['required', 'string', 'in:Espèces,Chèque,Virement bancaire,Airtel Money,M-Pesa,Orange Money'],
             'reference_paiement' => ['nullable', 'string', 'max:255'],
+            'montant_en_lettres' => ['required', 'string', 'max:500'],
             'observation' => ['nullable', 'string', 'max:1000'],
             'pin' => ['required', 'string', 'digits_between:4,6'],
         ], [
-            'mode_paiement.required' => 'Veuillez sélectionner le mode de décaissement.',
-            'pin.required' => 'Le code PIN caissier est strictement obligatoire pour confirmer la sortie de fonds.',
-            'pin.digits_between' => 'Le code PIN doit comporter obligatoirement entre 4 et 6 chiffres.',
+            'pin.required' => 'Le code PIN caissier est strictement obligatoire.',
         ]);
 
         if (empty($user->signature_pin) || ! Hash::check($validated['pin'], $user->signature_pin)) {
-            return Redirect::back()->withErrors([
-                'pin' => 'Code PIN caissier incorrect ou non configuré dans votre profil.',
-            ]);
+            return Redirect::back()->withErrors(['pin' => 'Code PIN caissier incorrect ou non configuré.']);
         }
 
-        DB::transaction(function () use ($validated, $requisition, $user) {
+        DB::transaction(function () use ($validated, $requisition, $user, $cashRegister, $session) {
             $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
 
             $now = now();
-            $refPaiement = $validated['reference_paiement'] ?? 'CASH-' . $now->format('ymd-His');
+            $annee = $now->year;
+            $countBSC = CashMovement::whereYear('created_at', $annee)->where('type', 'sortie')->count() + 1;
+            $numeroBSC = sprintf('BSC-%s-%03d', $annee, $countBSC);
+
+            $primaryImputation = $lockedRequisition->demandes()->first()?->code_allocation
+                ?? $lockedRequisition->demandes()->first()?->code_all_budget
+                ?? '6.112.a';
+
+            $montantDecaisse = (float) $lockedRequisition->montant_total;
+
+            CashMovement::create([
+                'cash_register_id' => $cashRegister->id,
+                'session_id' => $session->id,
+                'cashier_id' => $user->id,
+                'requisition_id' => $lockedRequisition->id,
+                'type' => 'sortie',
+                'numero_piece' => $numeroBSC,
+                'date_mouvement' => $now->toDateString(),
+                'tiers_nom' => $lockedRequisition->user?->name ?? 'Demandeur',
+                'montant' => $montantDecaisse,
+                'devise' => $lockedRequisition->devise,
+                'montant_en_lettres' => trim($validated['montant_en_lettres']),
+                'motif' => "En règlement de : " . ($lockedRequisition->observation ?: $lockedRequisition->nature_requisition),
+                'imputation' => $primaryImputation,
+                'mode_paiement' => $validated['mode_paiement'],
+                'reference_externe' => $validated['reference_paiement'] ?? $lockedRequisition->numero_requisition,
+                'signature_tiers' => $lockedRequisition->user?->name,
+                'signature_caissier' => $user->name,
+            ]);
+
+            // DÉDUCTION AUTOMATIQUE SUR LA LIGNE BUDGÉTAIRE
+            foreach ($lockedRequisition->demandes as $demande) {
+                $codeAllocation = trim((string) ($demande->code_allocation ?: $demande->code_all_budget));
+                $ligneTotal = (float) $demande->total_ligne;
+
+                if (! empty($codeAllocation)) {
+                    $budgetLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
+                        ->where('code', $codeAllocation)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if ($budgetLine) {
+                        $budgetLine->decrement('montant_engage', min((float) $budgetLine->montant_engage, $ligneTotal));
+                        $budgetLine->increment('montant_decaisse', $ligneTotal);
+                        $budgetLine->update([
+                            'solde' => round($budgetLine->budget_initial - $budgetLine->montant_decaisse, 2),
+                        ]);
+                    }
+                }
+            }
 
             $lockedRequisition->update([
                 'status' => 'decaisse',
                 'cashier_id' => $user->id,
                 'mode_paiement' => $validated['mode_paiement'],
-                'reference_paiement' => $refPaiement,
+                'reference_paiement' => $numeroBSC,
                 'date_decaissement' => $now,
             ]);
 
-            $commentaire = sprintf(
-                'Fonds décaissés au guichet par %s. Mode : %s | Réf : %s',
-                $user->name,
-                $validated['mode_paiement'],
-                $refPaiement
-            );
-
-            if (! empty($validated['observation'])) {
-                $commentaire .= ' | Note : ' . trim($validated['observation']);
-            }
+            $cashRegister->decrement('solde_actuel', $montantDecaisse);
+            $session->increment('total_sorties', $montantDecaisse);
 
             $this->enregistrerSignature(
                 requisition: $lockedRequisition,
                 user: $user,
                 roleSignataire: 'cashier',
                 action: 'disbursed',
-                commentaire: $commentaire
+                commentaire: "Bon de Sortie Caisse {$numeroBSC} émis. Paiement effectué en {$validated['mode_paiement']}."
             );
 
             $this->notifierUtilisateur(
                 userId: $lockedRequisition->user_id,
-                titre: 'Fonds décaissés au guichet',
-                message: "Les fonds pour votre réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->montant_total} {$lockedRequisition->devise}) ont été remis au guichet. Mode: {$validated['mode_paiement']} (Réf: {$refPaiement})."
-            );
-
-            $this->notifierRole(
-                roleCible: 'finance',
-                projectId: null,
-                titre: 'Sortie de caisse confirmée',
-                message: "La réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->montant_total} {$lockedRequisition->devise}) a été décaissée par {$user->name} au guichet {$lockedRequisition->caisse_decaissement}."
+                titre: 'Bon de Sortie Caisse émis',
+                message: "Les fonds pour votre réquisition {$lockedRequisition->numero_requisition} ont été décaissés sous le Bon de Sortie Caisse N° {$numeroBSC}."
             );
         });
 
-        return Redirect::back()->with('success', "Décaissement confirmé avec succès pour le dossier {$requisition->numero_requisition}.");
+        return Redirect::back()->with('success', "Bon de Sortie Caisse émis et ligne budgétaire débitée avec succès.");
     }
 
-    /**
-     * Formate une réquisition pour transmission uniforme à Inertia.
-     */
+    protected function getUserCaisses(User $user)
+    {
+        return $user->hasRole('admin')
+            ? CashRegister::where('is_active', true)->orderBy('name')->get()
+            : $user->cashRegisters()->where('is_active', true)->orderBy('name')->get();
+    }
+
     protected function transformRequisition(Requisition $r): array
     {
         return [
@@ -175,15 +410,6 @@ class CashierController extends Controller
             'mode_paiement' => $r->mode_paiement,
             'reference_paiement' => $r->reference_paiement,
             'date_decaissement' => $r->date_decaissement?->format('d/m/Y à H:i'),
-            'cashierNom' => $r->cashier?->name,
-            'signatures' => $r->signatures->map(fn (RequisitionSignature $s) => [
-                'role' => $s->role_signataire,
-                'nom' => $s->nom_signataire,
-                'action' => $s->action,
-                'date' => $s->signed_at->format('d/m/Y H:i'),
-                'code' => $s->signature_code,
-                'hash' => $s->signature_hash,
-            ])->values()->all(),
             'lignes' => $r->demandes->map(fn (Demande $d) => [
                 'id' => (string) $d->id,
                 'activite' => $d->activite,
@@ -192,18 +418,30 @@ class CashierController extends Controller
                 'unite' => $d->unite ?? '',
                 'prixUnitaire' => (float) $d->frais_unitaire,
                 'total' => (float) $d->total_ligne,
-                'justificatifs' => $d->justificatifs->map(fn ($j) => [
-                    'id' => (string) $j->id,
-                    'nom' => $j->original_name ?? $j->description,
-                    'fileUrl' => $j->file_path ? route('requisitions.justificatif.show', ['justificatif' => $j->id]) : null,
-                ])->values()->all(),
             ])->values()->all(),
         ];
     }
 
-    /**
-     * Enregistre le visa électronique du caissier dans la table d'audit SHA-256.
-     */
+    protected function transformMovement(CashMovement $m): array
+    {
+        return [
+            'id' => (string) $m->id,
+            'type' => $m->type,
+            'numero_piece' => $m->numero_piece,
+            'date_mouvement' => $m->date_mouvement->format('d/m/Y'),
+            'tiers_nom' => $m->tiers_nom,
+            'montant' => (float) $m->montant,
+            'devise' => $m->devise,
+            'montant_en_lettres' => $m->montant_en_lettres,
+            'motif' => $m->motif,
+            'imputation' => $m->imputation,
+            'mode_paiement' => $m->mode_paiement,
+            'reference_externe' => $m->reference_externe,
+            'caisse_nom' => $m->cashRegister?->name,
+            'cashier_nom' => $m->cashier?->name,
+        ];
+    }
+
     protected function enregistrerSignature(
         Requisition $requisition,
         User $user,
@@ -213,8 +451,7 @@ class CashierController extends Controller
     ): void {
         $now = now();
         $hash = hash('sha256', $requisition->id . $user->id . $roleSignataire . $action . $now->toIso8601String() . config('app.key'));
-        $userInitials = strtoupper(substr($user->name, 0, 2));
-        $signatureCode = sprintf('BP-SIG-CS-%s-%s-%s', $userInitials, $now->format('ymd'), strtoupper(substr($hash, 0, 4)));
+        $signatureCode = sprintf('BP-SIG-CS-%s-%s-%s', strtoupper(substr($user->name, 0, 2)), $now->format('ymd'), strtoupper(substr($hash, 0, 4)));
 
         RequisitionSignature::create([
             'requisition_id' => $requisition->id,
@@ -229,20 +466,6 @@ class CashierController extends Controller
         ]);
     }
 
-    /**
-     * Notifie les utilisateurs par rôle dans la table MySQL native.
-     */
-    protected function notifierRole(string $roleCible, ?string $projectId, string $titre, string $message): void
-    {
-        $users = User::role($roleCible)->get();
-        foreach ($users as $u) {
-            $this->notifierUtilisateur($u->id, $titre, $message);
-        }
-    }
-
-    /**
-     * Insère une notification non lue en base de données MySQL.
-     */
     protected function notifierUtilisateur(string $userId, string $titre, string $message): void
     {
         DB::table('notifications')->insert([

@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -78,6 +79,26 @@ class User extends Authenticatable
         return $this->hasMany(RequisitionSignature::class);
     }
 
+    public function cashRegisters(): BelongsToMany
+    {
+        return $this->belongsToMany(CashRegister::class, 'cash_register_user');
+    }
+
+    public function cashRegisterSessions(): HasMany
+    {
+        return $this->hasMany(CashRegisterSession::class, 'cashier_id');
+    }
+
+    public function cashMovements(): HasMany
+    {
+        return $this->hasMany(CashMovement::class, 'cashier_id');
+    }
+
+    public function expenseJustifications(): HasMany
+    {
+        return $this->hasMany(ExpenseJustification::class);
+    }
+
     public static function roleRequiresSite(?string $role): bool
     {
         return in_array($role, self::SITE_ASSIGNED_ROLES, true);
@@ -98,10 +119,6 @@ class User extends Authenticatable
         return ! empty($this->signature_pin);
     }
 
-    /**
-     * Détermine si l'utilisateur a l'autorité pour signer le Bon à Payer :
-     * Soit la Directrice Générale en titre, soit le PAM (admin_manager) en intérim autorisé.
-     */
     public function canApproveAsDirector(): bool
     {
         if ($this->hasRole('director') || $this->role === 'director') {

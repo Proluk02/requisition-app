@@ -3,8 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Admin\StoreUserRequest;
-use App\Http\Requests\Admin\UpdateUserRequest;
+use App\Models\CashRegister;
 use App\Models\Project;
 use App\Models\Site;
 use App\Models\User;
@@ -21,7 +20,7 @@ class UserController extends Controller
         $this->authorize('viewAny', User::class);
 
         $users = User::query()
-            ->with(['project:id,name', 'site:id,name', 'roles:id,name'])
+            ->with(['project:id,name', 'site:id,name', 'cashRegisters:id,name', 'roles:id,name'])
             ->when($request->search, function ($query, $search) {
                 $query->where(function ($q) use ($search) {
                     $q->where('name', 'like', "%{$search}%")
@@ -33,7 +32,7 @@ class UserController extends Controller
             ->when($request->project_id, fn ($query, $projectId) => $query->where('project_id', $projectId))
             ->when($request->site_id, fn ($query, $siteId) => $query->where('site_id', $siteId))
             ->latest()
-            ->paginate(10)
+            ->paginate(15)
             ->withQueryString();
 
         return Inertia::render('Admin/Users/Index', [
@@ -42,6 +41,7 @@ class UserController extends Controller
             'roles' => Role::orderBy('name')->get(['id', 'name']),
             'projects' => Project::orderBy('name')->get(['id', 'name']),
             'sites' => Site::orderBy('name')->get(['id', 'name']),
+            'cashRegisters' => CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name']),
         ]);
     }
 
@@ -52,15 +52,31 @@ class UserController extends Controller
         return Inertia::render('Admin/Users/Create', [
             'projects' => Project::orderBy('name')->get(['id', 'name']),
             'sites' => Site::orderBy('name')->get(['id', 'name']),
+            'cashRegisters' => CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name', 'code', 'devise']),
             'roles' => Role::orderBy('name')->get(['id', 'name']),
         ]);
     }
 
-    public function store(StoreUserRequest $request)
+    public function store(Request $request)
     {
-        $data = $request->validated();
+        $this->authorize('create', User::class);
 
-        DB::transaction(function () use ($data) {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
+            'password' => ['required', 'string', 'min:8'],
+            'role' => ['required', 'string', 'exists:roles,name'],
+            'status' => ['required', 'in:active,inactive'],
+            'project_id' => ['nullable', 'exists:projects,id'],
+            'site_id' => ['nullable', 'exists:sites,id'],
+            'is_director_interim' => ['sometimes', 'boolean'],
+            'cash_register_ids' => ['nullable', 'array'],
+            'cash_register_ids.*' => ['exists:cash_registers,id'],
+        ]);
+
+        $isInterim = $data['role'] === 'admin_manager' && $request->boolean('is_director_interim');
+
+        DB::transaction(function () use ($data, $isInterim) {
             $user = User::create([
                 'name' => $data['name'],
                 'email' => $data['email'],
@@ -68,10 +84,15 @@ class UserController extends Controller
                 'role' => $data['role'],
                 'project_id' => $data['project_id'] ?? null,
                 'site_id' => $data['site_id'] ?? null,
+                'is_director_interim' => $isInterim,
                 'status' => $data['status'],
             ]);
 
             $user->assignRole($data['role']);
+
+            if ($data['role'] === 'cashier' && ! empty($data['cash_register_ids'])) {
+                $user->cashRegisters()->sync($data['cash_register_ids']);
+            }
         });
 
         return redirect()->route('admin.users.index')
@@ -82,30 +103,69 @@ class UserController extends Controller
     {
         $this->authorize('update', $user);
 
+        $user->load('cashRegisters:id');
+
         return Inertia::render('Admin/Users/Edit', [
-            'user' => $user->only(['id', 'name', 'email', 'role', 'status', 'project_id', 'site_id']),
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role,
+                'status' => $user->status,
+                'project_id' => $user->project_id,
+                'site_id' => $user->site_id,
+                'is_director_interim' => (bool) $user->is_director_interim,
+                'cash_register_ids' => $user->cashRegisters->pluck('id')->all(),
+            ],
             'projects' => Project::orderBy('name')->get(['id', 'name']),
             'sites' => Site::orderBy('name')->get(['id', 'name']),
+            'cashRegisters' => CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name', 'code', 'devise']),
             'roles' => Role::orderBy('name')->get(['id', 'name']),
         ]);
     }
 
-    public function update(UpdateUserRequest $request, User $user)
+    public function update(Request $request, User $user)
     {
-        $data = $request->validated();
+        $this->authorize('update', $user);
 
-        DB::transaction(function () use ($data, $user) {
-            $user->update([
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email,' . $user->id],
+            'password' => ['nullable', 'string', 'min:8'],
+            'role' => ['required', 'string', 'exists:roles,name'],
+            'status' => ['required', 'in:active,inactive'],
+            'project_id' => ['nullable', 'exists:projects,id'],
+            'site_id' => ['nullable', 'exists:sites,id'],
+            'is_director_interim' => ['sometimes', 'boolean'],
+            'cash_register_ids' => ['nullable', 'array'],
+            'cash_register_ids.*' => ['exists:cash_registers,id'],
+        ]);
+
+        $isInterim = $data['role'] === 'admin_manager' && $request->boolean('is_director_interim');
+
+        DB::transaction(function () use ($data, $user, $isInterim) {
+            $updateData = [
                 'name' => $data['name'],
                 'email' => $data['email'],
                 'role' => $data['role'],
                 'project_id' => $data['project_id'] ?? null,
                 'site_id' => $data['site_id'] ?? null,
+                'is_director_interim' => $isInterim,
                 'status' => $data['status'],
-                ...(! empty($data['password']) ? ['password' => Hash::make($data['password'])] : []),
-            ]);
+            ];
 
+            if (! empty($data['password'])) {
+                $updateData['password'] = Hash::make($data['password']);
+            }
+
+            $user->update($updateData);
             $user->syncRoles([$data['role']]);
+
+            if ($data['role'] === 'cashier') {
+                $user->cashRegisters()->sync($data['cash_register_ids'] ?? []);
+            } else {
+                $user->cashRegisters()->detach();
+            }
         });
 
         return redirect()->route('admin.users.index')
@@ -129,6 +189,11 @@ class UserController extends Controller
     {
         $this->authorize('delete', $user);
 
+        if ($user->requisitions()->exists() || $user->signatures()->exists()) {
+            return back()->with('error', 'Suppression impossible : cet utilisateur possède un historique financier auditable.');
+        }
+
+        $user->cashRegisters()->detach();
         $user->delete();
 
         return redirect()->route('admin.users.index')

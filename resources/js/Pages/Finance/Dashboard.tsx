@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Head, router, usePage } from '@inertiajs/react';
+import { Head, Link, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
 import {
@@ -17,8 +17,9 @@ import {
     KeyRound,
     Loader2,
     FolderKanban,
-    User as UserIcon,
-    ListFilter,
+    Building2,
+    PieChart,
+    AlertTriangle,
 } from 'lucide-react';
 
 interface FinanceJustificatif {
@@ -39,6 +40,8 @@ interface FinanceLine {
     unite: string;
     prixUnitaire: number;
     total: number;
+    budget_solde_actuel?: number | null;
+    budget_initial?: number | null;
     justificatifs: FinanceJustificatif[];
 }
 
@@ -75,39 +78,68 @@ interface UserItem {
     email: string;
 }
 
+interface CaisseSummaryItem {
+    id: string;
+    name: string;
+    code: string;
+    devise: string;
+    solde_actuel: number;
+    is_ouverte: boolean;
+    cashiers_names: string;
+}
+
+interface PendingSessionItem {
+    id: string;
+    caisse_name: string;
+    caisse_devise: string;
+    cashier_name: string;
+    solde_ouverture: number;
+    date_session: string;
+    observation?: string;
+}
+
 interface Props extends PageProps {
     scopeLabel?: string;
     requisitions?: FinanceRequisition[];
     projects?: ProjectItem[];
     usersList?: UserItem[];
+    caisses?: CaisseSummaryItem[];
+    pendingSessions?: PendingSessionItem[];
 }
 
 const money = (amount: number, currency: string) =>
     `${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${currency}`;
 
 export default function FinanceDashboard({
-    scopeLabel = 'Tous les projets',
     requisitions: initialRequisitions = [],
     projects = [],
-    usersList = [],
+    caisses = [],
+    pendingSessions = [],
 }: Props) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
 
     const [requisitions, setRequisitions] = useState<FinanceRequisition[]>(initialRequisitions);
 
-    const [activeTab, setActiveTab] = useState<'tous' | 'par_projet' | 'par_utilisateur'>('tous');
-    const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
-    const [selectedUserId, setSelectedUserId] = useState<string>('all');
+    const [selectedProject, setSelectedProject] = useState<string>('all');
+    const [selectedCaisse, setSelectedCaisse] = useState<string>('all');
+    const [selectedNature, setSelectedNature] = useState<string>('all');
     const [statusFilter, setStatusFilter] = useState('all');
 
     const [selected, setSelected] = useState<FinanceRequisition | null>(null);
     const [rejecting, setRejecting] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
 
-    const [passwordModalOpen, setPasswordModalOpen] = useState(false);
-    const [passwordSaisi, setPasswordSaisi] = useState('');
+    const [pinModalOpen, setPinModalOpen] = useState(false);
+    const [pinSaisi, setPinSaisi] = useState('');
+    const [pinError, setPinError] = useState<string | null>(null);
     const [processing, setProcessing] = useState(false);
+
+    const [sessionToAuthorize, setSessionToAuthorize] = useState<PendingSessionItem | null>(null);
+    const [sessionPin, setSessionPin] = useState('');
+    const [sessionPinError, setSessionPinError] = useState<string | null>(null);
+    const [authorizingSession, setAuthorizingSession] = useState(false);
+
     const [toast, setToast] = useState<{
         type: 'success' | 'error';
         message: string;
@@ -121,55 +153,55 @@ export default function FinanceDashboard({
     const filteredRequisitions = useMemo(() => {
         return requisitions.filter((item) => {
             if (statusFilter === 'pending' && !item.canDecide) return false;
-            if (statusFilter === 'approved' && item.statusCode !== 'controle_finance') return false;
+            if (statusFilter === 'controle_finance' && item.statusCode !== 'controle_finance') return false;
+            if (statusFilter === 'decaissement_caisse' && item.statusCode !== 'decaissement_caisse') return false;
+            if (statusFilter === 'decaisse' && item.statusCode !== 'decaisse') return false;
             if (statusFilter === 'returned' && !item.financeRejected) return false;
 
-            if (activeTab === 'par_projet' && selectedProjectId !== 'all') {
-                if (
-                    item.project_id !== selectedProjectId &&
-                    item.projet !== selectedProjectId
-                )
-                    return false;
+            if (selectedProject !== 'all' && item.project_id !== selectedProject && item.projet !== selectedProject) {
+                return false;
             }
 
-            if (activeTab === 'par_utilisateur' && selectedUserId !== 'all') {
-                if (
-                    item.user_id !== selectedUserId &&
-                    item.initiateurNom !== selectedUserId
-                )
-                    return false;
+            if (selectedCaisse !== 'all' && item.caisseAttribuee !== selectedCaisse) {
+                return false;
+            }
+
+            if (selectedNature !== 'all' && item.nature !== selectedNature) {
+                return false;
             }
 
             return true;
         });
-    }, [requisitions, statusFilter, activeTab, selectedProjectId, selectedUserId]);
+    }, [requisitions, statusFilter, selectedProject, selectedCaisse, selectedNature]);
 
     const handleTriggerApprove = () => {
         if (!selected) return;
-        setPasswordSaisi('');
-        setPasswordModalOpen(true);
+        setPinSaisi('');
+        setPinError(null);
+        setPinModalOpen(true);
     };
 
     const handleConfirmSignature = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selected || !passwordSaisi) return;
+        if (!selected || !pinSaisi) return;
 
         setProcessing(true);
+        setPinError(null);
 
         router.patch(
             route('requisitions.finance-decision', selected.id),
             {
                 decision: 'approve',
-                password: passwordSaisi,
+                pin: pinSaisi.trim(),
             },
             {
                 preserveScroll: true,
                 onFinish: () => setProcessing(false),
                 onSuccess: () => {
                     const updatedId = selected.id;
-                    setPasswordModalOpen(false);
+                    setPinModalOpen(false);
                     setSelected(null);
-                    setPasswordSaisi('');
+                    setPinSaisi('');
 
                     setRequisitions((prev) =>
                         prev.map((item) => {
@@ -187,15 +219,11 @@ export default function FinanceDashboard({
 
                     showToast(
                         'success',
-                        `Visa Financier apposé avec succès sur ${selected.numero}. Transmis à l'Administration.`,
+                        `Visa Financier certifié apposé sur ${selected.numero}. Transmis à l'Administration.`
                     );
                 },
                 onError: (errors) => {
-                    showToast(
-                        'error',
-                        (errors as any).password ||
-                            'Erreur lors de la signature financière.',
-                    );
+                    setPinError((errors as any).pin || 'Code PIN financier incorrect ou non configuré.');
                 },
             },
         );
@@ -213,7 +241,7 @@ export default function FinanceDashboard({
             route('requisitions.finance-decision', selected.id),
             {
                 decision: 'reject',
-                password: 'skip',
+                pin: '0000',
                 motif_rejet: rejectionReason,
             },
             {
@@ -240,318 +268,327 @@ export default function FinanceDashboard({
                         }),
                     );
 
-                    showToast(
-                        'error',
-                        `Réquisition ${selected.numero} renvoyée pour correction budgétaire.`,
-                    );
+                    showToast('error', `Réquisition ${selected.numero} renvoyée pour correction budgétaire.`);
                 },
                 onError: (errors) => {
-                    showToast(
-                        'error',
-                        (errors as any).motif_rejet || 'Erreur lors du rejet.',
-                    );
+                    showToast('error', (errors as any).motif_rejet || 'Erreur lors du renvoi.');
                 },
             },
         );
     };
 
-    const pendingCount = requisitions.filter((item) => item.canDecide).length;
-    const approvedCount = requisitions.filter(
-        (item) => item.statusCode === 'controle_finance',
-    ).length;
-    const returnedCount = requisitions.filter((item) => item.financeRejected).length;
+    const handleAuthorizeSession = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!sessionToAuthorize || !sessionPin) return;
 
-    const tabClass = (tab: typeof activeTab) =>
-        `inline-flex items-center gap-2 pb-3 px-3 border-b-2 text-xs font-semibold transition ${
-            activeTab === tab
-                ? 'border-primary text-primary'
-                : 'border-transparent text-gray-500 hover:text-on-surface'
-        }`;
+        setAuthorizingSession(true);
+        setSessionPinError(null);
 
-    const renderStatutBadge = (item: FinanceRequisition) => {
-        let cls = 'bg-gray-100 text-gray-700';
-        if (item.canDecide) cls = 'bg-tertiary-soft text-tertiary-dark';
-        else if (item.statusCode === 'controle_finance')
-            cls = 'bg-success-soft text-success-dark';
-        else if (item.financeRejected) cls = 'bg-error-soft text-error-dark';
-        return (
-            <span className={`${cls} px-2.5 py-1 rounded-full text-[10px] font-bold`}>
-                {item.statusLabel}
-            </span>
+        router.patch(
+            route('cashier.session.authorize-opening', sessionToAuthorize.id),
+            { pin: sessionPin.trim() },
+            {
+                preserveScroll: true,
+                onFinish: () => setAuthorizingSession(false),
+                onSuccess: () => {
+                    setSessionToAuthorize(null);
+                    setSessionPin('');
+                    showToast('success', `Guichet ${sessionToAuthorize.caisse_name} ouvert avec succès.`);
+                },
+                onError: (errs) => {
+                    setSessionPinError(errs.pin || 'Code PIN financier incorrect.');
+                },
+            }
         );
     };
 
+    const pendingCount = requisitions.filter((item) => item.canDecide).length;
+    const decaissementPretCount = requisitions.filter((item) => item.statusCode === 'decaissement_caisse').length;
+    const decaisseCount = requisitions.filter((item) => item.statusCode === 'decaisse').length;
+
     return (
         <AppLayout>
-            <Head title="Direction Financière & Contrôle de Gestion" />
+            <Head title="Direction Financière — Centre Financier" />
 
             <div className="space-y-6">
-                {/* En-tête */}
-                <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-outline-soft pb-5">
+                <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
                     <div>
-                        <p className="text-[10px] uppercase tracking-wider font-bold text-tertiary flex items-center gap-1.5">
-                            <Wallet className="w-3 h-3" />
-                            Direction Financière
-                        </p>
-                        <h1 className="text-xl font-bold text-on-surface mt-1">
-                            Contrôle Budgétaire & Visa Financier
+                        <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1.5 flex items-center gap-1.5">
+                            <Wallet className="w-3.5 h-3.5 text-[#04326D]" />
+                            <span>Direction Financière</span>
+                            <span className="mx-1">/</span>
+                            <span className="text-[#04326D]">Centre Financier</span>
+                        </nav>
+                        <h1 className="text-xl font-bold text-[#0B192C]">
+                            Contrôle Budgétaire, Caisses & Visas
                         </h1>
-                        <p className="text-xs text-gray-500 mt-1">
-                            Financier :{' '}
-                            <strong className="text-on-surface">{user.name}</strong> • Vérification
-                            des soubassements et imputations.
+                        <p className="text-[12px] text-gray-500 mt-1">
+                            Financier : <strong className="text-[#0B192C]">{user.name}</strong> • Vérification des soubassements, autorisations de caisses et contrôle d'imputation en temps réel.
                         </p>
                     </div>
-                    <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-primary bg-primary-soft px-3 py-1.5 rounded-md border border-primary/15">
-                        <FileText className="w-3 h-3" />
-                        {requisitions.length} dossier(s) au total
-                    </span>
+
+                    <div className="flex items-center gap-2">
+                        <Link
+                            href={route('finance.budgets.index')}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow-sm transition"
+                        >
+                            <PieChart className="w-4 h-4 text-emerald-400" />
+                            <span>Centre Budgétaire & Donateurs</span>
+                        </Link>
+                    </div>
                 </header>
 
-                {/* Toast */}
+                {pendingSessions.length > 0 && (
+                    <div className="p-4 bg-amber-50 border-2 border-amber-400 rounded shadow-sm space-y-3">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2.5">
+                                <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0" />
+                                <div>
+                                    <h3 className="text-xs font-bold uppercase tracking-wider text-amber-950">
+                                        Demande d'Ouverture de Guichet en Attente ({pendingSessions.length})
+                                    </h3>
+                                    <p className="text-[11px] text-amber-900 mt-0.5">
+                                        Un caissier a demandé l'ouverture de sa caisse pour la journée. Votre autorisation par PIN est requise pour démarrer les opérations.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-1">
+                            {pendingSessions.map((session) => (
+                                <div key={session.id} className="p-3 bg-white border border-amber-300 rounded flex justify-between items-center text-xs">
+                                    <div>
+                                        <strong className="text-[#0B192C] block">{session.caisse_name}</strong>
+                                        <span className="text-[11px] text-gray-500 block">
+                                            Caissier : {session.cashier_name}
+                                        </span>
+                                        <span className="text-[11px] font-mono font-bold text-amber-800">
+                                            Fond initial : {money(session.solde_ouverture, session.caisse_devise)}
+                                        </span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSessionToAuthorize(session);
+                                            setSessionPin('');
+                                            setSessionPinError(null);
+                                        }}
+                                        className="px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow transition shrink-0"
+                                    >
+                                        Autoriser
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 {toast && (
                     <div
-                        className={`p-3.5 rounded-md text-xs font-semibold flex justify-between items-center gap-3 border animate-slide-down ${
+                        className={`p-3.5 rounded text-xs font-semibold flex justify-between items-center gap-3 border ${
                             toast.type === 'success'
-                                ? 'bg-success-soft text-success-dark border-success/30'
-                                : 'bg-error-soft text-error-dark border-error/30'
+                                ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                                : 'bg-red-50 text-red-900 border-red-300'
                         }`}
                     >
                         <div className="flex items-center gap-2">
                             {toast.type === 'success' ? (
-                                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                                <CheckCircle2 className="w-4 h-4 text-emerald-700" />
                             ) : (
-                                <AlertCircle className="w-4 h-4 shrink-0" />
+                                <AlertCircle className="w-4 h-4 text-red-700" />
                             )}
                             <span>{toast.message}</span>
                         </div>
-                        <button
-                            type="button"
-                            onClick={() => setToast(null)}
-                            className="text-[11px] underline hover:no-underline shrink-0"
-                        >
+                        <button type="button" onClick={() => setToast(null)} className="underline text-[11px]">
                             Fermer
                         </button>
                     </div>
                 )}
 
-                {/* KPI */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="bg-white p-5 shadow-card border border-outline-soft rounded-lg border-l-4 border-l-tertiary hover:shadow-md transition-shadow">
-                        <div className="flex items-center justify-between mb-2">
-                            <p className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">
-                                En attente de Visa Finance
-                            </p>
-                            <div className="w-8 h-8 rounded-md bg-tertiary-soft flex items-center justify-center">
-                                <Clock className="w-4 h-4 text-tertiary" />
-                            </div>
-                        </div>
-                        <p className="text-2xl font-black text-tertiary">
-                            {pendingCount}{' '}
-                            <span className="text-base font-bold text-gray-500">
-                                dossier(s)
-                            </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between border-l-4 border-l-[#F58F20]">
+                        <span className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">
+                            En attente de Visa Finance
+                        </span>
+                        <p className="text-2xl font-black text-[#F58F20] mt-2">
+                            {pendingCount} <span className="text-xs font-normal text-gray-500">dossier(s)</span>
                         </p>
                     </div>
 
-                    <div className="bg-white p-5 shadow-card border border-outline-soft rounded-lg border-l-4 border-l-success hover:shadow-md transition-shadow">
-                        <div className="flex items-center justify-between mb-2">
-                            <p className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">
-                                Validées par Finance
-                            </p>
-                            <div className="w-8 h-8 rounded-md bg-success-soft flex items-center justify-center">
-                                <CheckCircle2 className="w-4 h-4 text-success" />
-                            </div>
-                        </div>
-                        <p className="text-2xl font-black text-success">
-                            {approvedCount}{' '}
-                            <span className="text-base font-bold text-gray-500">
-                                dossier(s)
-                            </span>
+                    <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between border-l-4 border-l-[#04326D]">
+                        <span className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">
+                            Prêtes pour Caisse (Bon à Payer)
+                        </span>
+                        <p className="text-2xl font-black text-[#04326D] mt-2">
+                            {decaissementPretCount} <span className="text-xs font-normal text-gray-500">dossier(s)</span>
                         </p>
                     </div>
 
-                    <div className="bg-white p-5 shadow-card border border-outline-soft rounded-lg border-l-4 border-l-error hover:shadow-md transition-shadow">
-                        <div className="flex items-center justify-between mb-2">
-                            <p className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">
-                                Renvoyées en correction
-                            </p>
-                            <div className="w-8 h-8 rounded-md bg-error-soft flex items-center justify-center">
-                                <AlertCircle className="w-4 h-4 text-error" />
-                            </div>
-                        </div>
-                        <p className="text-2xl font-black text-error">
-                            {returnedCount}{' '}
-                            <span className="text-base font-bold text-gray-500">
-                                dossier(s)
-                            </span>
+                    <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between border-l-4 border-l-emerald-600">
+                        <span className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">
+                            Dossiers Décaissés au Guichet
+                        </span>
+                        <p className="text-2xl font-black text-emerald-700 mt-2">
+                            {decaisseCount} <span className="text-xs font-normal text-gray-500">dossier(s)</span>
                         </p>
                     </div>
                 </div>
 
-                {/* Onglets */}
-                <div className="bg-white border border-outline-soft rounded-lg shadow-card overflow-hidden">
-                    <div className="border-b border-outline-soft px-4 pt-3 flex flex-wrap items-center justify-between gap-3 bg-surface-muted">
-                        <div className="flex gap-1">
-                            <button
-                                type="button"
-                                onClick={() => setActiveTab('tous')}
-                                className={tabClass('tous')}
-                            >
-                                <ListFilter className="w-3.5 h-3.5" />
-                                Vue Générale
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setActiveTab('par_projet')}
-                                className={tabClass('par_projet')}
-                            >
-                                <FolderKanban className="w-3.5 h-3.5" />
-                                Par Projet
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setActiveTab('par_utilisateur')}
-                                className={tabClass('par_utilisateur')}
-                            >
-                                <UserIcon className="w-3.5 h-3.5" />
-                                Par Utilisateur
-                            </button>
-                        </div>
-
-                        <div className="flex items-center gap-2 pb-2 text-xs">
-                            <span className="text-gray-500 font-semibold">Statut :</span>
-                            <select
-                                value={statusFilter}
-                                onChange={(e) => setStatusFilter(e.target.value)}
-                                className="border border-outline-variant rounded-md px-2.5 py-1.5 text-xs bg-white text-gray-700 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
-                            >
-                                <option value="all">Tous les états</option>
-                                <option value="pending">À valider uniquement</option>
-                                <option value="approved">Validées Finance</option>
-                                <option value="returned">Renvoyées en correction</option>
-                            </select>
-                        </div>
+                <div className="bg-white border border-[#B2BED6] rounded shadow-sm p-4 space-y-3">
+                    <header className="flex items-center justify-between border-b pb-2">
+                        <h2 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
+                            <Building2 className="w-4 h-4 text-[#04326D]" />
+                            <span>Situation des Caisses Physiques</span>
+                        </h2>
+                        <span className="text-[10px] text-gray-400 uppercase font-mono font-bold">
+                            Temps réel MySQL
+                        </span>
+                    </header>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                        {caisses.map((c) => (
+                            <div key={c.id} className="p-3 bg-gray-50 border rounded flex flex-col justify-between space-y-2">
+                                <div className="flex items-start justify-between">
+                                    <strong className="text-[#0B192C]">{c.name}</strong>
+                                    {c.is_ouverte ? (
+                                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                                            Ouverte
+                                        </span>
+                                    ) : (
+                                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-gray-200 text-gray-600">
+                                            Fermée
+                                        </span>
+                                    )}
+                                </div>
+                                <div>
+                                    <span className="text-[10px] text-gray-500 block">Solde en caisse :</span>
+                                    <span className="text-base font-black font-mono text-[#04326D]">
+                                        {money(c.solde_actuel, c.devise)}
+                                    </span>
+                                </div>
+                                <span className="text-[10px] text-gray-500 truncate" title={c.cashiers_names}>
+                                    Caissier : {c.cashiers_names || 'Non assigné'}
+                                </span>
+                            </div>
+                        ))}
                     </div>
+                </div>
 
-                    {activeTab === 'par_projet' && (
-                        <div className="p-3.5 bg-primary-soft/60 border-b border-primary/15 flex flex-wrap items-center gap-3 text-xs">
-                            <span className="font-bold text-primary flex items-center gap-1.5">
-                                <FolderKanban className="w-3.5 h-3.5" />
-                                Sélectionnez le Projet :
-                            </span>
+                <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
+                    <div className="border-b px-4 py-3 bg-gray-50 flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div className="flex flex-wrap items-center gap-2">
                             <select
-                                value={selectedProjectId}
-                                onChange={(e) => setSelectedProjectId(e.target.value)}
-                                className="border border-primary rounded-md px-3 py-1.5 text-xs bg-white font-bold text-primary focus:outline-none focus:ring-1 focus:ring-primary/30 transition"
+                                value={selectedProject}
+                                onChange={(e) => setSelectedProject(e.target.value)}
+                                className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold"
                             >
                                 <option value="all">Tous les projets</option>
                                 {projects.map((p) => (
-                                    <option key={p.id} value={p.name}>
-                                        {p.name}
-                                    </option>
+                                    <option key={p.id} value={p.id}>{p.name}</option>
                                 ))}
                             </select>
-                        </div>
-                    )}
 
-                    {activeTab === 'par_utilisateur' && (
-                        <div className="p-3.5 bg-primary-soft/60 border-b border-primary/15 flex flex-wrap items-center gap-3 text-xs">
-                            <span className="font-bold text-primary flex items-center gap-1.5">
-                                <UserIcon className="w-3.5 h-3.5" />
-                                Sélectionnez le Demandeur :
-                            </span>
                             <select
-                                value={selectedUserId}
-                                onChange={(e) => setSelectedUserId(e.target.value)}
-                                className="border border-primary rounded-md px-3 py-1.5 text-xs bg-white font-bold text-primary focus:outline-none focus:ring-1 focus:ring-primary/30 transition"
+                                value={selectedCaisse}
+                                onChange={(e) => setSelectedCaisse(e.target.value)}
+                                className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold"
                             >
-                                <option value="all">Tous les utilisateurs</option>
-                                {usersList.map((u) => (
-                                    <option key={u.id} value={u.name}>
-                                        {u.name} ({u.email})
-                                    </option>
+                                <option value="all">Toutes les caisses</option>
+                                {caisses.map((c) => (
+                                    <option key={c.id} value={c.name}>{c.name}</option>
                                 ))}
                             </select>
-                        </div>
-                    )}
 
-                    {/* Tableau */}
+                            <select
+                                value={selectedNature}
+                                onChange={(e) => setSelectedNature(e.target.value)}
+                                className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold"
+                            >
+                                <option value="all">Achat & Service</option>
+                                <option value="Achat">Achat</option>
+                                <option value="Service">Service</option>
+                            </select>
+
+                            <select
+                                value={statusFilter}
+                                onChange={(e) => setStatusFilter(e.target.value)}
+                                className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold"
+                            >
+                                <option value="all">Tous les statuts</option>
+                                <option value="pending">En attente Visa Finance</option>
+                                <option value="controle_finance">Validées Finance</option>
+                                <option value="decaissement_caisse">Bon à Payer Accordé</option>
+                                <option value="decaisse">Décaissées au Guichet</option>
+                                <option value="returned">Renvoyées en correction</option>
+                            </select>
+                        </div>
+
+                        <span className="text-[11px] font-bold text-gray-500 font-mono">
+                            {filteredRequisitions.length} dossier(s)
+                        </span>
+                    </div>
+
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs border-collapse">
                             <thead>
-                                <tr className="bg-sidebar text-white uppercase text-[10px] font-bold tracking-wider">
+                                <tr className="bg-[#0B192C] text-white uppercase text-[10px] font-bold tracking-wider">
                                     <th className="px-4 py-3">Numéro</th>
                                     <th className="px-4 py-3">Demandeur</th>
-                                    <th className="px-4 py-3">Projet</th>
-                                    <th className="px-4 py-3">Observation / Objet</th>
+                                    <th className="px-4 py-3">Projet / Caisse</th>
+                                    <th className="px-4 py-3">Observation</th>
                                     <th className="px-4 py-3 text-right">Montant</th>
                                     <th className="px-4 py-3 text-center">Urgence</th>
                                     <th className="px-4 py-3 text-center">Statut</th>
                                     <th className="px-4 py-3 text-right">Action</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-outline-soft text-gray-700">
+                            <tbody className="divide-y divide-gray-200 text-gray-700">
                                 {filteredRequisitions.length === 0 ? (
                                     <tr>
-                                        <td colSpan={8} className="py-12 text-center">
-                                            <FileText
-                                                className="w-10 h-10 mx-auto text-gray-300 mb-2"
-                                                strokeWidth={1.5}
-                                            />
-                                            <p className="text-gray-500 font-medium text-sm">
-                                                Aucune réquisition dans cette sélection
-                                            </p>
-                                            <p className="text-gray-400 text-[11px] mt-1">
-                                                Modifiez les filtres ou l'onglet actif.
-                                            </p>
+                                        <td colSpan={8} className="py-12 text-center text-gray-400 italic">
+                                            Aucune réquisition ne correspond aux filtres appliqués.
                                         </td>
                                     </tr>
                                 ) : (
                                     filteredRequisitions.map((item) => (
-                                        <tr
-                                            key={item.id}
-                                            className="hover:bg-primary-soft/40 transition-colors"
-                                        >
-                                            <td className="px-4 py-3.5 font-mono font-bold text-primary whitespace-nowrap">
+                                        <tr key={item.id} className="hover:bg-[#F9F9FF] transition">
+                                            <td className="px-4 py-3.5 font-mono font-bold text-[#04326D] whitespace-nowrap">
                                                 {item.numero}
                                             </td>
                                             <td className="px-4 py-3.5 whitespace-nowrap">
-                                                <p className="font-semibold text-on-surface">
-                                                    {item.initiateurNom}
-                                                </p>
-                                                <p className="text-[10px] text-gray-400">
-                                                    {item.initiateurRole}
-                                                </p>
+                                                <p className="font-bold text-gray-800">{item.initiateurNom}</p>
+                                                <p className="text-[10px] text-gray-400">{item.initiateurRole}</p>
                                             </td>
-                                            <td className="px-4 py-3.5 font-semibold text-gray-700">
-                                                {item.projet}
+                                            <td className="px-4 py-3.5">
+                                                <p className="font-bold text-[#0B192C]">{item.projet}</p>
+                                                <p className="text-[10px] text-gray-500">{item.caisseAttribuee}</p>
                                             </td>
-                                            <td
-                                                className="px-4 py-3.5 max-w-xs truncate"
-                                                title={item.observation || ''}
-                                            >
-                                                {item.observation ||
-                                                    item.lignes
-                                                        .map((l) => l.activite)
-                                                        .join(', ')}
+                                            <td className="px-4 py-3.5 max-w-xs truncate" title={item.observation || ''}>
+                                                {item.observation || '—'}
                                             </td>
-                                            <td className="px-4 py-3.5 text-right font-mono font-bold whitespace-nowrap text-on-surface">
+                                            <td className="px-4 py-3.5 text-right font-mono font-bold text-[#0B192C] whitespace-nowrap">
                                                 {money(item.montantTotal, item.devise)}
                                             </td>
                                             <td className="px-4 py-3.5 text-center whitespace-nowrap">
                                                 {item.is_urgent ? (
-                                                    <span className="bg-error-soft text-error-dark px-2 py-0.5 rounded font-black text-[9px] uppercase">
-                                                        URGENT
+                                                    <span className="px-2 py-0.5 rounded bg-red-100 text-red-800 font-black text-[9px] uppercase">
+                                                        Urgent
                                                     </span>
                                                 ) : (
-                                                    <span className="text-gray-400 text-[10px]">
-                                                        Normal
-                                                    </span>
+                                                    <span className="text-gray-400 text-[10px]">Normal</span>
                                                 )}
                                             </td>
                                             <td className="px-4 py-3.5 text-center whitespace-nowrap">
-                                                {renderStatutBadge(item)}
+                                                <span
+                                                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                                        item.canDecide
+                                                            ? 'bg-amber-100 text-amber-900'
+                                                            : item.statusCode === 'decaisse'
+                                                            ? 'bg-emerald-100 text-emerald-800'
+                                                            : 'bg-blue-50 text-[#04326D]'
+                                                    }`}
+                                                >
+                                                    {item.canDecide ? 'À Viser' : item.statusLabel}
+                                                </span>
                                             </td>
                                             <td className="px-4 py-3.5 text-right whitespace-nowrap">
                                                 <button
@@ -561,19 +598,10 @@ export default function FinanceDashboard({
                                                         setRejecting(false);
                                                         setRejectionReason('');
                                                     }}
-                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary-light text-white rounded-md font-semibold text-xs shadow-sm transition"
+                                                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow-sm transition"
                                                 >
-                                                    {item.canDecide ? (
-                                                        <>
-                                                            <ShieldCheck className="w-3 h-3" />
-                                                            Examiner & Viser
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <FileText className="w-3 h-3" />
-                                                            Consulter
-                                                        </>
-                                                    )}
+                                                    <ShieldCheck className="w-3.5 h-3.5" />
+                                                    <span>{item.canDecide ? 'Examiner & Viser' : 'Détails'}</span>
                                                 </button>
                                             </td>
                                         </tr>
@@ -585,180 +613,149 @@ export default function FinanceDashboard({
                 </div>
             </div>
 
-            {/* MODALE CONTRÔLE BUDGÉTAIRE */}
             {selected && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
-                    <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white border border-outline-soft shadow-modal rounded-lg p-6 space-y-5 animate-slide-down">
-                        <header className="flex items-start justify-between border-b border-outline-soft pb-3">
-                            <div className="flex items-start gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-primary-soft flex items-center justify-center shrink-0">
-                                    <Wallet className="w-5 h-5 text-primary" />
-                                </div>
-                                <div>
-                                    <span className="text-[10px] uppercase font-bold text-tertiary tracking-wider">
-                                        Contrôle Budgétaire & Visa Financier
-                                    </span>
-                                    <h2 className="text-base font-bold text-on-surface">
-                                        Réquisition N° {selected.numero}{' '}
-                                        <span className="text-xs font-normal text-gray-500">
-                                            ({selected.nature})
-                                        </span>
-                                    </h2>
-                                    <p className="text-xs text-gray-500 mt-0.5">
-                                        Initiée par{' '}
-                                        <strong className="text-on-surface">
-                                            {selected.initiateurNom}
-                                        </strong>{' '}
-                                        • Projet : {selected.projet} • Date :{' '}
-                                        {selected.dateSoumission}
-                                    </p>
-                                </div>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
+                    <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-5 animate-slide-down">
+                        <header className="flex items-start justify-between border-b pb-3">
+                            <div>
+                                <span className="text-[10px] uppercase font-bold text-[#F58F20] tracking-wider">
+                                    Contrôle Budgétaire & Visa Financier (Étape 2)
+                                </span>
+                                <h2 className="text-base font-bold text-[#0B192C]">
+                                    Réquisition N° {selected.numero} ({selected.nature})
+                                </h2>
+                                <p className="text-xs text-gray-500 mt-0.5">
+                                    Demandeur : <strong>{selected.initiateurNom}</strong> • Projet : {selected.projet} • Caisse : {selected.caisseAttribuee}
+                                </p>
                             </div>
                             <button
                                 type="button"
                                 onClick={() => setSelected(null)}
-                                className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100 transition"
-                                aria-label="Fermer"
+                                className="text-gray-400 hover:text-gray-600 text-lg font-bold"
                             >
-                                <X className="w-4 h-4" />
+                                <X className="w-5 h-5" />
                             </button>
                         </header>
 
                         {selected.observation && (
-                            <div className="p-3 bg-tertiary-soft border-l-4 border-tertiary text-xs text-gray-800 rounded-r-md">
-                                <strong className="text-on-surface">
-                                    Observation / Contexte :
-                                </strong>{' '}
-                                {selected.observation}
+                            <div className="p-3 bg-amber-50 border-l-4 border-[#F58F20] text-xs text-gray-800 rounded-r">
+                                <strong>Observation :</strong> {selected.observation}
                             </div>
                         )}
 
-                        {/* Tableau */}
                         <div>
                             <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
-                                Articles & Devis Attachés (Vérification Soubassements)
+                                Contrôle de l'Impact Budgétaire Ligne par Ligne
                             </h3>
-                            <table className="w-full text-left text-xs border border-outline-soft rounded-md overflow-hidden">
-                                <thead className="bg-surface-muted font-bold text-gray-600">
+                            <table className="w-full text-left text-xs border border-gray-200 rounded overflow-hidden">
+                                <thead className="bg-gray-100 font-bold text-gray-600">
                                     <tr>
                                         <th className="p-2">Désignation</th>
                                         <th className="p-2">Code Budget (MP)</th>
-                                        <th className="p-2 text-right">Qté/Durée</th>
-                                        <th className="p-2 text-right">Prix Unit.</th>
-                                        <th className="p-2 text-right">Total</th>
+                                        <th className="p-2 text-right">Solde Dispo</th>
+                                        <th className="p-2 text-right">Montant Ligne</th>
+                                        <th className="p-2 text-center">Impact Budgétaire</th>
                                         <th className="p-2">Pièces Jointes</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-outline-soft text-gray-700">
-                                    {selected.lignes.map((line) => (
-                                        <tr key={line.id}>
-                                            <td className="p-2 font-medium">
-                                                {line.activite}
-                                            </td>
-                                            <td className="p-2 font-mono font-bold text-primary">
-                                                {line.codeAllocation ||
-                                                    line.codeBudget ||
-                                                    'Non attribué'}
-                                            </td>
-                                            <td className="p-2 text-right">
-                                                {line.quantiteOuDuree} {line.unite}
-                                            </td>
-                                            <td className="p-2 text-right">
-                                                {money(line.prixUnitaire, selected.devise)}
-                                            </td>
-                                            <td className="p-2 text-right font-bold">
-                                                {money(line.total, selected.devise)}
-                                            </td>
-                                            <td className="p-2">
-                                                {line.justificatifs.length > 0 ? (
-                                                    <div className="space-y-1">
-                                                        {line.justificatifs.map((f) => (
-                                                            <div
-                                                                key={f.id}
-                                                                className="bg-primary-soft text-primary px-2 py-1 rounded-md text-[10px] flex items-center justify-between gap-1"
-                                                            >
-                                                                <span
-                                                                    className="truncate max-w-[120px] flex items-center gap-1"
-                                                                    title={f.description}
-                                                                >
-                                                                    <Paperclip className="w-2.5 h-2.5 shrink-0" />
-                                                                    {f.nom}
-                                                                </span>
-                                                                {f.fileUrl && (
-                                                                    <a
-                                                                        href={f.fileUrl}
-                                                                        target="_blank"
-                                                                        rel="noreferrer"
-                                                                        className="inline-flex items-center gap-0.5 font-bold hover:underline"
-                                                                    >
-                                                                        <Download className="w-2.5 h-2.5" />
-                                                                        Ouvrir
-                                                                    </a>
-                                                                )}
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <span className="text-gray-400 italic text-[10px]">
-                                                        Aucun justificatif
-                                                    </span>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))}
+                                <tbody className="divide-y text-gray-700">
+                                    {selected.lignes.map((line) => {
+                                        const code = line.codeAllocation || line.codeBudget || 'Non attribué';
+                                        const solde = line.budget_solde_actuel;
+                                        const depassement = solde !== null && solde !== undefined && line.total > solde;
+
+                                        return (
+                                            <tr key={line.id} className={depassement ? 'bg-red-50/60' : ''}>
+                                                <td className="p-2 font-medium">{line.activite}</td>
+                                                <td className="p-2 font-mono font-bold text-[#04326D]">{code}</td>
+                                                <td className="p-2 text-right font-mono font-bold">
+                                                    {solde !== null && solde !== undefined ? money(solde, selected.devise) : 'Non défini'}
+                                                </td>
+                                                <td className="p-2 text-right font-mono font-bold">
+                                                    {money(line.total, selected.devise)}
+                                                </td>
+                                                <td className="p-2 text-center">
+                                                    {solde === null || solde === undefined ? (
+                                                        <span className="text-[10px] text-gray-400">Non budgété</span>
+                                                    ) : depassement ? (
+                                                        <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-[10px] font-bold">
+                                                            Dépassement de crédit
+                                                        </span>
+                                                    ) : (
+                                                        <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                                                            Crédit suffisant
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="p-2">
+                                                    {line.justificatifs.length > 0 ? (
+                                                        <div className="space-y-1">
+                                                            {line.justificatifs.map((f) => (
+                                                                <div key={f.id} className="flex items-center justify-between text-[10px] bg-blue-50 text-[#04326D] px-2 py-0.5 rounded">
+                                                                    <span className="truncate max-w-[120px]">{f.nom}</span>
+                                                                    {f.fileUrl && (
+                                                                        <a href={f.fileUrl} target="_blank" rel="noreferrer" className="underline font-bold ml-1">
+                                                                            Voir
+                                                                        </a>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-gray-400 italic text-[10px]">Aucun justificatif</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
-                                <tfoot className="bg-surface-muted font-bold border-t border-outline-soft">
+                                <tfoot className="bg-gray-50 font-bold border-t">
                                     <tr>
-                                        <td colSpan={4} className="p-2 text-right">
-                                            Montant Total Général :
-                                        </td>
-                                        <td className="p-2 text-right text-primary text-sm font-mono">
+                                        <td colSpan={3} className="p-2 text-right">Total Dossier :</td>
+                                        <td className="p-2 text-right font-mono text-sm text-[#0B192C]">
                                             {money(selected.montantTotal, selected.devise)}
                                         </td>
-                                        <td />
+                                        <td colSpan={2} />
                                     </tr>
                                 </tfoot>
                             </table>
                         </div>
 
-                        {/* Décision */}
                         {selected.canDecide && (
-                            <div className="border-t border-outline-soft pt-4 space-y-3">
+                            <div className="border-t pt-4 space-y-3">
                                 {!rejecting ? (
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex items-center justify-between">
                                         <button
                                             type="button"
                                             onClick={() => setRejecting(true)}
-                                            className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-error/40 text-error rounded-md text-xs font-semibold hover:bg-error-soft transition"
+                                            className="px-3.5 py-2 border border-red-300 text-red-600 hover:bg-red-50 rounded text-xs font-bold transition"
                                         >
-                                            <Ban className="w-3.5 h-3.5" />
-                                            Rejeter (problème budgétaire)
+                                            <Ban className="w-3.5 h-3.5 inline mr-1" />
+                                            Rejeter (Problème Budgétaire)
                                         </button>
 
                                         <div className="flex gap-2">
                                             <button
                                                 type="button"
                                                 onClick={() => setSelected(null)}
-                                                className="px-3 py-2 border border-outline-variant rounded-md text-xs text-gray-600 hover:bg-gray-50 transition"
+                                                className="px-3.5 py-2 border rounded text-xs font-semibold text-gray-600 hover:bg-gray-50"
                                             >
                                                 Fermer
                                             </button>
                                             <button
                                                 type="button"
                                                 onClick={handleTriggerApprove}
-                                                className="inline-flex items-center gap-2 px-4 py-2 bg-success hover:bg-success-dark text-white rounded-md text-xs font-semibold shadow-sm hover:shadow-md transition-all active:scale-[0.98]"
+                                                className="px-4 py-2 bg-[#10B981] hover:bg-[#059669] text-white rounded text-xs font-bold shadow transition"
                                             >
-                                                <ShieldCheck className="w-4 h-4" />
-                                                Accorder Visa Financier
+                                                Accorder Visa Financier (PIN)
                                             </button>
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="bg-error-soft p-4 rounded-md border border-error/20 space-y-3">
+                                    <div className="bg-red-50 p-4 rounded border border-red-200 space-y-3">
                                         <div className="flex justify-between items-center">
-                                            <h4 className="text-xs font-bold text-error-dark uppercase flex items-center gap-1.5">
-                                                <AlertCircle className="w-3.5 h-3.5" />
-                                                Motif du Rejet Financier (obligatoire)
+                                            <h4 className="text-xs font-bold text-red-800 uppercase">
+                                                Motif du Rejet Financier (Obligatoire)
                                             </h4>
                                             <button
                                                 type="button"
@@ -771,18 +768,16 @@ export default function FinanceDashboard({
                                         <textarea
                                             rows={3}
                                             value={rejectionReason}
-                                            onChange={(e) =>
-                                                setRejectionReason(e.target.value)
-                                            }
-                                            placeholder="Précisez le problème comptable (dépassement ligne budgétaire, prix unitaire excessif, pièces manquantes)…"
-                                            className="w-full border border-error/30 rounded-md p-2.5 text-xs focus:outline-none focus:border-error focus:ring-1 focus:ring-error/20 bg-white transition"
+                                            onChange={(e) => setRejectionReason(e.target.value)}
+                                            placeholder="Précisez le motif comptable : dépassement de crédit, absence de proforma..."
+                                            className="w-full border border-red-300 rounded p-2 text-xs bg-white focus:outline-none"
                                             required
                                         />
                                         <div className="flex justify-end gap-2">
                                             <button
                                                 type="button"
                                                 onClick={() => setRejecting(false)}
-                                                className="px-3 py-2 border border-outline-variant rounded-md text-xs bg-white text-gray-700 hover:bg-gray-50 transition"
+                                                className="px-3 py-1.5 border rounded text-xs bg-white text-gray-700"
                                             >
                                                 Annuler
                                             </button>
@@ -790,11 +785,8 @@ export default function FinanceDashboard({
                                                 type="button"
                                                 onClick={handleRejectFinance}
                                                 disabled={processing}
-                                                className="inline-flex items-center gap-1.5 px-4 py-2 bg-error hover:bg-error-dark text-white rounded-md text-xs font-semibold shadow-sm transition disabled:opacity-60"
+                                                className="px-4 py-1.5 bg-[#DC2626] hover:bg-[#b91c1c] text-white rounded text-xs font-bold shadow"
                                             >
-                                                {processing && (
-                                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                                )}
                                                 Confirmer le Rejet
                                             </button>
                                         </div>
@@ -802,90 +794,132 @@ export default function FinanceDashboard({
                                 )}
                             </div>
                         )}
-
-                        {!selected.canDecide && (
-                            <footer className="flex justify-end border-t border-outline-soft pt-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setSelected(null)}
-                                    className="px-4 py-2 bg-sidebar text-white text-xs font-semibold rounded-md hover:bg-primary transition"
-                                >
-                                    Fermer
-                                </button>
-                            </footer>
-                        )}
                     </div>
                 </div>
             )}
 
-            {/* MODALE SIGNATURE ÉLECTRONIQUE */}
-            {passwordModalOpen && selected && (
-                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-                    <div className="bg-white rounded-lg border-2 border-primary shadow-modal max-w-sm w-full p-6 space-y-4 animate-slide-down">
-                        <div className="text-center border-b border-outline-soft pb-3">
-                            <div className="w-12 h-12 mx-auto rounded-full bg-primary-soft flex items-center justify-center mb-2">
-                                <Lock className="w-5 h-5 text-primary" />
+            {pinModalOpen && selected && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in">
+                    <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
+                        <div className="text-center border-b pb-3">
+                            <div className="w-12 h-12 mx-auto rounded-full bg-blue-50 flex items-center justify-center mb-2">
+                                <Lock className="w-5 h-5 text-[#04326D]" />
                             </div>
-                            <h3 className="text-sm font-black uppercase text-on-surface tracking-wider">
-                                Visa de Contrôle Financier
+                            <h3 className="text-sm font-bold uppercase text-[#0B192C] tracking-wide">
+                                Signature Électronique du Visa Financier
                             </h3>
                             <p className="text-[11px] text-gray-500 mt-1">
-                                Signataire :{' '}
-                                <strong className="text-on-surface">{user.name}</strong> (Manager
-                                des Finances)
+                                Réquisition N° <strong className="font-mono text-[#04326D]">{selected.numero}</strong>
                             </p>
                         </div>
 
-                        <form onSubmit={handleConfirmSignature} className="space-y-3">
+                        {pinError && (
+                            <div className="p-2.5 bg-red-50 border border-red-300 text-red-800 rounded text-xs">
+                                {pinError}
+                            </div>
+                        )}
+
+                        <form onSubmit={handleConfirmSignature} className="space-y-3 text-xs">
                             <div>
-                                <label className="block text-[11px] font-bold text-gray-700 mb-1.5">
-                                    Saisissez votre mot de passe pour signer le visa :
+                                <label className="block font-bold text-gray-700 mb-1">
+                                    Saisissez votre Code PIN personnel financier *
                                 </label>
                                 <div className="relative">
-                                    <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                                    <KeyRound className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                                     <input
                                         type="password"
-                                        placeholder="••••••••"
-                                        value={passwordSaisi}
-                                        onChange={(e) => setPasswordSaisi(e.target.value)}
-                                        className="w-full border border-outline-variant rounded-md p-2.5 pl-9 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+                                        maxLength={6}
+                                        placeholder="Code PIN (4 à 6 chiffres)"
+                                        value={pinSaisi}
+                                        onChange={(e) => setPinSaisi(e.target.value)}
+                                        className="w-full pl-8 pr-3 py-2 border border-[#B2BED6] rounded text-xs font-mono tracking-widest text-[#0B192C] focus:outline-none focus:border-[#04326D]"
                                         autoFocus
                                         required
                                     />
                                 </div>
                             </div>
 
-                            <p className="text-[10px] text-gray-400 leading-relaxed flex items-start gap-1.5">
-                                <ShieldCheck className="w-3 h-3 shrink-0 mt-0.5" />
-                                Cette signature électronique infalsifiable atteste de la
-                                disponibilité des crédits budgétaires pour la réquisition{' '}
-                                {selected.numero}.
+                            <p className="text-[10px] text-gray-400 leading-tight">
+                                Cette signature infalsifiable atteste de la disponibilité des crédits budgétaires et autorise le passage au contrôle administratif.
                             </p>
 
-                            <div className="flex justify-end gap-2 pt-2 border-t border-outline-soft">
+                            <div className="flex justify-end gap-2 pt-2 border-t">
                                 <button
                                     type="button"
-                                    onClick={() => setPasswordModalOpen(false)}
-                                    className="px-3 py-2 border border-outline-variant rounded-md text-xs text-gray-600 hover:bg-gray-50 transition"
+                                    onClick={() => setPinModalOpen(false)}
+                                    className="px-3.5 py-1.5 border border-[#B2BED6] rounded text-xs text-gray-600 hover:bg-gray-50"
                                 >
                                     Annuler
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={processing}
-                                    className="inline-flex items-center gap-2 px-4 py-2 bg-success hover:bg-success-dark text-white font-semibold text-xs rounded-md shadow-sm transition disabled:opacity-50"
+                                    className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white rounded text-xs font-bold shadow transition"
                                 >
-                                    {processing ? (
-                                        <>
-                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                            Signature…
-                                        </>
-                                    ) : (
-                                        <>
-                                            <ShieldCheck className="w-3.5 h-3.5" />
-                                            Signer & Valider
-                                        </>
-                                    )}
+                                    {processing ? 'Signature...' : 'Signer & Valider'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {sessionToAuthorize && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in">
+                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
+                        <header className="border-b pb-2">
+                            <h3 className="text-sm font-bold text-[#0B192C] uppercase tracking-wide">
+                                Autoriser l'Ouverture de Caisse
+                            </h3>
+                            <p className="text-[11px] text-gray-500">
+                                Guichet : <strong>{sessionToAuthorize.caisse_name}</strong> • Caissier : <strong>{sessionToAuthorize.cashier_name}</strong>
+                            </p>
+                        </header>
+
+                        <div className="p-3 bg-amber-50 border border-amber-300 rounded text-xs">
+                            <span className="text-[10px] font-bold text-gray-500 uppercase block">Fond de caisse déclaré :</span>
+                            <span className="text-base font-black font-mono text-[#0B192C]">
+                                {money(sessionToAuthorize.solde_ouverture, sessionToAuthorize.caisse_devise)}
+                            </span>
+                        </div>
+
+                        {sessionPinError && (
+                            <div className="p-2.5 bg-red-50 border border-red-300 text-red-800 rounded text-xs">
+                                {sessionPinError}
+                            </div>
+                        )}
+
+                        <form onSubmit={handleAuthorizeSession} className="space-y-3 text-xs">
+                            <div>
+                                <label className="block font-bold text-gray-700 mb-1">
+                                    Confirmez avec votre Code PIN financier *
+                                </label>
+                                <input
+                                    type="password"
+                                    maxLength={6}
+                                    placeholder="Code PIN"
+                                    value={sessionPin}
+                                    onChange={(e) => setSessionPin(e.target.value)}
+                                    className="w-full border border-[#B2BED6] rounded p-2 text-xs font-mono tracking-widest text-[#0B192C] focus:outline-none focus:border-[#04326D]"
+                                    autoFocus
+                                    required
+                                />
+                            </div>
+
+                            <div className="flex justify-end gap-2 pt-2 border-t">
+                                <button
+                                    type="button"
+                                    onClick={() => setSessionToAuthorize(null)}
+                                    className="px-3 py-1.5 border rounded text-xs text-gray-600 hover:bg-gray-50"
+                                >
+                                    Annuler
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={authorizingSession}
+                                    className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow"
+                                >
+                                    {authorizingSession ? 'Autorisation...' : 'Autoriser l’Ouverture'}
                                 </button>
                             </div>
                         </form>

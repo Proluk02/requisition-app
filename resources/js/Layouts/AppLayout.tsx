@@ -21,6 +21,12 @@ import {
     Menu,
     X,
     Plus,
+    PieChart,
+    MapPin,
+    ArrowUpRight,
+    ArrowDownLeft,
+    BookOpen,
+    KeyRound,
 } from 'lucide-react';
 
 interface NotificationItem {
@@ -357,19 +363,59 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </div>
                         )}
 
-                        {/* Finance */}
+                        {/* Direction Financière (Centre Financier Complet) */}
                         {isFinance && (
                             <div className="space-y-1">
+                                <span className="px-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
+                                    Direction Financière
+                                </span>
+
                                 <Link
                                     href={route('finance.dashboard')}
                                     className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('finance.*')
+                                        isRouteActive('finance.dashboard')
                                             ? 'bg-white/10 text-white font-bold'
                                             : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
                                     }`}
                                 >
                                     <ShieldCheck className="w-4 h-4 text-primary" />
-                                    <span>Contrôle Budgétaire & Visa</span>
+                                    <span>Contrôle & Visas Réquisitions</span>
+                                </Link>
+
+                                <Link
+                                    href={route('finance.budgets.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('finance.budgets.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <PieChart className="w-4 h-4 text-emerald-400" />
+                                    <span>Budgets & Donateurs</span>
+                                </Link>
+
+                                <Link
+                                    href={route('finance.caisses.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('finance.caisses.index')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <Building2 className="w-4 h-4 text-amber-300" />
+                                    <span>Gestion des Caisses & Soldes</span>
+                                </Link>
+
+                                <Link
+                                    href={route('finance.caisses.sessions')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('finance.caisses.sessions')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <KeyRound className="w-4 h-4 text-[#F58F20]" />
+                                    <span>Approbations d'Ouvertures</span>
                                 </Link>
                             </div>
                         )}
@@ -380,16 +426,53 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 <span className="px-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
                                     Guichet Caisse
                                 </span>
+
                                 <Link
                                     href={route('cashier.dashboard')}
                                     className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('cashier.*')
+                                        isRouteActive('cashier.dashboard')
                                             ? 'bg-white/10 text-white font-bold'
                                             : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
                                     }`}
                                 >
-                                    <Wallet className="w-4 h-4 text-emerald-400" />
-                                    <span>Décaissements en Caisse</span>
+                                    <Wallet className="w-4 h-4 text-amber-300" />
+                                    <span>Guichet & Sessions</span>
+                                </Link>
+
+                                <Link
+                                    href={route('cashier.disbursements.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('cashier.disbursements.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <ArrowUpRight className="w-4 h-4 text-emerald-400" />
+                                    <span>Bons à Décaisser (BSC)</span>
+                                </Link>
+
+                                <Link
+                                    href={route('cashier.receipts.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('cashier.receipts.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <ArrowDownLeft className="w-4 h-4 text-blue-300" />
+                                    <span>Entrées de Caisse (BEC)</span>
+                                </Link>
+
+                                <Link
+                                    href={route('cashier.ledger.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('cashier.ledger.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <BookOpen className="w-4 h-4 text-purple-300" />
+                                    <span>Grand Livre de Caisse</span>
                                 </Link>
                             </div>
                         )}
@@ -400,6 +483,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 <span className="px-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
                                     Administration
                                 </span>
+
                                 <Link
                                     href={route('admin.users.index')}
                                     className={`flex items-center gap-3 px-3 py-2 rounded transition ${
@@ -410,6 +494,42 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 >
                                     <Users className="w-4 h-4" />
                                     <span>{__('Gestion Utilisateurs')}</span>
+                                </Link>
+
+                                <Link
+                                    href={route('admin.projects.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('admin.projects.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <FolderKanban className="w-4 h-4 text-blue-300" />
+                                    <span>Projets Institutionnels</span>
+                                </Link>
+
+                                <Link
+                                    href={route('admin.sites.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('admin.sites.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <MapPin className="w-4 h-4 text-emerald-300" />
+                                    <span>Sites Opérationnels</span>
+                                </Link>
+
+                                <Link
+                                    href={route('admin.cash-registers.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('admin.cash-registers.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <Building2 className="w-4 h-4 text-amber-300" />
+                                    <span>Caisses & Guichets</span>
                                 </Link>
                             </div>
                         )}
@@ -450,7 +570,6 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                 </div>
             </aside>
 
-            {/* Backdrop mobile */}
             {mobileMenuOpen && (
                 <div
                     onClick={() => setMobileMenuOpen(false)}
@@ -644,9 +763,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                 </main>
             </div>
 
-            {/* ============================================================
-                MODALE : Détail Notification
-            ============================================================ */}
+            {/* MODALE : Détail Notification */}
             {selectedNotif && (
                 <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-sm w-full p-5 space-y-3">
@@ -686,9 +803,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                 </div>
             )}
 
-            {/* ============================================================
-                MODALE : Règles Financières & Procédures
-            ============================================================ */}
+            {/* MODALE : Règles Financières & Procédures */}
             {showHelpModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-lg w-full p-6 space-y-4">

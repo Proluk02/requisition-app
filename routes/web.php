@@ -1,9 +1,16 @@
 <?php
 
+use App\Http\Controllers\Admin\BackupController;
+use App\Http\Controllers\Admin\CashRegisterController;
+use App\Http\Controllers\Admin\ProjectController;
+use App\Http\Controllers\Admin\SiteController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\CashierController;
+use App\Http\Controllers\CashierSessionController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\Finance\BudgetController;
+use App\Http\Controllers\Finance\CaisseManagementController;
 use App\Http\Controllers\LocaleController;
 use App\Http\Controllers\PettyCashController;
 use App\Http\Controllers\ProfileController;
@@ -36,6 +43,23 @@ Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admi
     Route::put('/users/{user}', [UserController::class, 'update'])->name('users.update');
     Route::patch('/users/{user}/toggle-status', [UserController::class, 'toggleStatus'])->name('users.toggle-status');
     Route::delete('/users/{user}', [UserController::class, 'destroy'])->name('users.destroy');
+
+    Route::get('/projects', [ProjectController::class, 'index'])->name('projects.index');
+    Route::post('/projects', [ProjectController::class, 'store'])->name('projects.store');
+    Route::put('/projects/{project}', [ProjectController::class, 'update'])->name('projects.update');
+    Route::delete('/projects/{project}', [ProjectController::class, 'destroy'])->name('projects.destroy');
+
+    Route::get('/sites', [SiteController::class, 'index'])->name('sites.index');
+    Route::post('/sites', [SiteController::class, 'store'])->name('sites.store');
+    Route::put('/sites/{site}', [SiteController::class, 'update'])->name('sites.update');
+    Route::delete('/sites/{site}', [SiteController::class, 'destroy'])->name('sites.destroy');
+
+    Route::get('/cash-registers', [CashRegisterController::class, 'index'])->name('cash-registers.index');
+    Route::post('/cash-registers', [CashRegisterController::class, 'store'])->name('cash-registers.store');
+    Route::put('/cash-registers/{cashRegister}', [CashRegisterController::class, 'update'])->name('cash-registers.update');
+    Route::delete('/cash-registers/{cashRegister}', [CashRegisterController::class, 'destroy'])->name('cash-registers.destroy');
+
+    Route::get('/backup/download', [BackupController::class, 'download'])->name('backup.download');
 });
 
 Route::middleware(['auth', 'active'])->group(function () {
@@ -46,12 +70,33 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::get('/director/caisses', [DashboardController::class, 'directorCaisses'])->name('director.caisses');
     Route::get('/director/urgences', [DashboardController::class, 'directorUrgences'])->name('director.urgences');
 
-    Route::get('/finance/requisitions', [DashboardController::class, 'finance'])
-        ->middleware('role:finance')
-        ->name('finance.dashboard');
+    Route::prefix('finance')->name('finance.')->middleware('role:finance')->group(function () {
+        Route::get('/requisitions', [DashboardController::class, 'finance'])->name('dashboard');
 
-    Route::get('/cashier/dashboard', [CashierController::class, 'index'])->name('cashier.dashboard');
+        Route::get('/budgets', [BudgetController::class, 'index'])->name('budgets.index');
+        Route::post('/budgets/import', [BudgetController::class, 'import'])->name('budgets.import');
+        Route::post('/budgets/lines', [BudgetController::class, 'storeBudgetLine'])->name('budgets.lines.store');
+        Route::post('/donors', [BudgetController::class, 'storeDonor'])->name('donors.store');
+
+        Route::get('/caisses', [CaisseManagementController::class, 'index'])->name('caisses.index');
+        Route::post('/caisses', [CaisseManagementController::class, 'store'])->name('caisses.store');
+        Route::put('/caisses/{cashRegister}', [CaisseManagementController::class, 'update'])->name('caisses.update');
+        Route::get('/caisses/sessions', [CaisseManagementController::class, 'sessions'])->name('caisses.sessions');
+    });
+
+    Route::prefix('cashier')->name('cashier.')->group(function () {
+        Route::get('/dashboard', [CashierController::class, 'index'])->name('dashboard');
+        Route::get('/disbursements', [CashierController::class, 'disbursements'])->name('disbursements.index');
+        Route::get('/receipts', [CashierController::class, 'receipts'])->name('receipts.index');
+        Route::get('/ledger', [CashierController::class, 'ledger'])->name('ledger.index');
+    });
+
     Route::patch('/requisitions/{requisition}/cashier-disburse', [CashierController::class, 'disburse'])->name('requisitions.cashier-disburse');
+
+    Route::post('/cashier/registers/{cashRegister}/request-opening', [CashierSessionController::class, 'requestOpening'])->name('cashier.session.request-opening');
+    Route::patch('/cashier/sessions/{session}/authorize-opening', [CashierSessionController::class, 'authorizeOpening'])->name('cashier.session.authorize-opening');
+    Route::post('/cashier/sessions/{session}/close', [CashierSessionController::class, 'closeSession'])->name('cashier.session.close');
+    Route::post('/cashier/registers/{cashRegister}/entree', [CashierSessionController::class, 'storeEntree'])->name('cashier.movement.entree');
 
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');

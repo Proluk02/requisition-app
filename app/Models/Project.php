@@ -31,4 +31,14 @@ class Project extends Model
     {
         return $this->hasMany(User::class);
     }
+
+    public function requisitions(): HasMany
+    {
+        return $this->hasMany(Requisition::class);
+    }
+
+    public function budgetLines(): HasMany
+    {
+        return $this->hasMany(BudgetLine::class);
+    }
 }

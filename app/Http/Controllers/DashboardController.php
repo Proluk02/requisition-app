@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BudgetLine;
+use App\Models\CashRegister;
+use App\Models\CashRegisterSession;
 use App\Models\Demande;
 use App\Models\Project;
 use App\Models\Requisition;
@@ -99,7 +102,6 @@ class DashboardController extends Controller
         return $this->renderDirectorDashboard($request);
     }
 
-
     private function renderDirectorDashboard(Request $request)
     {
         $user = $request->user();
@@ -126,11 +128,10 @@ class DashboardController extends Controller
             ];
         });
 
-        $caisses = ['Caisse principale', 'EU', 'Saint Jean Eudes', 'Local Fund 1 (Boulangerie)', 'Local Fund 2'];
-        $caissesStats = collect($caisses)->map(function ($caisse) use ($allPeriodRequisitions) {
-            $caisseReqs = $allPeriodRequisitions->filter(fn ($r) => $r->caisse_decaissement === $caisse);
+        $caissesStats = CashRegister::all()->map(function ($caisse) use ($allPeriodRequisitions) {
+            $caisseReqs = $allPeriodRequisitions->filter(fn ($r) => $r->caisse_decaissement === $caisse->name);
             return [
-                'caisse' => $caisse,
+                'caisse' => $caisse->name,
                 'count' => $caisseReqs->count(),
                 'total_usd' => (float) $caisseReqs->where('devise', 'USD')->sum('montant_total'),
                 'decaisse_usd' => (float) $caisseReqs->where('status', 'decaisse')->where('devise', 'USD')->sum('montant_total'),
@@ -221,11 +222,10 @@ class DashboardController extends Controller
     {
         abort_unless($request->user()?->canApproveAsDirector(), 403);
 
-        $caissesNoms = ['Caisse principale', 'EU', 'Saint Jean Eudes', 'Local Fund 1 (Boulangerie)', 'Local Fund 2'];
-        $caisses = collect($caissesNoms)->map(function ($nom) {
-            $reqs = Requisition::where('caisse_decaissement', $nom)->get();
+        $caisses = CashRegister::with('activeSession')->get()->map(function ($c) {
+            $reqs = Requisition::where('caisse_decaissement', $c->name)->get();
             return [
-                'nom' => $nom,
+                'nom' => $c->name,
                 'total_dossiers' => $reqs->count(),
                 'total_usd' => (float) $reqs->where('devise', 'USD')->sum('montant_total'),
                 'total_fc' => (float) $reqs->where('devise', 'FC')->sum('montant_total'),
@@ -266,26 +266,106 @@ class DashboardController extends Controller
         ]);
     }
 
-    private function mapWorkflowLevel(string $status): array
-    {
-        return match ($status) {
-            'draft' => ['step' => 1, 'label' => 'Brouillon', 'color' => 'gray'],
-            'urgent_direction' => ['step' => 1, 'label' => 'Dérogation Urgente', 'color' => 'red'],
-            'visa_mp' => ['step' => 2, 'label' => 'Visa MP Accordé', 'color' => 'blue'],
-            'controle_finance' => ['step' => 3, 'label' => 'Contrôle Finances Validé', 'color' => 'purple'],
-            'visa_admin' => ['step' => 4, 'label' => 'En attente Bon à Payer', 'color' => 'amber'],
-            'decaissement_caisse' => ['step' => 5, 'label' => 'Approuvé (À décaisser)', 'color' => 'emerald'],
-            'decaisse' => ['step' => 6, 'label' => 'Décaissé', 'color' => 'green'],
-            'cloture' => ['step' => 7, 'label' => 'Clôturé', 'color' => 'black'],
-            'rejetee' => ['step' => 0, 'label' => 'Rejeté', 'color' => 'red'],
-            default => ['step' => 1, 'label' => ucfirst($status), 'color' => 'gray'],
-        };
-    }
-
     public function finance(Request $request)
     {
         abort_unless($request->user()?->hasRole('finance'), 403);
         return $this->renderFinanceDashboard($request->user());
+    }
+
+    /**
+     * Dashboard Manager Finance enrichi : centre financier avec suivi budgétaire en direct et autorisations caisse.
+     */
+    private function renderFinanceDashboard(User $user)
+    {
+        $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
+            ->orderByDesc('created_at')
+            ->get();
+
+        $budgetLines = BudgetLine::all()->keyBy(fn ($b) => $b->project_id . '_' . $b->code);
+
+        $pendingSessions = CashRegisterSession::with(['cashRegister', 'cashier'])
+            ->where('status', 'en_attente_autorisation')
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(fn (CashRegisterSession $s) => [
+                'id' => $s->id,
+                'caisse_name' => $s->cashRegister?->name,
+                'caisse_devise' => $s->cashRegister?->devise,
+                'cashier_name' => $s->cashier?->name,
+                'solde_ouverture' => (float) $s->solde_ouverture,
+                'date_session' => $s->date_session->format('d/m/Y'),
+                'observation' => $s->observation_ouverture,
+            ]);
+
+        $caisses = CashRegister::with(['activeSession', 'cashiers'])->get()->map(fn ($c) => [
+            'id' => $c->id,
+            'name' => $c->name,
+            'code' => $c->code,
+            'devise' => $c->devise,
+            'solde_actuel' => (float) $c->solde_actuel,
+            'is_ouverte' => $c->isOuverte(),
+            'cashiers_count' => $c->cashiers->count(),
+            'cashiers_names' => $c->cashiers->pluck('name')->join(', '),
+        ]);
+
+        $projects = Project::orderBy('name')->get(['id', 'name', 'full_name']);
+        $users = User::orderBy('name')->get(['id', 'name', 'email']);
+
+        return Inertia::render('Finance/Dashboard', [
+            'projectName' => null,
+            'scopeLabel' => 'Tous les projets',
+            'projects' => $projects,
+            'usersList' => $users,
+            'caisses' => $caisses,
+            'pendingSessions' => $pendingSessions,
+            'requisitions' => $requisitions->map(function (Requisition $r) use ($budgetLines) {
+                return [
+                    'id' => (string) $r->id,
+                    'numero' => $r->numero_requisition,
+                    'projet' => $r->projet,
+                    'project_id' => $r->project_id,
+                    'user_id' => $r->user_id,
+                    'initiateurNom' => $r->user?->name ?? 'Inconnu',
+                    'initiateurRole' => $r->user?->role ?? 'Staff',
+                    'nature' => $r->nature_requisition,
+                    'devise' => $r->devise,
+                    'montantTotal' => (float) $r->montant_total,
+                    'observation' => $r->observation,
+                    'caisseAttribuee' => $r->caisse_decaissement ?? 'Caisse principale',
+                    'is_urgent' => (bool) $r->is_urgent,
+                    'statusCode' => $r->status,
+                    'statusLabel' => ucfirst($r->status),
+                    'canDecide' => $r->status === 'visa_mp',
+                    'financeRejected' => $r->status === 'draft' && str_contains($r->observation ?? '', 'Motif rejet Finance:'),
+                    'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
+                    'lignes' => $r->demandes->map(function (Demande $d) use ($r, $budgetLines) {
+                        $codeAlloc = trim((string) ($d->code_allocation ?: $d->code_all_budget));
+                        $budgetKey = $r->project_id . '_' . $codeAlloc;
+                        $lineModel = $budgetLines->get($budgetKey);
+
+                        return [
+                            'id' => (string) $d->id,
+                            'activite' => $d->activite,
+                            'codeBudget' => $d->code_all_budget,
+                            'codeAllocation' => $d->code_allocation,
+                            'nature' => $d->nature ?? '',
+                            'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
+                            'unite' => $d->unite ?? '',
+                            'prixUnitaire' => (float) $d->frais_unitaire,
+                            'frais' => (float) $d->frais_unitaire,
+                            'total' => (float) $d->total_ligne,
+                            'budget_solde_actuel' => $lineModel ? (float) $lineModel->solde : null,
+                            'budget_initial' => $lineModel ? (float) $lineModel->budget_initial : null,
+                            'justificatifs' => $d->justificatifs->map(fn ($j) => [
+                                'id' => (string) $j->id,
+                                'nom' => $j->original_name ?? $j->description,
+                                'fileUrl' => $j->file_path ? route('requisitions.justificatif.show', ['justificatif' => $j->id]) : null,
+                            ])->values()->all(),
+                        ];
+                    })->values()->all(),
+                ];
+            })->values()->all(),
+        ]);
     }
 
     public function adminManager(Request $request)
@@ -339,60 +419,20 @@ class DashboardController extends Controller
         ]);
     }
 
-    private function renderFinanceDashboard(User $user)
+    private function mapWorkflowLevel(string $status): array
     {
-        $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
-            ->orderByDesc('created_at')
-            ->get();
-
-        $projects = Project::orderBy('name')->get(['id', 'name']);
-        $users = User::orderBy('name')->get(['id', 'name', 'email']);
-
-        return Inertia::render('Finance/Dashboard', [
-            'projectName' => null,
-            'scopeLabel' => 'Tous les projets',
-            'projects' => $projects,
-            'usersList' => $users,
-            'requisitions' => $requisitions->map(function (Requisition $r) {
-                return [
-                    'id' => (string) $r->id,
-                    'numero' => $r->numero_requisition,
-                    'projet' => $r->projet,
-                    'project_id' => $r->project_id,
-                    'user_id' => $r->user_id,
-                    'initiateurNom' => $r->user?->name ?? 'Inconnu',
-                    'initiateurRole' => $r->user?->role ?? 'Staff',
-                    'nature' => $r->nature_requisition,
-                    'devise' => $r->devise,
-                    'montantTotal' => (float) $r->montant_total,
-                    'observation' => $r->observation,
-                    'caisseAttribuee' => $r->caisse_decaissement ?? 'Caisse principale',
-                    'is_urgent' => (bool) $r->is_urgent,
-                    'statusCode' => $r->status,
-                    'statusLabel' => ucfirst($r->status),
-                    'canDecide' => $r->status === 'visa_mp',
-                    'financeRejected' => $r->status === 'draft' && str_contains($r->observation ?? '', 'Motif rejet Finance:'),
-                    'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
-                    'lignes' => $r->demandes->map(fn ($d) => [
-                        'id' => (string) $d->id,
-                        'activite' => $d->activite,
-                        'codeBudget' => $d->code_all_budget,
-                        'codeAllocation' => $d->code_allocation,
-                        'nature' => $d->nature ?? '',
-                        'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
-                        'unite' => $d->unite ?? '',
-                        'prixUnitaire' => (float) $d->frais_unitaire,
-                        'frais' => (float) $d->frais_unitaire,
-                        'total' => (float) $d->total_ligne,
-                        'justificatifs' => $d->justificatifs->map(fn ($j) => [
-                            'id' => (string) $j->id,
-                            'nom' => $j->original_name ?? $j->description,
-                            'fileUrl' => $j->file_path ? route('requisitions.justificatif.show', ['justificatif' => $j->id]) : null,
-                        ])->values()->all(),
-                    ])->values()->all(),
-                ];
-            })->values()->all(),
-        ]);
+        return match ($status) {
+            'draft' => ['step' => 1, 'label' => 'Brouillon', 'color' => 'gray'],
+            'urgent_direction' => ['step' => 1, 'label' => 'Dérogation Urgente', 'color' => 'red'],
+            'visa_mp' => ['step' => 2, 'label' => 'Visa MP Accordé', 'color' => 'blue'],
+            'controle_finance' => ['step' => 3, 'label' => 'Contrôle Finances Validé', 'color' => 'purple'],
+            'visa_admin' => ['step' => 4, 'label' => 'En attente Bon à Payer', 'color' => 'amber'],
+            'decaissement_caisse' => ['step' => 5, 'label' => 'Approuvé (À décaisser)', 'color' => 'emerald'],
+            'decaisse' => ['step' => 6, 'label' => 'Décaissé', 'color' => 'green'],
+            'cloture' => ['step' => 7, 'label' => 'Clôturé', 'color' => 'black'],
+            'rejetee' => ['step' => 0, 'label' => 'Rejeté', 'color' => 'red'],
+            default => ['step' => 1, 'label' => ucfirst($status), 'color' => 'gray'],
+        };
     }
 
     private function buildStats($requisitions): array
