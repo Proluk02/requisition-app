@@ -19,6 +19,7 @@ class Requisition extends Model
     protected $fillable = [
         'user_id',
         'project_id',
+        'cashier_id',
         'numero_requisition',
         'nature_requisition',
         'projet',
@@ -31,6 +32,9 @@ class Requisition extends Model
         'is_urgent',
         'date_paiement',
         'date_livraison',
+        'mode_paiement',
+        'reference_paiement',
+        'date_decaissement',
     ];
 
     protected function casts(): array
@@ -40,12 +44,18 @@ class Requisition extends Model
             'is_urgent' => 'boolean',
             'date_paiement' => 'date',
             'date_livraison' => 'date',
+            'date_decaissement' => 'datetime',
         ];
     }
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function cashier(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cashier_id');
     }
 
     public function project(): BelongsTo
@@ -58,13 +68,11 @@ class Requisition extends Model
         return $this->hasMany(Demande::class);
     }
 
-    // Relation avec les signatures électroniques horodatées
     public function signatures(): HasMany
     {
         return $this->hasMany(RequisitionSignature::class)->orderBy('signed_at', 'asc');
     }
 
-    // Relation avec les vouchers de petite caisse pour justification transport
     public function pettyCashVouchers(): HasMany
     {
         return $this->hasMany(PettyCashVoucher::class)->orderBy('created_at', 'asc');

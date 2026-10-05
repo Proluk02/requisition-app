@@ -28,8 +28,9 @@ class User extends Authenticatable
         'last_name',
         'email',
         'password',
-        'signature_pin', 
+        'signature_pin',
         'pin_set_at',
+        'is_director_interim',
         'project_id',
         'site_id',
         'role',
@@ -51,8 +52,9 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'signature_pin' => 'hashed',
-            'last_login_at' => 'datetime',
             'pin_set_at' => 'datetime',
+            'last_login_at' => 'datetime',
+            'is_director_interim' => 'boolean',
         ];
     }
 
@@ -90,8 +92,26 @@ class User extends Authenticatable
     {
         return $this->status === 'active';
     }
+
     public function hasSignaturePin(): bool
     {
         return ! empty($this->signature_pin);
+    }
+
+    /**
+     * Détermine si l'utilisateur a l'autorité pour signer le Bon à Payer :
+     * Soit la Directrice Générale en titre, soit le PAM (admin_manager) en intérim autorisé.
+     */
+    public function canApproveAsDirector(): bool
+    {
+        if ($this->hasRole('director') || $this->role === 'director') {
+            return true;
+        }
+
+        if (($this->hasRole('admin_manager') || $this->role === 'admin_manager') && (bool) $this->is_director_interim) {
+            return true;
+        }
+
+        return false;
     }
 }

@@ -17,12 +17,13 @@ return new class extends Migration
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
 
-            // --- SIGNATURE ÉLECTRONIQUE PAR CODE PIN PERSONNEL (SPÉCIFICATION #6) ---
-            $table->string('signature_pin')->nullable(); // Code PIN haché (bcrypt)
+            $table->string('signature_pin')->nullable();
             $table->timestamp('pin_set_at')->nullable();
 
-            $table->foreignUuid('project_id')->nullable()->index();
-            $table->foreignUuid('site_id')->nullable()->index();
+            $table->boolean('is_director_interim')->default(false);
+
+            $table->uuid('project_id')->nullable()->index();
+            $table->uuid('site_id')->nullable()->index();
 
             $table->string('role')->default('beneficiary');
             $table->string('status')->default('active');
@@ -52,8 +53,8 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists('users');
-        Schema::dropIfExists('password_reset_tokens');
         Schema::dropIfExists('sessions');
+        Schema::dropIfExists('password_reset_tokens');
+        Schema::dropIfExists('users');
     }
 };

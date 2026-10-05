@@ -9,9 +9,20 @@ import Toast, { ToastType } from '@/Components/Director/Toast';
 import EmptyState from '@/Components/Director/EmptyState';
 import PinSignatureModal from '@/Components/Director/PinSignatureModal';
 import RequisitionDetailModal from '@/Components/Director/RequisitionDetailModal';
+import { Calendar, Eye, Printer, ShieldCheck } from 'lucide-react';
 
-interface WorkflowLevel { step: number; label: string; color: string; }
-interface Justificatif { id: string; nom: string; fileUrl: string | null; }
+interface WorkflowLevel {
+    step: number;
+    label: string;
+    color: string;
+}
+
+interface Justificatif {
+    id: string;
+    nom: string;
+    fileUrl: string | null;
+}
+
 interface LigneItem {
     id: string;
     activite: string;
@@ -22,6 +33,7 @@ interface LigneItem {
     total: number;
     justificatifs: Justificatif[];
 }
+
 interface RequisitionDirectrice {
     id: string;
     numero: string;
@@ -38,11 +50,31 @@ interface RequisitionDirectrice {
     statusCode: string;
     workflowLevel: WorkflowLevel;
     dateSoumission: string;
-    signatures: { role: string; nom: string; action: string; date: string; code?: string; hash: string; }[];
+    signatures: {
+        role: string;
+        nom: string;
+        action: string;
+        date: string;
+        code?: string;
+        hash: string;
+    }[];
     lignes: LigneItem[];
 }
-interface ProjectStat { id: string; name: string; count: number; total_usd: number; total_fc: number; }
-interface CaisseStat { caisse: string; count: number; total_usd: number; decaisse_usd: number; }
+
+interface ProjectStat {
+    id: string;
+    name: string;
+    count: number;
+    total_usd: number;
+    total_fc: number;
+}
+
+interface CaisseStat {
+    caisse: string;
+    count: number;
+    total_usd: number;
+    decaisse_usd: number;
+}
 
 interface Props extends PageProps {
     selectedPeriod: string;
@@ -51,6 +83,7 @@ interface Props extends PageProps {
     decaisseesCount: number;
     nonDecaisseesCount: number;
     requisitions: RequisitionDirectrice[];
+    isInterim?: boolean;
 }
 
 const money = (n: number, c: string) =>
@@ -63,6 +96,7 @@ export default function DirectorDashboard({
     decaisseesCount = 0,
     nonDecaisseesCount = 0,
     requisitions = [],
+    isInterim = false,
 }: Props) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
@@ -81,7 +115,7 @@ export default function DirectorDashboard({
 
     const handlePeriodChange = (newPeriod: string) => {
         setPeriod(newPeriod);
-        router.get(route('dashboard'), { period: newPeriod }, { preserveState: true, preserveScroll: true });
+        router.get(route('director.dashboard'), { period: newPeriod }, { preserveState: true, preserveScroll: true });
     };
 
     const filteredList = useMemo(() => {
@@ -118,7 +152,9 @@ export default function DirectorDashboard({
                     setSignReq(null);
                     setToast({
                         type: 'success',
-                        message: 'Bon à payer accordé. Le dossier est transmis au guichet pour décaissement.',
+                        message: isInterim
+                            ? 'Bon à payer accordé (Pour ordre / Intérim). Le dossier est transmis à la Caisse.'
+                            : 'Bon à payer accordé. Le dossier est transmis au guichet pour décaissement.',
                     });
                 },
                 onError: (errs) => {
@@ -138,7 +174,20 @@ export default function DirectorDashboard({
             <Head title="Direction Générale — Supervision" />
 
             <div className="space-y-6 no-print">
-                {/* En-tête */}
+                {isInterim && (
+                    <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded text-emerald-900 text-xs flex items-center justify-between shadow-sm">
+                        <div className="flex items-center gap-2.5">
+                            <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
+                            <span>
+                                <strong>Mandat d'intérim Direction Générale actif :</strong> Vous êtes connecté en tant que Manager Administratif (PAM). Vos visas apposés porteront la mention légale <strong>« Pour ordre / Intérim »</strong>.
+                            </span>
+                        </div>
+                        <span className="text-[10px] font-mono uppercase bg-emerald-200/70 text-emerald-800 px-2 py-0.5 rounded font-bold">
+                            Intérim Officiel
+                        </span>
+                    </div>
+                )}
+
                 <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
                     <div>
                         <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1.5">
@@ -150,15 +199,12 @@ export default function DirectorDashboard({
                             Supervision des réquisitions
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
-                            Connectée en tant que <strong className="text-[#0B192C]">{user.name}</strong>. Contrôle consolidé des projets et caisses.
+                            Connecté en tant que <strong className="text-[#0B192C]">{user.name}</strong>. Contrôle consolidé des projets et caisses.
                         </p>
                     </div>
 
                     <div className="flex items-center gap-2 bg-white border border-[#04326D] rounded px-3 py-2">
-                        <svg className="w-4 h-4 text-[#04326D]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                            <rect x="3" y="4" width="18" height="18" rx="2" />
-                            <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
-                        </svg>
+                        <Calendar className="w-4 h-4 text-[#04326D]" />
                         <label className="text-[11px] font-bold uppercase tracking-widest text-gray-600">Période</label>
                         <input
                             type="month"
@@ -169,7 +215,6 @@ export default function DirectorDashboard({
                     </div>
                 </header>
 
-                {/* KPIs */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <KpiCard
                         label="Réquisitions du mois"
@@ -196,7 +241,6 @@ export default function DirectorDashboard({
                     />
                 </div>
 
-                {/* Synthèses */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                     <section className="lg:col-span-7 bg-white border border-[#B2BED6] rounded">
                         <header className="px-4 py-3 border-b border-[#E2E8F0] flex items-center justify-between">
@@ -269,7 +313,6 @@ export default function DirectorDashboard({
                     </section>
                 </div>
 
-                {/* Tableau principal */}
                 <section className="bg-white border border-[#B2BED6] rounded overflow-hidden">
                     <header className="px-4 py-3 border-b border-[#E2E8F0] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
@@ -376,7 +419,7 @@ export default function DirectorDashboard({
                                                         <button
                                                             type="button"
                                                             onClick={() => handleOpenSignature(req)}
-                                                            className="px-2.5 py-1 bg-[#10B981] hover:bg-[#059669] text-white rounded text-[11px] font-bold"
+                                                            className="px-2.5 py-1 bg-[#10B981] hover:bg-[#059669] text-white rounded text-[11px] font-bold transition"
                                                         >
                                                             Bon à payer
                                                         </button>
@@ -384,21 +427,12 @@ export default function DirectorDashboard({
                                                     <IconButton
                                                         title="Consulter"
                                                         onClick={() => setDetailReq(req)}
-                                                        icon={
-                                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
-                                                                <circle cx="12" cy="12" r="3" />
-                                                            </svg>
-                                                        }
+                                                        icon={<Eye className="w-4 h-4" />}
                                                     />
                                                     <IconButton
                                                         title="Imprimer"
                                                         onClick={() => handlePrint(req)}
-                                                        icon={
-                                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                                                                <path d="M6 9V4a1 1 0 011-1h10a1 1 0 011 1v5M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v7H6z" strokeLinecap="round" strokeLinejoin="round" />
-                                                            </svg>
-                                                        }
+                                                        icon={<Printer className="w-4 h-4" />}
                                                     />
                                                 </div>
                                             </td>
@@ -439,8 +473,6 @@ export default function DirectorDashboard({
     );
 }
 
-/* --- Sous-composants locaux --- */
-
 function FilterSelect({
     value,
     onChange,
@@ -472,7 +504,7 @@ function IconButton({ title, onClick, icon }: { title: string; onClick: () => vo
             type="button"
             onClick={onClick}
             title={title}
-            className="p-1.5 text-gray-500 hover:text-[#04326D] hover:bg-gray-100 rounded"
+            className="p-1.5 text-gray-500 hover:text-[#04326D] hover:bg-gray-100 rounded transition"
         >
             {icon}
         </button>

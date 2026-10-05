@@ -6,16 +6,14 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('requisitions', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->foreignUuid('user_id')->constrained('users')->cascadeOnDelete();
+            $table->foreignUuid('project_id')->nullable()->constrained('projects')->nullOnDelete();
             $table->string('numero_requisition');
-            $table->string('nature_requisition');
+            $table->string('nature_requisition'); // Achat, Service
             $table->string('projet');
             $table->string('project_code')->nullable();
             $table->string('caisse_decaissement')->nullable();
@@ -23,6 +21,16 @@ return new class extends Migration
             $table->text('observation')->nullable();
             $table->decimal('montant_total', 15, 2)->default(0);
             $table->string('status')->default('draft');
+            $table->boolean('is_urgent')->default(false);
+            $table->date('date_paiement')->nullable();
+            $table->date('date_livraison')->nullable();
+
+            // Champs Caisse / Décaissement effectif (Étape 1.2)
+            $table->foreignUuid('cashier_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->string('mode_paiement')->nullable(); // Espèces, Chèque, Virement bancaire
+            $table->string('reference_paiement')->nullable(); // N° Chèque, Réf Bordereau
+            $table->timestamp('date_decaissement')->nullable();
+
             $table->timestamps();
         });
 
@@ -31,22 +39,47 @@ return new class extends Migration
             $table->foreignUuid('requisition_id')->constrained('requisitions')->cascadeOnDelete();
             $table->string('activite');
             $table->string('code_all_budget');
+            $table->string('code_allocation')->nullable();
             $table->string('nature')->nullable();
             $table->decimal('quantite', 15, 2)->nullable();
             $table->decimal('duree', 15, 2)->nullable();
             $table->string('unite')->nullable();
             $table->decimal('frais_unitaire', 15, 2)->default(0);
             $table->decimal('total_ligne', 15, 2)->default(0);
-            $table->json('justificatifs')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('demande_justificatifs', function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->foreignUuid('demande_id')->constrained('demandes')->cascadeOnDelete();
+            $table->string('description');
+            $table->date('date')->nullable();
+            $table->decimal('montant', 15, 2)->default(0);
+            $table->string('file_path');
+            $table->string('original_name');
+            $table->string('mime_type')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('requisition_signatures', function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->foreignUuid('requisition_id')->constrained('requisitions')->cascadeOnDelete();
+            $table->foreignUuid('user_id')->constrained('users')->cascadeOnDelete();
+            $table->string('role_signataire'); // project_manager, finance, admin_manager, director, cashier
+            $table->string('nom_signataire');
+            $table->string('action'); // approved, rejected, disbursed
+            $table->text('commentaire')->nullable();
+            $table->string('signature_code')->nullable();
+            $table->string('signature_hash');
+            $table->timestamp('signed_at');
             $table->timestamps();
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
+        Schema::dropIfExists('requisition_signatures');
+        Schema::dropIfExists('demande_justificatifs');
         Schema::dropIfExists('demandes');
         Schema::dropIfExists('requisitions');
     }

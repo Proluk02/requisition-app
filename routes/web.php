@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Auth\GoogleController;
+use App\Http\Controllers\CashierController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\LocaleController;
 use App\Http\Controllers\PettyCashController;
@@ -12,12 +13,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
-
-/*
-|--------------------------------------------------------------------------
-| Web Routes - Plateforme de Gestion des Réquisitions (ASBL Bon Pasteur)
-|--------------------------------------------------------------------------
-*/
 
 Route::get('/', function () {
     return Inertia::render('Welcome', [
@@ -33,12 +28,6 @@ Route::post('/locale/{locale}', [LocaleController::class, 'switch'])->name('loca
 Route::get('auth/google', [GoogleController::class, 'redirectToGoogle'])->name('google.login');
 Route::get('auth/google/callback', [GoogleController::class, 'handleGoogleCallback'])->name('google.callback');
 
-Route::patch('/requisitions/{requisition}/urgent-director', [RequisitionController::class, 'urgentDirectorApproval'])
-    ->name('requisitions.urgent-director');
-
-// --------------------------------------------------------------------------
-// GROUPE ADMINISTRATEUR SYSTÈME
-// --------------------------------------------------------------------------
 Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admin.')->group(function () {
     Route::get('/users', [UserController::class, 'index'])->name('users.index');
     Route::get('/users/create', [UserController::class, 'create'])->name('users.create');
@@ -49,40 +38,39 @@ Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admi
     Route::delete('/users/{user}', [UserController::class, 'destroy'])->name('users.destroy');
 });
 
-// --------------------------------------------------------------------------
-// GROUPE UTILISATEURS CONNECTÉS
-// --------------------------------------------------------------------------
 Route::middleware(['auth', 'active'])->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
-    
+
+    Route::get('/director/dashboard', [DashboardController::class, 'directorDashboard'])->name('director.dashboard');
+    Route::get('/director/projects', [DashboardController::class, 'directorProjects'])->name('director.projects');
+    Route::get('/director/caisses', [DashboardController::class, 'directorCaisses'])->name('director.caisses');
+    Route::get('/director/urgences', [DashboardController::class, 'directorUrgences'])->name('director.urgences');
+
     Route::get('/finance/requisitions', [DashboardController::class, 'finance'])
         ->middleware('role:finance')
         ->name('finance.dashboard');
 
-    // Profil Utilisateur & Gestion du Code PIN Personnel
+    Route::get('/cashier/dashboard', [CashierController::class, 'index'])->name('cashier.dashboard');
+    Route::patch('/requisitions/{requisition}/cashier-disburse', [CashierController::class, 'disburse'])->name('requisitions.cashier-disburse');
+
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
-    Route::patch('/profile/pin', [ProfileController::class, 'updatePin'])->name('profile.pin.update'); // ROUTE PIN AJOUTÉE
+    Route::patch('/profile/pin', [ProfileController::class, 'updatePin'])->name('profile.pin.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 
-    // Réquisitions
     Route::get('/requisitions', [RequisitionController::class, 'index'])->name('requisitions.index');
-
-    Route::get('/requisitions/justificatifs/{justificatif}', [RequisitionController::class, 'showJustificatif'])
-        ->name('requisitions.justificatif.show');
-
     Route::get('/requisitions/create', function () {
         return Inertia::render('Staff/Requisitions/Create');
     })->name('requisitions.create');
-
     Route::post('/requisitions', [RequisitionController::class, 'store'])->name('requisitions.store');
+    Route::get('/requisitions/justificatifs/{justificatif}', [RequisitionController::class, 'showJustificatif'])->name('requisitions.justificatif.show');
     Route::patch('/requisitions/{requisition}', [RequisitionController::class, 'update'])->name('requisitions.update');
+    Route::patch('/requisitions/{requisition}/urgent-director', [RequisitionController::class, 'urgentDirectorApproval'])->name('requisitions.urgent-director');
     Route::patch('/requisitions/{requisition}/manager-decision', [RequisitionController::class, 'managerDecision'])->name('requisitions.manager-decision');
     Route::patch('/requisitions/{requisition}/finance-decision', [RequisitionController::class, 'financeDecision'])->name('requisitions.finance-decision');
     Route::patch('/requisitions/{requisition}/admin-decision', [RequisitionController::class, 'adminDecision'])->name('requisitions.admin-decision');
     Route::patch('/requisitions/{requisition}/director-decision', [RequisitionController::class, 'directorDecision'])->name('requisitions.director-decision');
 
-    // Petits Cash & Transport
     Route::get('/petty-cash', [PettyCashController::class, 'index'])->name('petty-cash.index');
     Route::post('/petty-cash', [PettyCashController::class, 'store'])->name('petty-cash.store');
     Route::patch('/petty-cash/{voucher}/visa-mp', [PettyCashController::class, 'visaMP'])->name('petty-cash.visa-mp');
@@ -90,11 +78,6 @@ Route::middleware(['auth', 'active'])->group(function () {
 
     Route::get('/transport', [PettyCashController::class, 'index'])->name('transport.index');
 
-    Route::get('/director/projects', [DashboardController::class, 'directorProjects'])->middleware('role:director')->name('director.projects');
-    Route::get('/director/caisses', [DashboardController::class, 'directorCaisses'])->middleware('role:director')->name('director.caisses');
-    Route::get('/director/urgences', [DashboardController::class, 'directorUrgences'])->middleware('role:director')->name('director.urgences');
-
-    // Notifications réelles
     Route::post('/notifications/{id}/mark-read', function (Request $request, $id) {
         DB::table('notifications')
             ->where('notifiable_type', 'App\\Models\\User')

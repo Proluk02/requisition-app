@@ -17,7 +17,6 @@ class DashboardController extends Controller
     {
         $user = $request->user();
 
-        // 1. DASHBOARD ADMINISTRATEUR
         if ($user->hasRole('admin')) {
             $usersCount = User::count();
             $projectsCount = Project::count();
@@ -35,7 +34,6 @@ class DashboardController extends Controller
             ]);
         }
 
-        // 2. DASHBOARD MANAGER DE PROJET
         if ($user->hasRole('project_manager')) {
             $projectName = $user->project?->name;
             $requisitionsQuery = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
@@ -59,22 +57,22 @@ class DashboardController extends Controller
             ]);
         }
 
-        // 3. DASHBOARD DIRECTRICE GÉNÉRALE (Spécification #1)
         if ($user->hasRole('director')) {
             return $this->renderDirectorDashboard($request);
         }
 
-        // 4. DASHBOARD FINANCE
         if ($user->hasRole('finance')) {
             return $this->renderFinanceDashboard($user);
         }
 
-        // 5. DASHBOARD MANAGER ADMINISTRATION
         if ($user->hasRole('admin_manager')) {
-            return $this->renderAdminManagerDashboard();
+            return $this->renderAdminManagerDashboard($user);
         }
 
-        // 6. DASHBOARD STAFF / COORDONNATEUR
+        if ($user->hasRole('cashier')) {
+            return redirect()->route('cashier.dashboard');
+        }
+
         if ($user->hasRole('coordinator') || $user->hasRole('beneficiary')) {
             $requisitions = Requisition::with(['demandes.justificatifs', 'signatures.user'])
                 ->where('user_id', $user->id)
@@ -90,11 +88,23 @@ class DashboardController extends Controller
         return Inertia::render('Dashboard');
     }
 
-    /**
-     * Dashboard Directrice Générale : Vision globale du workflow (Spécification #1).
-     */
+    public function directorDashboard(Request $request)
+    {
+        abort_unless(
+            $request->user()?->canApproveAsDirector(),
+            403,
+            'Accès réservé exclusivement à la Direction Générale ou à l’intérim officiel.'
+        );
+
+        return $this->renderDirectorDashboard($request);
+    }
+
+
     private function renderDirectorDashboard(Request $request)
     {
+        $user = $request->user();
+        $isInterim = ! $user->hasRole('director') && (bool) $user->is_director_interim;
+
         $selectedPeriod = $request->input('period', now()->format('Y-m'));
         [$year, $month] = explode('-', $selectedPeriod);
 
@@ -180,15 +190,13 @@ class DashboardController extends Controller
             'decaisseesCount' => $decaisseesCount,
             'nonDecaisseesCount' => $nonDecaisseesCount,
             'requisitions' => $requisitionsList,
+            'isInterim' => $isInterim,
         ]);
     }
 
-    /**
-     * Raccourci 1 : Synthèse des Projets (Directrice).
-     */
     public function directorProjects(Request $request)
     {
-        abort_unless($request->user()?->hasRole('director'), 403);
+        abort_unless($request->user()?->canApproveAsDirector(), 403);
 
         $projects = Project::all()->map(function ($p) {
             $reqs = Requisition::where('project_id', $p->id)->orWhere('projet', $p->name)->get();
@@ -209,12 +217,9 @@ class DashboardController extends Controller
         ]);
     }
 
-    /**
-     * Raccourci 2 : Trésorerie & Caisses (Directrice).
-     */
     public function directorCaisses(Request $request)
     {
-        abort_unless($request->user()?->hasRole('director'), 403);
+        abort_unless($request->user()?->canApproveAsDirector(), 403);
 
         $caissesNoms = ['Caisse principale', 'EU', 'Saint Jean Eudes', 'Local Fund 1 (Boulangerie)', 'Local Fund 2'];
         $caisses = collect($caissesNoms)->map(function ($nom) {
@@ -234,12 +239,9 @@ class DashboardController extends Controller
         ]);
     }
 
-    /**
-     * Raccourci 3 : Dérogations Urgentes (Directrice).
-     */
     public function directorUrgences(Request $request)
     {
-        abort_unless($request->user()?->hasRole('director'), 403);
+        abort_unless($request->user()?->canApproveAsDirector(), 403);
 
         $urgences = Requisition::with(['user', 'demandes.justificatifs', 'project'])
             ->where('is_urgent', true)
@@ -289,10 +291,10 @@ class DashboardController extends Controller
     public function adminManager(Request $request)
     {
         abort_unless($request->user()?->hasRole('admin_manager'), 403);
-        return $this->renderAdminManagerDashboard();
+        return $this->renderAdminManagerDashboard($request->user());
     }
 
-    private function renderAdminManagerDashboard()
+    private function renderAdminManagerDashboard(User $user)
     {
         $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user'])
             ->where('status', 'controle_finance')
@@ -300,6 +302,7 @@ class DashboardController extends Controller
             ->get();
 
         return Inertia::render('AdminManager/Dashboard', [
+            'isInterim' => (bool) $user->is_director_interim,
             'requisitions' => $requisitions->map(fn ($r) => [
                 'id' => (string) $r->id,
                 'numero' => $r->numero_requisition,

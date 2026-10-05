@@ -25,8 +25,8 @@ return new class extends Migration
 
         Schema::create('project_site', function (Blueprint $table) {
             $table->id();
-            $table->foreignUuid('project_id')->constrained()->onDelete('cascade');
-            $table->foreignUuid('site_id')->constrained()->onDelete('cascade');
+            $table->foreignUuid('project_id')->constrained('projects')->cascadeOnDelete();
+            $table->foreignUuid('site_id')->constrained('sites')->cascadeOnDelete();
         });
     }
 
