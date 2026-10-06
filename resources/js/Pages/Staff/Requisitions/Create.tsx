@@ -37,23 +37,35 @@ interface LigneArticle {
     justificatifs: JustificatifItem[];
 }
 
-const CAISSES_DISPONIBLES = [
-    'EU',
-    'Caisse principale',
-    'Saint Jean Eudes',
-    'Local Fund 1 (Boulangerie)',
-    'Local Fund 2',
-];
+interface CaisseOption {
+    id: string;
+    name: string;
+    devise: string;
+}
 
-export default function CreateRequisition() {
+interface ProjectOption {
+    id: string;
+    name: string;
+    full_name: string;
+}
+
+interface Props extends PageProps {
+    caisses?: CaisseOption[];
+    projectsList?: ProjectOption[];
+}
+
+export default function CreateRequisition({
+    caisses = [],
+    projectsList = [],
+}: Props) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
-    const isCoordinator = user.role === 'coordinator';
+    const isCoordinator = user.role === 'coordinator' || auth.user.roles?.some((r) => r.name === 'coordinator');
 
     const [natureRequisition, setNatureRequisition] = useState<'Achat' | 'Service'>('Achat');
     const [isUrgent, setIsUrgent] = useState<boolean>(false);
 
-    const userProjectName = user.project?.name || 'USIMAMIZI BORA';
+    const userProjectName = user.project?.name || (projectsList[0]?.name ?? 'USIMAMIZI BORA');
     const [selectedProject, setSelectedProject] = useState<string>(userProjectName);
 
     const projectCode = useMemo(() => {
@@ -70,7 +82,8 @@ export default function CreateRequisition() {
         return `${projectCode}/${mois}/001`;
     }, [projectCode]);
 
-    const [caisseDecaissement, setCaisseDecaissement] = useState<string>('Caisse principale');
+    const initialCaisse = caisses.length > 0 ? caisses[0].name : '';
+    const [caisseDecaissement, setCaisseDecaissement] = useState<string>(initialCaisse);
     const [devise, setDevise] = useState<'USD' | 'FC' | 'EUR'>('USD');
     const [observation, setObservation] = useState<string>('');
     const [datePaiement, setDatePaiement] = useState<string>('');
@@ -225,6 +238,11 @@ export default function CreateRequisition() {
             return;
         }
 
+        if (!caisseDecaissement) {
+            alert('Veuillez sélectionner une caisse créée.');
+            return;
+        }
+
         setIsSubmitting(true);
         const formData = new FormData();
 
@@ -290,7 +308,6 @@ export default function CreateRequisition() {
             <Head title={`Créer Réquisition — ${numeroRequisition}`} />
 
             <div className="space-y-6">
-                {/* En-tête */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-outline-soft pb-5">
                     <div>
                         <nav className="text-[11px] text-gray-500 font-medium mb-1 flex items-center gap-1">
@@ -342,7 +359,6 @@ export default function CreateRequisition() {
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-5">
-                    {/* 1. Paramètres */}
                     <div className="bg-white border border-outline-soft rounded-lg p-5 shadow-card space-y-4">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-outline-soft pb-3 gap-2">
                             <h2 className="text-xs font-bold text-on-surface uppercase tracking-wider flex items-center gap-2">
@@ -378,7 +394,7 @@ export default function CreateRequisition() {
                                     }
                                     className="w-full border border-primary rounded-md p-2 text-xs font-semibold text-primary bg-primary-soft/50 focus:outline-none focus:ring-1 focus:ring-primary/30 transition"
                                 >
-                                    <option value="Achat">Achat </option>
+                                    <option value="Achat">Achat</option>
                                     <option value="Service">Service</option>
                                 </select>
                             </div>
@@ -387,18 +403,17 @@ export default function CreateRequisition() {
                                 <label className="block font-semibold text-gray-700 mb-1.5">
                                     Projet
                                 </label>
-                                {isCoordinator ? (
+                                {isCoordinator && projectsList.length > 0 ? (
                                     <select
                                         value={selectedProject}
                                         onChange={(e) => setSelectedProject(e.target.value)}
                                         className="w-full border border-outline-variant rounded-md p-2 text-xs font-semibold focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                                     >
-                                        <option value="USIMAMIZI BORA">USIMAMIZI BORA (UB)</option>
-                                        <option value="AFYA BORA">AFYA BORA (AB)</option>
-                                        <option value="CHAKUISHI">CHAKUISHI (CB)</option>
-                                        <option value="HABIMA">HABIMA (HB)</option>
-                                        <option value="MAHUWA">MAHUWA (MH)</option>
-                                        <option value="USUMADA">USUMADA (UM)</option>
+                                        {projectsList.map((p) => (
+                                            <option key={p.id} value={p.name}>
+                                                {p.name} ({p.full_name})
+                                            </option>
+                                        ))}
                                     </select>
                                 ) : (
                                     <input
@@ -412,19 +427,26 @@ export default function CreateRequisition() {
 
                             <div>
                                 <label className="block font-semibold text-gray-700 mb-1.5">
-                                    Caisse de Décaissement
+                                    Caisse de Décaissement *
                                 </label>
-                                <select
-                                    value={caisseDecaissement}
-                                    onChange={(e) => setCaisseDecaissement(e.target.value)}
-                                    className="w-full border border-outline-variant rounded-md p-2 text-xs font-bold text-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
-                                >
-                                    {CAISSES_DISPONIBLES.map((c) => (
-                                        <option key={c} value={c}>
-                                            {c}
-                                        </option>
-                                    ))}
-                                </select>
+                                {caisses.length === 0 ? (
+                                    <div className="border border-red-300 bg-red-50 text-red-700 p-2 rounded text-[11px] font-semibold">
+                                        Aucune caisse active enregistrée.
+                                    </div>
+                                ) : (
+                                    <select
+                                        value={caisseDecaissement}
+                                        onChange={(e) => setCaisseDecaissement(e.target.value)}
+                                        className="w-full border border-outline-variant rounded-md p-2 text-xs font-bold text-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+                                        required
+                                    >
+                                        {caisses.map((c) => (
+                                            <option key={c.id} value={c.name}>
+                                                {c.name} ({c.devise})
+                                            </option>
+                                        ))}
+                                    </select>
+                                )}
                             </div>
 
                             <div>
@@ -485,7 +507,6 @@ export default function CreateRequisition() {
                         </div>
                     </div>
 
-                    {/* 2. Lignes */}
                     <div className="bg-white border border-outline-soft rounded-lg shadow-card overflow-hidden">
                         <div className="p-4 bg-sidebar text-white flex items-center justify-between">
                             <div className="flex items-center gap-2">
@@ -717,7 +738,6 @@ export default function CreateRequisition() {
                         </div>
                     </div>
 
-                    {/* 3. Total */}
                     <div className="bg-sidebar text-white rounded-lg p-5 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div>
                             <span className="text-[10px] text-[#B2BED6] uppercase tracking-wider font-bold block mb-1.5">
@@ -746,7 +766,6 @@ export default function CreateRequisition() {
                     </div>
                 </form>
 
-                {/* MODALE DEVIS */}
                 {activeLigneId && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                         <div className="bg-white rounded-lg border border-outline-soft shadow-modal max-w-sm w-full p-5 space-y-3 animate-slide-down">

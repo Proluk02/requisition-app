@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\CashRegister;
 use App\Models\Demande;
 use App\Models\DemandeJustificatif;
 use App\Models\Project;
@@ -21,7 +22,7 @@ class RequisitionController extends Controller
 {
     public function index()
     {
-        $requisitions = Requisition::with(['demandes.justificatifs', 'signatures.user', 'project'])
+        $requisitions = Requisition::with(['demandes.justificatifs', 'signatures.user', 'project', 'user'])
             ->where('user_id', Auth::id())
             ->orderByDesc('created_at')
             ->get()
@@ -31,6 +32,8 @@ class RequisitionController extends Controller
                     'numero' => $requisition->numero_requisition,
                     'projet' => $requisition->projet,
                     'project_id' => $requisition->project_id,
+                    'demandeurNom' => $requisition->user?->name ?? Auth::user()->name,
+                    'initiateurNom' => $requisition->user?->name ?? Auth::user()->name,
                     'site' => $requisition->project_code ?? '',
                     'nature' => $requisition->nature_requisition,
                     'caisse' => $requisition->caisse_decaissement ?? 'Caisse principale',
@@ -44,7 +47,6 @@ class RequisitionController extends Controller
                     'observation' => $requisition->observation,
                     'etapeActuelle' => $this->mapStatusToWorkflow($requisition->status),
 
-                    // SIGNATURES RÉELLES AVEC CODE UNIQUE ET EMPREINTE SHA-256
                     'signatures' => $requisition->signatures->map(function (RequisitionSignature $sig) {
                         return [
                             'role' => $sig->role_signataire,
@@ -86,8 +88,11 @@ class RequisitionController extends Controller
                 ];
             })->all();
 
+        $caisses = CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name', 'devise']);
+
         return Inertia::render('Staff/Requisitions/Index', [
             'requisitions' => $requisitions,
+            'caisses' => $caisses,
         ]);
     }
 
@@ -135,7 +140,7 @@ class RequisitionController extends Controller
 
         $validated = $request->validate([
             'nature_requisition' => ['sometimes', 'in:Achat,Service'],
-            'caisse_decaissement' => ['required', 'string', 'max:255'],
+            'caisse_decaissement' => ['required', 'string', 'max:255', 'exists:cash_registers,name'],
             'devise' => ['required', 'in:USD,FC,EUR'],
             'observation' => ['nullable', 'string'],
             'articles' => ['required', 'array', 'min:1'],
@@ -146,6 +151,8 @@ class RequisitionController extends Controller
             'articles.*.quantiteOuDuree' => ['required', 'numeric', 'min:0'],
             'articles.*.unite' => ['nullable', 'string', 'max:255'],
             'articles.*.prixUnitaire' => ['required', 'numeric', 'min:0'],
+        ], [
+            'caisse_decaissement.exists' => 'Veuillez sélectionner une caisse officielle valide.',
         ]);
 
         $natureRequisition = $validated['nature_requisition'] ?? $requisition->nature_requisition;
@@ -197,16 +204,13 @@ class RequisitionController extends Controller
         return Redirect::back()->with('success', 'Réquisition modifiée avec succès.');
     }
 
-    /**
-     * ENREGISTREMENT INITIAL AVEC NUMÉROTATION CHRONOLOGIQUE PAR PROJET ET PAR MOIS.
-     */
     public function store(Request $request)
     {
         $validated = $request->validate([
             'nature_requisition' => ['required', 'in:Achat,Service'],
             'projet' => ['required', 'string', 'exists:projects,name'],
             'project_code' => ['nullable', 'string'],
-            'caisse_decaissement' => ['nullable', 'string'],
+            'caisse_decaissement' => ['required', 'string', 'exists:cash_registers,name'],
             'devise' => ['required', 'in:USD,FC,EUR'],
             'observation' => ['nullable', 'string'],
             'montant_total' => ['required', 'numeric', 'min:0'],
@@ -222,6 +226,9 @@ class RequisitionController extends Controller
             'lignes.*.frais_unitaire' => ['required', 'numeric', 'min:0'],
             'lignes.*.total_ligne' => ['required', 'numeric', 'min:0'],
             'lignes.*.justificatifs' => ['nullable', 'array'],
+        ], [
+            'caisse_decaissement.required' => 'Veuillez sélectionner une caisse créée.',
+            'caisse_decaissement.exists' => 'La caisse sélectionnée est introuvable.',
         ]);
 
         $project = Project::where('name', $validated['projet'])->firstOrFail();
@@ -231,7 +238,6 @@ class RequisitionController extends Controller
             abort_unless($user->project_id !== null && $user->project_id === $project->id, 403, 'Vous ne pouvez créer une réquisition que pour votre projet.');
         }
 
-        // Numérotation chronologique officielle (ex: CH/09/001)
         $initialesProjet = strtoupper(substr($project->name, 0, 2));
         $moisCourant = now()->format('m');
         $anneeCourante = now()->year;
@@ -253,7 +259,7 @@ class RequisitionController extends Controller
             'nature_requisition' => $validated['nature_requisition'],
             'projet' => $validated['projet'],
             'project_code' => $initialesProjet,
-            'caisse_decaissement' => $validated['caisse_decaissement'] ?? 'Caisse principale',
+            'caisse_decaissement' => $validated['caisse_decaissement'],
             'devise' => $validated['devise'],
             'observation' => $validated['observation'] ?? null,
             'montant_total' => $validated['montant_total'],
@@ -263,7 +269,6 @@ class RequisitionController extends Controller
             'status' => $initialStatus,
         ]);
 
-        // Signature initiateur
         $this->enregistrerSignature(
             $requisition,
             $user,
@@ -272,7 +277,6 @@ class RequisitionController extends Controller
             $isUrgent ? 'Soumission URGENTE' : 'Soumission initiale'
         );
 
-        // Notification initiateur
         $this->notifierUtilisateur(
             userId: $user->id,
             titre: 'Réquisition transmise',
@@ -280,7 +284,6 @@ class RequisitionController extends Controller
             urgent: $isUrgent
         );
 
-        // Notification Manager de Projet
         $this->notifierRole(
             roleCible: 'project_manager',
             projectId: $project->id,
@@ -334,10 +337,6 @@ class RequisitionController extends Controller
         return Redirect::route('dashboard')->with('success', "Réquisition {$numeroChronologique} enregistrée avec succès.");
     }
 
-    /**
-     * DÉCISION DU MANAGER DE PROJET (VISA 1) :
-     * Exige obligatoirement le Code PIN personnel + Attribution des codes budgétaires.
-     */
     public function managerDecision(Request $request, Requisition $requisition)
     {
         $user = $request->user();
@@ -347,21 +346,22 @@ class RequisitionController extends Controller
 
         $validated = $request->validate([
             'decision' => ['required', 'in:approve,reject'],
-            'pin' => ['required_if:decision,approve', 'nullable', 'string', 'digits_between:4,6'],
-            'caisse_decaissement' => ['required_if:decision,approve', 'nullable', 'string', 'max:255'],
+            'pin' => ['nullable', 'string'],
+            'password' => ['nullable', 'string'],
+            'caisse_decaissement' => ['required_if:decision,approve', 'nullable', 'string', 'max:255', 'exists:cash_registers,name'],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
             'allocations' => ['required_if:decision,approve', 'array', 'min:1'],
             'allocations.*.demande_id' => ['required', 'string', 'distinct'],
             'allocations.*.code_allocation' => ['required', 'string', 'max:255'],
-        ], [
-            'pin.required_if' => 'Le code PIN personnel est strictement obligatoire pour apposer votre visa.',
-            'pin.digits_between' => 'Le code PIN doit comporter obligatoirement entre 4 et 6 chiffres.',
         ]);
 
         if ($validated['decision'] === 'approve') {
-            if (! $this->verifierPinSignature($user, $validated['pin'] ?? null)) {
+            $secret = $validated['pin'] ?? $validated['password'] ?? $request->input('pin') ?? $request->input('password');
+
+            if (! $this->verifierSecretSignature($user, $secret)) {
                 return Redirect::back()->withErrors([
-                    'pin' => 'Signature refusée : Code PIN personnel incorrect ou non configuré.',
+                    'pin' => 'Signature refusée : Code PIN (ou mot de passe) incorrect.',
+                    'password' => 'Signature refusée : Code PIN (ou mot de passe) incorrect.',
                 ]);
             }
         }
@@ -453,17 +453,18 @@ class RequisitionController extends Controller
 
         $validated = $request->validate([
             'decision' => ['required', 'in:approve,reject'],
-            'pin' => ['required_if:decision,approve', 'nullable', 'string', 'digits_between:4,6'],
+            'pin' => ['nullable', 'string'],
+            'password' => ['nullable', 'string'],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
-        ], [
-            'pin.required_if' => 'Le code PIN financier est strictement obligatoire pour apposer le visa financier.',
-            'pin.digits_between' => 'Le code PIN doit comporter obligatoirement entre 4 et 6 chiffres.',
         ]);
 
         if ($validated['decision'] === 'approve') {
-            if (! $this->verifierPinSignature($user, $validated['pin'] ?? null)) {
+            $secret = $validated['pin'] ?? $validated['password'] ?? $request->input('pin') ?? $request->input('password');
+
+            if (! $this->verifierSecretSignature($user, $secret)) {
                 return Redirect::back()->withErrors([
-                    'pin' => 'Signature refusée : Code PIN financier incorrect ou non configuré.',
+                    'pin' => 'Signature refusée : Code PIN (ou mot de passe) financier incorrect.',
+                    'password' => 'Signature refusée : Code PIN (ou mot de passe) financier incorrect.',
                 ]);
             }
         }
@@ -541,17 +542,18 @@ class RequisitionController extends Controller
 
         $validated = $request->validate([
             'decision' => ['required', 'in:approve,reject'],
-            'pin' => ['required_if:decision,approve', 'nullable', 'string', 'digits_between:4,6'],
+            'pin' => ['nullable', 'string'],
+            'password' => ['nullable', 'string'],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
-        ], [
-            'pin.required_if' => 'Le code PIN administratif est strictement obligatoire pour apposer le visa 3.',
-            'pin.digits_between' => 'Le code PIN doit comporter obligatoirement entre 4 et 6 chiffres.',
         ]);
 
         if ($validated['decision'] === 'approve') {
-            if (! $this->verifierPinSignature($user, $validated['pin'] ?? null)) {
+            $secret = $validated['pin'] ?? $validated['password'] ?? $request->input('pin') ?? $request->input('password');
+
+            if (! $this->verifierSecretSignature($user, $secret)) {
                 return Redirect::back()->withErrors([
-                    'pin' => 'Signature refusée : Code PIN administratif incorrect ou non configuré.',
+                    'pin' => 'Signature refusée : Code PIN (ou mot de passe) administratif incorrect.',
+                    'password' => 'Signature refusée : Code PIN (ou mot de passe) administratif incorrect.',
                 ]);
             }
         }
@@ -638,17 +640,18 @@ class RequisitionController extends Controller
 
         $validated = $request->validate([
             'decision' => ['required', 'in:approve,reject'],
-            'pin' => ['required_if:decision,approve', 'nullable', 'string', 'digits_between:4,6'],
+            'pin' => ['nullable', 'string'],
+            'password' => ['nullable', 'string'],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
-        ], [
-            'pin.required_if' => 'Le code PIN personnel est strictement obligatoire pour accorder le Bon à Payer.',
-            'pin.digits_between' => 'Le code PIN doit comporter obligatoirement entre 4 et 6 chiffres.',
         ]);
 
         if ($validated['decision'] === 'approve') {
-            if (! $this->verifierPinSignature($user, $validated['pin'] ?? null)) {
+            $secret = $validated['pin'] ?? $validated['password'] ?? $request->input('pin') ?? $request->input('password');
+
+            if (! $this->verifierSecretSignature($user, $secret)) {
                 return Redirect::back()->withErrors([
-                    'pin' => 'Signature refusée : Code PIN incorrect ou non configuré.',
+                    'pin' => 'Signature refusée : Code PIN (ou mot de passe) de la Direction incorrect.',
+                    'password' => 'Signature refusée : Code PIN (ou mot de passe) de la Direction incorrect.',
                 ]);
             }
         }
@@ -775,17 +778,21 @@ class RequisitionController extends Controller
         return Redirect::back()->with('success', 'Dérogation urgente accordée. Dossier réintégré dans le circuit prioritaire.');
     }
 
-    protected function verifierPinSignature(User $user, ?string $pin): bool
+    protected function verifierSecretSignature(User $user, ?string $secret): bool
     {
-        if (empty($pin)) {
+        if (empty($secret)) {
             return false;
         }
 
-        if (empty($user->signature_pin)) {
-            return false;
+        if (! empty($user->signature_pin) && Hash::check($secret, $user->signature_pin)) {
+            return true;
         }
 
-        return Hash::check($pin, $user->signature_pin);
+        if (! empty($user->password) && Hash::check($secret, $user->password)) {
+            return true;
+        }
+
+        return false;
     }
 
     protected function enregistrerSignature(

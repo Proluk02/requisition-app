@@ -7,8 +7,7 @@ import {
     Building2,
     Calendar,
     Printer,
-    ArrowDownLeft,
-    ArrowUpRight,
+    Download,
 } from 'lucide-react';
 
 interface CaisseOption {
@@ -118,6 +117,19 @@ export default function LedgerIndex({
                                 className="border-none bg-transparent text-[12px] font-bold text-[#04326D] focus:outline-none cursor-pointer"
                             />
                         </div>
+
+                        {selectedCaisse && (
+                            <a
+                                href={route('cashier.ledger.export', {
+                                    caisse_id: selectedCaisse.id,
+                                    period: period,
+                                })}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition"
+                            >
+                                <Download className="w-4 h-4 text-emerald-400" />
+                                <span>Exporter Excel (.csv)</span>
+                            </a>
+                        )}
 
                         <button
                             type="button"

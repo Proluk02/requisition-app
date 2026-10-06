@@ -2,7 +2,6 @@ import { useState, useMemo } from 'react';
 import { Head, Link, router } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import {
-    mockRequisitionsStaff,
     RequisitionSuivi,
     WorkflowStep,
     DetailArticle,
@@ -24,8 +23,15 @@ import {
     Download,
 } from 'lucide-react';
 
+interface CaisseOption {
+    id: string;
+    name: string;
+    devise: string;
+}
+
 interface RequisitionIndexProps {
     requisitions?: RequisitionSuivi[];
+    caisses?: CaisseOption[];
 }
 
 const WORKFLOW_STEPS: { key: WorkflowStep; label: string; role: string }[] = [
@@ -38,16 +44,9 @@ const WORKFLOW_STEPS: { key: WorkflowStep; label: string; role: string }[] = [
     { key: 'cloture', label: 'Clôture', role: 'Return Form' },
 ];
 
-const CAISSES_DISPONIBLES = [
-    'EU',
-    'Caisse principale',
-    'Saint Jean Eudes',
-    'Local Fund 1 (Boulangerie)',
-    'Local Fund 2',
-];
-
 export default function RequisitionsIndex({
     requisitions: initialRequisitions,
+    caisses = [],
 }: RequisitionIndexProps) {
     const [requisitions, setRequisitions] = useState<RequisitionSuivi[]>(
         (initialRequisitions ?? []).map((req) => ({
@@ -207,34 +206,7 @@ export default function RequisitionsIndex({
         <AppLayout>
             <Head title="Suivi des Réquisitions" />
 
-            <style>{`
-                @media print {
-                    nav, aside, header, .no-print-zone, button {
-                        display: none !important;
-                    }
-                    #bon-pasteur-print-zone {
-                        display: block !important;
-                        position: fixed;
-                        left: 0;
-                        top: 0;
-                        width: 100vw;
-                        height: auto;
-                        padding: 24px;
-                        background: white;
-                        color: black;
-                        font-family: 'Inter', serif;
-                        z-index: 999999;
-                        -webkit-print-color-adjust: exact !important;
-                        print-color-adjust: exact !important;
-                    }
-                }
-                @media screen {
-                    #bon-pasteur-print-zone { display: none; }
-                }
-            `}</style>
-
             <div className="space-y-6 no-print-zone">
-                {/* En-tête */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-outline-soft pb-5">
                     <div>
                         <nav className="text-[11px] text-gray-500 font-medium mb-1 flex items-center gap-1">
@@ -262,7 +234,6 @@ export default function RequisitionsIndex({
                     </Link>
                 </div>
 
-                {/* Filtres */}
                 <div className="bg-white border border-outline-soft rounded-lg p-4 shadow-card flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
                     <div className="relative w-full md:w-80">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
@@ -329,7 +300,6 @@ export default function RequisitionsIndex({
                     </div>
                 </div>
 
-                {/* Tableau */}
                 <div className="bg-white border border-outline-soft rounded-lg shadow-card overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs border-collapse">
@@ -497,7 +467,6 @@ export default function RequisitionsIndex({
                             </div>
                         </div>
 
-                        {/* STEPPER */}
                         <div>
                             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
                                 Circuit d'approbation
@@ -526,7 +495,6 @@ export default function RequisitionsIndex({
                             </div>
                         </div>
 
-                        {/* DEMANDES */}
                         <div>
                             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                                 Demandes
@@ -666,18 +634,19 @@ export default function RequisitionsIndex({
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div>
                                     <label className="block font-semibold text-gray-700 mb-1">
-                                        Caisse
+                                        Caisse de Décaissement *
                                     </label>
                                     <select
                                         value={editReq.caisse}
                                         onChange={(e) =>
                                             setEditReq({ ...editReq, caisse: e.target.value })
                                         }
-                                        className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+                                        className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition font-bold"
+                                        required
                                     >
-                                        {CAISSES_DISPONIBLES.map((c) => (
-                                            <option key={c} value={c}>
-                                                {c}
+                                        {caisses.map((c) => (
+                                            <option key={c.id} value={c.name}>
+                                                {c.name} ({c.devise})
                                             </option>
                                         ))}
                                     </select>

@@ -9,12 +9,16 @@ use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\CashierController;
 use App\Http\Controllers\CashierSessionController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ExpenseJustificationController;
 use App\Http\Controllers\Finance\BudgetController;
 use App\Http\Controllers\Finance\CaisseManagementController;
 use App\Http\Controllers\LocaleController;
 use App\Http\Controllers\PettyCashController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\ProjectManager\ReportingController;
 use App\Http\Controllers\RequisitionController;
+use App\Models\CashRegister;
+use App\Models\Project;
 use Illuminate\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -70,6 +74,8 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::get('/director/caisses', [DashboardController::class, 'directorCaisses'])->name('director.caisses');
     Route::get('/director/urgences', [DashboardController::class, 'directorUrgences'])->name('director.urgences');
 
+    Route::get('/pm/reporting', [ReportingController::class, 'index'])->name('pm.reporting.index');
+
     Route::prefix('finance')->name('finance.')->middleware('role:finance')->group(function () {
         Route::get('/requisitions', [DashboardController::class, 'finance'])->name('dashboard');
 
@@ -89,6 +95,7 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::get('/disbursements', [CashierController::class, 'disbursements'])->name('disbursements.index');
         Route::get('/receipts', [CashierController::class, 'receipts'])->name('receipts.index');
         Route::get('/ledger', [CashierController::class, 'ledger'])->name('ledger.index');
+        Route::get('/ledger/export', [CashierController::class, 'exportLedger'])->name('ledger.export');
     });
 
     Route::patch('/requisitions/{requisition}/cashier-disburse', [CashierController::class, 'disburse'])->name('requisitions.cashier-disburse');
@@ -98,6 +105,11 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::post('/cashier/sessions/{session}/close', [CashierSessionController::class, 'closeSession'])->name('cashier.session.close');
     Route::post('/cashier/registers/{cashRegister}/entree', [CashierSessionController::class, 'storeEntree'])->name('cashier.movement.entree');
 
+    Route::get('/justifications', [ExpenseJustificationController::class, 'index'])->name('justifications.index');
+    Route::post('/justifications', [ExpenseJustificationController::class, 'store'])->name('justifications.store');
+    Route::patch('/justifications/{justification}/visa-mp', [ExpenseJustificationController::class, 'visaMP'])->name('justifications.visa-mp');
+    Route::patch('/justifications/{justification}/apurer', [ExpenseJustificationController::class, 'apurerCaissier'])->name('justifications.apurer');
+
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::patch('/profile/pin', [ProfileController::class, 'updatePin'])->name('profile.pin.update');
@@ -105,7 +117,12 @@ Route::middleware(['auth', 'active'])->group(function () {
 
     Route::get('/requisitions', [RequisitionController::class, 'index'])->name('requisitions.index');
     Route::get('/requisitions/create', function () {
-        return Inertia::render('Staff/Requisitions/Create');
+        $caisses = CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name', 'devise']);
+        $projectsList = Project::orderBy('name')->get(['id', 'name', 'full_name']);
+        return Inertia::render('Staff/Requisitions/Create', [
+            'caisses' => $caisses,
+            'projectsList' => $projectsList,
+        ]);
     })->name('requisitions.create');
     Route::post('/requisitions', [RequisitionController::class, 'store'])->name('requisitions.store');
     Route::get('/requisitions/justificatifs/{justificatif}', [RequisitionController::class, 'showJustificatif'])->name('requisitions.justificatif.show');

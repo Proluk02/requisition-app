@@ -14,7 +14,6 @@ import {
     FileText,
     Paperclip,
     Download,
-    Send,
     Ban,
     Lock,
     KeyRound,
@@ -87,19 +86,17 @@ export default function ProjectManagerDashboard({
     const [demandes, setDemandes] = useState<RequisitionMP[]>(requisitions);
     const [filterStatut, setFilterStatut] = useState<string>('all');
 
-    // Modale d'arbitrage
     const [selectedReq, setSelectedReq] = useState<RequisitionMP | null>(null);
     const [caisseChoisie, setCaisseChoisie] = useState<string>('Caisse principale');
     const [allocations, setAllocations] = useState<Record<string, string>>({});
     const [modeRejet, setModeRejet] = useState<boolean>(false);
     const [motifRejet, setMotifRejet] = useState<string>('');
 
-    // Signature électronique
     const [passwordModalOpen, setPasswordModalOpen] = useState<boolean>(false);
     const [passwordSaisi, setPasswordSaisi] = useState<string>('');
     const [signingLoading, setSigningLoading] = useState<boolean>(false);
+    const [pinError, setPinError] = useState<string | null>(null);
 
-    // Modale correction
     const [editingReq, setEditingReq] = useState<RequisitionMP | null>(null);
     const [savingEdit, setSavingEdit] = useState(false);
     const [editError, setEditError] = useState<string | null>(null);
@@ -115,14 +112,12 @@ export default function ProjectManagerDashboard({
         setTimeout(() => setToast(null), 5000);
     };
 
-    // Filtrage
     const demandesFiltrees = useMemo(() => {
         if (filterStatut === 'all') return demandes;
         if (filterStatut === 'a_corriger') return demandes.filter((d) => d.needsCorrection);
         return demandes.filter((d) => d.statut === filterStatut);
     }, [demandes, filterStatut]);
 
-    // Ouvrir arbitrage
     const handleOuvrirArbitrage = (req: RequisitionMP) => {
         setSelectedReq(req);
         setCaisseChoisie(req.caisseAttribuee || req.caisseSouhaitee || 'Caisse principale');
@@ -136,7 +131,6 @@ export default function ProjectManagerDashboard({
         setAllocations(initialAllocations);
     };
 
-    // Déclencher signature
     const handleDeclencherApprobation = () => {
         if (!selectedReq) return;
 
@@ -149,21 +143,22 @@ export default function ProjectManagerDashboard({
         if (ligneSansCode) {
             showToast(
                 'error',
-                'En tant que Manager de Projet, vous devez attribuer un code budgétaire à chaque ligne.',
+                'En tant que Manager de Projet, vous devez attribuer un code budgétaire à chaque ligne.'
             );
             return;
         }
 
         setPasswordSaisi('');
+        setPinError(null);
         setPasswordModalOpen(true);
     };
 
-    // Confirmer signature
-    const handleConfirmerSignatureAvecMotDePasse = (e: React.FormEvent) => {
+    const handleConfirmerSignature = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selectedReq || !passwordSaisi) return;
+        if (!selectedReq || !passwordSaisi.trim()) return;
 
         setSigningLoading(true);
+        setPinError(null);
 
         const allocationsArray = Object.entries(allocations).map(([demande_id, code_allocation]) => ({
             demande_id,
@@ -174,7 +169,8 @@ export default function ProjectManagerDashboard({
             route('requisitions.manager-decision', selectedReq.id),
             {
                 decision: 'approve',
-                password: passwordSaisi,
+                pin: passwordSaisi.trim(),
+                password: passwordSaisi.trim(),
                 caisse_decaissement: caisseChoisie,
                 allocations: allocationsArray,
             },
@@ -192,28 +188,29 @@ export default function ProjectManagerDashboard({
                                       statusLabel: 'Validé MP',
                                       canDecide: false,
                                   }
-                                : d,
-                        ),
+                                : d
+                        )
                     );
                     showToast(
                         'success',
-                        `Visa Manager de Projet apposé avec succès sur ${selectedReq.numero}.`,
+                        `Visa Manager de Projet apposé avec succès sur ${selectedReq.numero}.`
                     );
                     setSelectedReq(null);
                     setPasswordSaisi('');
                 },
                 onError: (errors) => {
-                    showToast(
-                        'error',
+                    const message =
+                        (errors as any).pin ||
                         (errors as any).password ||
-                            'Échec de la signature : mot de passe incorrect.',
-                    );
+                        Object.values(errors)[0] ||
+                        'Échec de la signature : Code PIN ou mot de passe incorrect.';
+                    setPinError(message);
+                    showToast('error', message);
                 },
-            },
+            }
         );
     };
 
-    // Rejet
     const handleRejeter = () => {
         if (!selectedReq) return;
         if (!motifRejet.trim()) {
@@ -226,6 +223,7 @@ export default function ProjectManagerDashboard({
             {
                 decision: 'reject',
                 password: 'skip',
+                pin: 'skip',
                 motif_rejet: motifRejet,
             },
             {
@@ -240,19 +238,18 @@ export default function ProjectManagerDashboard({
                                       statusLabel: 'Rejeté',
                                       canDecide: false,
                                   }
-                                : d,
-                        ),
+                                : d
+                        )
                     );
                     showToast('error', `Réquisition ${selectedReq.numero} rejetée.`);
                     setSelectedReq(null);
                     setModeRejet(false);
                     setMotifRejet('');
                 },
-            },
+            }
         );
     };
 
-    // Ouvrir correction
     const openEditModal = (req: RequisitionMP) => {
         setEditingReq({ ...req, lignes: req.lignes.map((l) => ({ ...l })) });
         setEditFiles({});
@@ -325,7 +322,7 @@ export default function ProjectManagerDashboard({
                     showToast('success', 'Corrections enregistrées avec succès.');
                     setEditingReq(null);
                 },
-            },
+            }
         );
     };
 
@@ -345,7 +342,6 @@ export default function ProjectManagerDashboard({
         <AppLayout>
             <Head title="Validation Manager de Projet" />
 
-            {/* Toast */}
             {toast && (
                 <div
                     className={`fixed bottom-6 right-6 z-[90] p-4 rounded-lg shadow-modal border flex items-center gap-3 text-xs font-semibold animate-slide-in-right ${
@@ -370,7 +366,6 @@ export default function ProjectManagerDashboard({
                 </div>
             )}
 
-            {/* En-tête */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-outline-soft pb-5">
                 <div>
                     <h1 className="text-xl font-bold text-on-surface flex items-center gap-2">
@@ -394,7 +389,6 @@ export default function ProjectManagerDashboard({
                 </Link>
             </div>
 
-            {/* KPI */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-white border-2 border-tertiary/40 rounded-lg p-5 shadow-card hover:shadow-md transition-shadow">
                     <div className="flex items-center justify-between mb-3">
@@ -449,7 +443,6 @@ export default function ProjectManagerDashboard({
                 </div>
             </div>
 
-            {/* Tableau */}
             <div className="bg-white border border-outline-soft rounded-lg shadow-card overflow-hidden">
                 <div className="p-4 border-b border-outline-soft flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
@@ -601,7 +594,7 @@ export default function ProjectManagerDashboard({
                 </div>
             </div>
 
-            {/* ============ MODALE CORRECTION ============ */}
+            {/* MODALE CORRECTION */}
             {editingReq && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                     <form
@@ -844,7 +837,7 @@ export default function ProjectManagerDashboard({
                 </div>
             )}
 
-            {/* ============ MODALE ARBITRAGE ============ */}
+            {/* MODALE ARBITRAGE */}
             {selectedReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                     <div className="bg-white rounded-lg border border-outline-soft shadow-modal max-w-3xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto animate-slide-down">
@@ -890,7 +883,6 @@ export default function ProjectManagerDashboard({
                             </div>
                         )}
 
-                        {/* Tableau lignes */}
                         <div>
                             <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
                                 Articles, Prestations & Devis Attachés
@@ -1000,7 +992,6 @@ export default function ProjectManagerDashboard({
                             </table>
                         </div>
 
-                        {/* Zone arbitrage */}
                         {selectedReq.canDecide && (
                             <div className="border-t border-outline-soft pt-4 space-y-4">
                                 {!modeRejet ? (
@@ -1104,7 +1095,7 @@ export default function ProjectManagerDashboard({
                 </div>
             )}
 
-            {/* ============ MODALE SIGNATURE ÉLECTRONIQUE ============ */}
+            {/* MODALE SIGNATURE (PIN OU MOT DE PASSE) */}
             {passwordModalOpen && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
                     <div className="bg-white rounded-lg border-2 border-primary shadow-modal max-w-sm w-full p-6 space-y-4 animate-slide-down">
@@ -1113,28 +1104,30 @@ export default function ProjectManagerDashboard({
                                 <Lock className="w-5 h-5 text-primary" />
                             </div>
                             <h3 className="text-sm font-black uppercase text-on-surface tracking-wider">
-                                Signature Électronique
+                                Signature Certifiée du Visa MP
                             </h3>
                             <p className="text-[11px] text-gray-500 mt-1">
-                                Signataire :{' '}
-                                <strong className="text-on-surface">{user.name}</strong> (Manager
-                                de Projet)
+                                Signataire : <strong className="text-on-surface">{user.name}</strong> (Manager de Projet)
                             </p>
                         </div>
 
-                        <form
-                            onSubmit={handleConfirmerSignatureAvecMotDePasse}
-                            className="space-y-3"
-                        >
+                        {pinError && (
+                            <div className="p-2.5 bg-error-soft border border-error/30 text-error-dark rounded-md text-xs flex items-center gap-2">
+                                <AlertCircle className="w-4 h-4 shrink-0" />
+                                <span>{pinError}</span>
+                            </div>
+                        )}
+
+                        <form onSubmit={handleConfirmerSignature} className="space-y-3">
                             <div>
                                 <label className="block text-[11px] font-bold text-gray-700 mb-1.5">
-                                    Saisissez votre mot de passe pour signer :
+                                    Saisissez votre Code PIN personnel (ou mot de passe) *
                                 </label>
                                 <div className="relative">
                                     <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                                     <input
                                         type="password"
-                                        placeholder="••••••••"
+                                        placeholder="Code PIN ou mot de passe"
                                         value={passwordSaisi}
                                         onChange={(e) => setPasswordSaisi(e.target.value)}
                                         className="w-full border border-outline-variant rounded-md p-2.5 pl-9 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
@@ -1145,9 +1138,8 @@ export default function ProjectManagerDashboard({
                             </div>
 
                             <p className="text-[10px] text-gray-400 leading-relaxed flex items-start gap-1.5">
-                                <ShieldCheck className="w-3 h-3 shrink-0 mt-0.5" />
-                                Un code unique infalsifiable et un QR code d'audit seront générés
-                                et rattachés à cette réquisition.
+                                <ShieldCheck className="w-3 h-3 shrink-0 mt-0.5 text-success" />
+                                Un code certifié et une empreinte SHA-256 infalsifiable seront apposés sur la réquisition.
                             </p>
 
                             <div className="flex justify-end gap-2 pt-2 border-t border-outline-soft">

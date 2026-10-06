@@ -17,11 +17,12 @@ use Illuminate\Support\Facades\Redirect;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class CashierController extends Controller
 {
     /**
-     * Module 1 : Vue d'ensemble du guichet et gestion de la session journalière (Ouverture / Clôture).
+     * Module 1 : Vue d'ensemble du guichet et gestion de la session journalière.
      */
     public function index(Request $request): Response
     {
@@ -186,7 +187,7 @@ class CashierController extends Controller
     }
 
     /**
-     * Module 4 : Grand Livre de Caisse mensuel (Journal chronologique consolidé BEC et BSC).
+     * Module 4 : Grand Livre de Caisse mensuel (Visualisation chronologique avec solde progressif).
      */
     public function ledger(Request $request): Response
     {
@@ -271,6 +272,103 @@ class CashierController extends Controller
     }
 
     /**
+     * Exporte le Grand Livre mensuel au format CSV / Excel avec encodage UTF-8 BOM.
+     */
+    public function exportLedger(Request $request): StreamedResponse
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('cashier') || $user->hasRole('admin') || $user->hasRole('finance'), 403);
+
+        $selectedCaisseId = $request->input('caisse_id');
+        $caisse = CashRegister::findOrFail($selectedCaisseId);
+
+        $selectedPeriod = $request->input('period', now()->format('Y-m'));
+        [$year, $month] = explode('-', $selectedPeriod);
+        $dateDebutMois = "{$year}-{$month}-01";
+
+        $entreesPassees = (float) CashMovement::where('cash_register_id', $caisse->id)
+            ->where('type', 'entree')
+            ->whereDate('date_mouvement', '<', $dateDebutMois)
+            ->sum('montant');
+
+        $sortiesPassees = (float) CashMovement::where('cash_register_id', $caisse->id)
+            ->where('type', 'sortie')
+            ->whereDate('date_mouvement', '<', $dateDebutMois)
+            ->sum('montant');
+
+        $soldeInitialMois = $entreesPassees - $sortiesPassees;
+
+        $movements = CashMovement::with('cashier')
+            ->where('cash_register_id', $caisse->id)
+            ->whereYear('date_mouvement', (int) $year)
+            ->whereMonth('date_mouvement', (int) $month)
+            ->orderBy('date_mouvement')
+            ->orderBy('created_at')
+            ->get();
+
+        $fileName = 'grand_livre_' . Str::slug($caisse->name) . "_{$year}_{$month}.csv";
+
+        return response()->streamDownload(function () use ($caisse, $year, $month, $soldeInitialMois, $movements) {
+            $handle = fopen('php://output', 'w');
+            fputs($handle, "\xEF\xBB\xBF");
+
+            fputcsv($handle, ['ASBL BON PASTEUR - GRAND LIVRE DE CAISSE MENSUEL'], ';');
+            fputcsv($handle, ['Caisse :', $caisse->name, 'Devise :', $caisse->devise], ';');
+            fputcsv($handle, ['Période :', "{$month}/{$year}"], ';');
+            fputcsv($handle, ['Solde initial au 1er du mois :', number_format($soldeInitialMois, 2, ',', ' ')], ';');
+            fputcsv($handle, [], ';');
+
+            fputcsv($handle, [
+                'Date',
+                'N° Pièce',
+                'Type',
+                'Tiers / Bénéficiaire',
+                'Imputation',
+                'Motif / Libellé',
+                'Mode Règlement',
+                'Entrée (+)',
+                'Sortie (-)',
+                'Solde Progressif',
+                'Caissier',
+            ], ';');
+
+            $solde = $soldeInitialMois;
+            foreach ($movements as $m) {
+                if ($m->isEntree()) {
+                    $solde += $m->montant;
+                    $entree = number_format($m->montant, 2, ',', ' ');
+                    $sortie = '';
+                } else {
+                    $solde -= $m->montant;
+                    $entree = '';
+                    $sortie = number_format($m->montant, 2, ',', ' ');
+                }
+
+                fputcsv($handle, [
+                    $m->date_mouvement->format('d/m/Y'),
+                    $m->numero_piece,
+                    $m->isEntree() ? 'Entrée (BEC)' : 'Sortie (BSC)',
+                    $m->tiers_nom,
+                    $m->imputation,
+                    $m->motif,
+                    $m->mode_paiement,
+                    $entree,
+                    $sortie,
+                    number_format($solde, 2, ',', ' '),
+                    $m->cashier?->name,
+                ], ';');
+            }
+
+            fputcsv($handle, [], ';');
+            fputcsv($handle, ['Solde final de clôture :', number_format($solde, 2, ',', ' ')], ';');
+
+            fclose($handle);
+        }, $fileName, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
+    }
+
+    /**
      * Valide le décaissement, émet le Bon de Sortie Caisse (BSC) et impacte automatiquement la ligne budgétaire.
      */
     public function disburse(Request $request, Requisition $requisition)
@@ -334,7 +432,6 @@ class CashierController extends Controller
                 'signature_caissier' => $user->name,
             ]);
 
-            // DÉDUCTION AUTOMATIQUE SUR LA LIGNE BUDGÉTAIRE
             foreach ($lockedRequisition->demandes as $demande) {
                 $codeAllocation = trim((string) ($demande->code_allocation ?: $demande->code_all_budget));
                 $ligneTotal = (float) $demande->total_ligne;

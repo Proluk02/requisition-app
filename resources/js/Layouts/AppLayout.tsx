@@ -27,6 +27,8 @@ import {
     ArrowDownLeft,
     BookOpen,
     KeyRound,
+    BarChart3,
+    FileCheck,
 } from 'lucide-react';
 
 interface NotificationItem {
@@ -319,6 +321,18 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                     <Truck className="w-4 h-4" />
                                     <span>{__('Transport & Déplacements')}</span>
                                 </Link>
+
+                                <Link
+                                    href={route('justifications.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('justifications.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <FileCheck className="w-4 h-4 text-emerald-400" />
+                                    <span>{__('Décharges (Appendice 2)')}</span>
+                                </Link>
                             </div>
                         )}
 
@@ -335,6 +349,30 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 >
                                     <CheckSquare className="w-4 h-4" />
                                     <span>{__('Validations Équipe')}</span>
+                                </Link>
+
+                                <Link
+                                    href={route('pm.reporting.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('pm.reporting.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <BarChart3 className="w-4 h-4 text-emerald-400" />
+                                    <span>{__('Rapports & Synthèse')}</span>
+                                </Link>
+
+                                <Link
+                                    href={route('justifications.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('justifications.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <FileCheck className="w-4 h-4 text-amber-300" />
+                                    <span>{__('Contrôle Décharges')}</span>
                                 </Link>
 
                                 <Link
@@ -570,6 +608,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                 </div>
             </aside>
 
+            {/* Backdrop mobile */}
             {mobileMenuOpen && (
                 <div
                     onClick={() => setMobileMenuOpen(false)}
