@@ -38,21 +38,12 @@ class DashboardController extends Controller
         }
 
         if ($user->hasRole('project_manager')) {
-            $projectName = $user->project?->name;
             $requisitionsQuery = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
+                ->where('project_id', $user->project_id)
                 ->orderByDesc('created_at');
 
-            if ($user->project_id === null && ! $projectName) {
+            if ($user->project_id === null) {
                 $requisitionsQuery->whereRaw('1 = 0');
-            } else {
-                $requisitionsQuery->where(function ($query) use ($user, $projectName) {
-                    if ($user->project_id !== null) {
-                        $query->where('project_id', $user->project_id);
-                    }
-                    if ($projectName) {
-                        $query->orWhere('projet', $projectName);
-                    }
-                });
             }
 
             return Inertia::render('ProjectManager/Dashboard', [
@@ -245,6 +236,7 @@ class DashboardController extends Controller
 
         $urgences = Requisition::with(['user', 'demandes.justificatifs', 'project'])
             ->where('is_urgent', true)
+            ->where('status', 'urgent_direction')
             ->orderByDesc('created_at')
             ->get()
             ->map(fn ($r) => [
@@ -318,7 +310,7 @@ class DashboardController extends Controller
             'usersList' => $users,
             'caisses' => $caisses,
             'pendingSessions' => $pendingSessions,
-            'requisitions' => $requisitions->map(function (Requisition $r) use ($budgetLines) {
+            'requisitions' => $requisitions->map(function (Requisition $r) use ($budgetLines, $user) {
                 return [
                     'id' => (string) $r->id,
                     'numero' => $r->numero_requisition,
@@ -330,13 +322,24 @@ class DashboardController extends Controller
                     'nature' => $r->nature_requisition,
                     'devise' => $r->devise,
                     'montantTotal' => (float) $r->montant_total,
-                    'observation' => $r->observation,
                     'caisseAttribuee' => $r->caisse_decaissement ?? 'Caisse principale',
+                    'observation' => $r->observation,
                     'is_urgent' => (bool) $r->is_urgent,
                     'statusCode' => $r->status,
-                    'statusLabel' => ucfirst($r->status),
+                    'statusLabel' => match ($r->status) {
+                        'visa_mp' => 'À viser par les Finances',
+                        'returned_to_finance' => 'À corriger par les Finances',
+                        'returned_to_project_manager' => 'Renvoyée au Manager de Projet',
+                        'returned_to_urgent_initiator' => 'Urgence à corriger par son initiateur',
+                        'controle_finance' => 'Validée par les Finances',
+                        'decaissement_caisse' => 'Prête pour la Caisse',
+                        'decaisse' => 'Décaissée',
+                        default => ucfirst(str_replace('_', ' ', $r->status)),
+                    },
                     'canDecide' => $r->status === 'visa_mp',
-                    'financeRejected' => $r->status === 'draft' && str_contains($r->observation ?? '', 'Motif rejet Finance:'),
+                    'canCorrect' => $r->status === 'returned_to_finance'
+                        || ($r->status === 'returned_to_urgent_initiator' && (string) $r->user_id === (string) $user->id),
+                    'financeRejected' => $r->status === 'returned_to_project_manager',
                     'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
                     'lignes' => $r->demandes->map(function (Demande $d) use ($r, $budgetLines) {
                         $codeAlloc = trim((string) ($d->code_allocation ?: $d->code_all_budget));
@@ -377,7 +380,13 @@ class DashboardController extends Controller
     private function renderAdminManagerDashboard(User $user)
     {
         $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user'])
-            ->where('status', 'controle_finance')
+            ->where(function ($query) use ($user) {
+                $query->whereIn('status', ['controle_finance', 'returned_to_admin_manager'])
+                    ->orWhere(function ($urgentQuery) use ($user) {
+                        $urgentQuery->where('status', 'returned_to_urgent_initiator')
+                            ->where('user_id', $user->id);
+                    });
+            })
             ->orderByDesc('created_at')
             ->get();
 
@@ -392,11 +401,18 @@ class DashboardController extends Controller
                 'nature' => $r->nature_requisition,
                 'devise' => $r->devise,
                 'montantTotal' => (float) $r->montant_total,
+                'caisseAttribuee' => $r->caisse_decaissement ?? 'Caisse principale',
                 'observation' => $r->observation,
                 'is_urgent' => (bool) $r->is_urgent,
                 'statusCode' => $r->status,
-                'statusLabel' => 'Contrôle Administratif',
-                'canDecide' => true,
+                'statusLabel' => match ($r->status) {
+                    'returned_to_admin_manager' => 'À corriger après refus de la Direction',
+                    'returned_to_urgent_initiator' => 'Urgence à corriger par son initiateur',
+                    default => 'Contrôle Administratif',
+                },
+                'canDecide' => $r->status === 'controle_finance',
+                'canCorrect' => $r->status === 'returned_to_admin_manager'
+                    || ($r->status === 'returned_to_urgent_initiator' && (string) $r->user_id === (string) $user->id),
                 'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
                 'lignes' => $r->demandes->map(fn ($d) => [
                     'id' => (string) $d->id,
@@ -422,7 +438,8 @@ class DashboardController extends Controller
     private function mapWorkflowLevel(string $status): array
     {
         return match ($status) {
-            'draft' => ['step' => 1, 'label' => 'Brouillon', 'color' => 'gray'],
+            'draft' => ['step' => 1, 'label' => 'En attente du Manager de Projet', 'color' => 'gray'],
+            'returned_to_beneficiary', 'returned_to_urgent_initiator' => ['step' => 1, 'label' => 'À corriger par l’initiateur', 'color' => 'red'],
             'urgent_direction' => ['step' => 1, 'label' => 'Dérogation Urgente', 'color' => 'red'],
             'visa_mp' => ['step' => 2, 'label' => 'Visa MP Accordé', 'color' => 'blue'],
             'controle_finance' => ['step' => 3, 'label' => 'Contrôle Finances Validé', 'color' => 'purple'],
@@ -430,6 +447,9 @@ class DashboardController extends Controller
             'decaissement_caisse' => ['step' => 5, 'label' => 'Approuvé (À décaisser)', 'color' => 'emerald'],
             'decaisse' => ['step' => 6, 'label' => 'Décaissé', 'color' => 'green'],
             'cloture' => ['step' => 7, 'label' => 'Clôturé', 'color' => 'black'],
+            'returned_to_project_manager' => ['step' => 2, 'label' => 'À corriger par le Manager de Projet', 'color' => 'red'],
+            'returned_to_finance' => ['step' => 3, 'label' => 'À corriger par les Finances', 'color' => 'red'],
+            'returned_to_admin_manager' => ['step' => 4, 'label' => 'À corriger par le PAM', 'color' => 'red'],
             'rejetee' => ['step' => 0, 'label' => 'Rejeté', 'color' => 'red'],
             default => ['step' => 1, 'label' => ucfirst($status), 'color' => 'gray'],
         };
@@ -439,7 +459,18 @@ class DashboardController extends Controller
     {
         $validees = $requisitions->filter(fn ($req) => in_array($req->status, ['decaissement_caisse', 'decaisse', 'cloture'], true));
         return [
-            'enCoursCount' => $requisitions->whereIn('status', ['draft', 'visa_mp', 'controle_finance', 'visa_admin'])->count(),
+            'enCoursCount' => $requisitions->whereIn('status', [
+                'draft',
+                'returned_to_beneficiary',
+                'returned_to_project_manager',
+                'returned_to_finance',
+                'returned_to_admin_manager',
+                'returned_to_urgent_initiator',
+                'urgent_direction',
+                'visa_mp',
+                'controle_finance',
+                'visa_admin',
+            ])->count(),
             'valideesPretesCount' => $validees->count(),
             'valideesPretesMontantUSD' => (float) $validees->where('devise', 'USD')->sum('montant_total'),
             'vouchersMoisCount' => 0,
@@ -476,7 +507,8 @@ class DashboardController extends Controller
     private function buildProjectManagerRequisitionList($requisitions, string $managerId): array
     {
         return $requisitions->map(function ($r) use ($managerId) {
-            $isFinanceReturned = $r->status === 'draft' && str_contains($r->observation ?? '', 'Motif rejet Finance:');
+            $isFinanceReturned = $r->status === 'returned_to_project_manager';
+            $isRejectedForInitiator = in_array($r->status, ['returned_to_beneficiary', 'returned_to_urgent_initiator'], true);
             return [
                 'id' => (string) $r->id,
                 'numero' => $r->numero_requisition,
@@ -490,13 +522,28 @@ class DashboardController extends Controller
                 'caisseAttribuee' => $r->caisse_decaissement,
                 'observation' => $r->observation,
                 'is_urgent' => (bool) $r->is_urgent,
-                'statut' => $isFinanceReturned ? 'a_corriger' : ($r->status === 'draft' ? 'en_attente_mp' : 'valide_mp'),
+                'statut' => ($isFinanceReturned || $isRejectedForInitiator) ? 'a_corriger' : ($r->status === 'draft' ? 'en_attente_mp' : 'valide_mp'),
                 'statusCode' => $r->status,
-                'statusLabel' => $r->status === 'draft' ? ($isFinanceReturned ? 'Renvoyé par Finance' : 'En attente Visa MP') : 'Validé MP',
-                'canDecide' => $r->status === 'draft' && ! $isFinanceReturned,
-                'canEdit' => $r->status === 'draft' || $isFinanceReturned,
+                'statusLabel' => match ($r->status) {
+                    'draft' => 'En attente Visa MP',
+                    'returned_to_beneficiary' => 'À corriger par le bénéficiaire',
+                    'returned_to_project_manager' => 'À corriger par le Manager de Projet',
+                    'returned_to_finance' => 'À corriger par les Finances',
+                    'returned_to_admin_manager' => 'À corriger par le PAM',
+                    'returned_to_urgent_initiator' => 'Urgence à corriger par l’initiateur',
+                    'visa_mp' => 'Transmis aux Finances',
+                    'controle_finance' => 'Transmis au PAM',
+                    'visa_admin' => 'Transmis à la Direction',
+                    default => 'Validé MP',
+                },
+                'canDecide' => $r->status === 'draft'
+                    && ($r->user?->hasRole('beneficiary') ?? false),
+                'canEdit' => ((string) $r->user_id === $managerId
+                    && in_array($r->status, ['draft', 'visa_mp', 'returned_to_urgent_initiator'], true))
+                    || $r->status === 'returned_to_project_manager',
+                'canCorrect' => $r->status === 'returned_to_project_manager',
                 'financeReturned' => $isFinanceReturned,
-                'needsCorrection' => $isFinanceReturned || $r->status === 'rejetee',
+                'needsCorrection' => $isFinanceReturned || $isRejectedForInitiator || $r->status === 'returned_to_urgent_initiator',
                 'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
                 'lignes' => $r->demandes->map(fn ($d) => [
                     'id' => (string) $d->id,
@@ -533,7 +580,11 @@ class DashboardController extends Controller
     private function mapWorkflowStatus(string $status): array
     {
         return match ($status) {
-            'draft' => ['key' => 'chef_projet', 'label' => 'Brouillon', 'validator' => 'Initiateur'],
+            'draft' => ['key' => 'brouillon', 'label' => 'Brouillon', 'validator' => 'Manager Projet'],
+            'returned_to_beneficiary', 'returned_to_urgent_initiator' => ['key' => 'brouillon', 'label' => 'À corriger par l’initiateur', 'validator' => 'Initiateur'],
+            'returned_to_project_manager' => ['key' => 'visa_mp', 'label' => 'À corriger par le Manager de Projet', 'validator' => 'Manager Projet'],
+            'returned_to_finance' => ['key' => 'controle_finance', 'label' => 'À corriger par les Finances', 'validator' => 'Manager Finances'],
+            'returned_to_admin_manager' => ['key' => 'visa_admin', 'label' => 'À corriger par le PAM', 'validator' => 'Manager Admin'],
             'urgent_direction' => ['key' => 'urgent', 'label' => 'Dérogation Urgente', 'validator' => 'Directrice'],
             'visa_mp' => ['key' => 'chef_projet', 'label' => 'Visa Chef Projet', 'validator' => 'Manager Projet'],
             'controle_finance' => ['key' => 'finance_budget', 'label' => 'Contrôle Finances', 'validator' => 'Manager Finances'],

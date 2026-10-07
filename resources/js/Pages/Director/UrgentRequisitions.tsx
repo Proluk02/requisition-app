@@ -25,6 +25,8 @@ interface Props {
 
 export default function UrgentRequisitions({ urgences = [] }: Props) {
     const [target, setTarget] = useState<UrgenceItem | null>(null);
+    const [rejectTarget, setRejectTarget] = useState<UrgenceItem | null>(null);
+    const [rejectionReason, setRejectionReason] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [toast, setToast] = useState<{ type: ToastType; message: string } | null>(null);
 
@@ -40,7 +42,7 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
                 onSuccess: () => {
                     setToast({
                         type: 'success',
-                        message: `Dérogation accordée pour ${current.numero}. Dossier réinjecté en circuit prioritaire.`,
+                        message: `Réquisition urgente ${current.numero} approuvée et transmise directement à la Caisse.`,
                     });
                     setTarget(null);
                 },
@@ -50,6 +52,30 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
                         message: "Échec de l'opération. Veuillez réessayer.",
                     });
                 },
+                onFinish: () => setSubmitting(false),
+            }
+        );
+    };
+
+    const handleReject = (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!rejectTarget || !rejectionReason.trim()) return;
+        const current = rejectTarget;
+        setSubmitting(true);
+        router.patch(
+            route('requisitions.urgent-director', current.id),
+            { decision: 'reject', motif_rejet: rejectionReason },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setToast({
+                        type: 'error',
+                        message: `Réquisition urgente ${current.numero} renvoyée à son initiateur pour correction.`,
+                    });
+                    setRejectTarget(null);
+                    setRejectionReason('');
+                },
+                onError: () => setToast({ type: 'error', message: 'Échec du renvoi. Veuillez réessayer.' }),
                 onFinish: () => setSubmitting(false),
             }
         );
@@ -160,16 +186,28 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
                                             </td>
                                             <td className="py-3 px-4 text-right whitespace-nowrap">
                                                 {u.needsWaiver ? (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setTarget(u)}
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] font-bold bg-[#DC2626] text-white rounded hover:bg-[#b91c1c]"
-                                                    >
-                                                        Accorder
-                                                        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
-                                                            <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
-                                                        </svg>
-                                                    </button>
+                                                    <div className="inline-flex gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setTarget(u)}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] font-bold bg-[#DC2626] text-white rounded hover:bg-[#b91c1c]"
+                                                        >
+                                                            Accorder
+                                                            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                                                                <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
+                                                            </svg>
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setRejectTarget(u);
+                                                                setRejectionReason('');
+                                                            }}
+                                                            className="px-3 py-1.5 text-[11.5px] font-bold border border-red-300 text-red-700 rounded hover:bg-red-50"
+                                                        >
+                                                            Refuser
+                                                        </button>
+                                                    </div>
                                                 ) : (
                                                     <span className="text-[11.5px] text-gray-400 italic">
                                                         Priorité active
@@ -191,7 +229,7 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
                 title="Accorder la dérogation urgente ?"
                 description={
                     target
-                        ? `La réquisition ${target.numero} (${target.montantTotal.toLocaleString('fr-FR')} ${target.devise}) sera réinjectée dans le circuit prioritaire.`
+                        ? `La réquisition ${target.numero} (${target.montantTotal.toLocaleString('fr-FR')} ${target.devise}) sera transmise directement à la Caisse.`
                         : ''
                 }
                 confirmLabel="Accorder la dérogation"
@@ -200,6 +238,29 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
                 onConfirm={handleConfirm}
                 onCancel={() => !submitting && setTarget(null)}
             />
+
+            {rejectTarget && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+                    <form onSubmit={handleReject} className="w-full max-w-lg space-y-4 rounded bg-white p-6 shadow-xl">
+                        <h2 className="font-bold text-gray-900">Refuser la réquisition urgente {rejectTarget.numero}</h2>
+                        <p className="text-sm text-gray-600">Le dossier sera renvoyé à son initiateur pour correction.</p>
+                        <textarea
+                            required
+                            rows={4}
+                            value={rejectionReason}
+                            onChange={(event) => setRejectionReason(event.target.value)}
+                            placeholder="Motif du refus"
+                            className="w-full rounded border p-2 text-sm"
+                        />
+                        <div className="flex justify-end gap-2">
+                            <button type="button" disabled={submitting} onClick={() => setRejectTarget(null)} className="rounded border px-4 py-2 text-sm">Annuler</button>
+                            <button type="submit" disabled={submitting || !rejectionReason.trim()} className="rounded bg-red-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-60">
+                                {submitting ? 'Envoi…' : 'Renvoyer pour correction'}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
 
             {/* Notification */}
             {toast && (

@@ -103,10 +103,14 @@ export default function RequisitionsIndex({
         const total = editReq.articles.reduce((acc, a) => acc + (Number(a.total) || 0), 0);
         const enLettres = numberToWordsFR(total, editReq.devise);
 
+        const resubmittedUrgent = editReq.statusCode === 'returned_to_urgent_initiator';
         const updated: RequisitionSuivi = {
             ...editReq,
             montantTotal: total,
             montantLettres: enLettres,
+            statusCode: resubmittedUrgent ? 'urgent_direction' : 'draft',
+            statusLabel: resubmittedUrgent ? 'En attente de la Directrice (urgence)' : 'En attente du Manager de Projet',
+            etapeActuelle: resubmittedUrgent ? 'approbation_direction' : 'brouillon',
         };
 
         router.patch(
@@ -378,7 +382,11 @@ export default function RequisitionsIndex({
                                                 {req.devise}
                                             </td>
                                             <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                                                {renderEtapeBadge(req.etapeActuelle)}
+                                                {req.statusCode?.startsWith('returned_to_') ? (
+                                                    <span className="inline-block rounded-full bg-red-100 px-2.5 py-1 text-[10px] font-bold text-red-800">
+                                                        {req.statusLabel}
+                                                    </span>
+                                                ) : renderEtapeBadge(req.etapeActuelle)}
                                             </td>
                                             <td className="py-3.5 px-4 text-right whitespace-nowrap">
                                                 <div className="inline-flex items-center gap-0.5">
@@ -618,7 +626,7 @@ export default function RequisitionsIndex({
                     <div className="bg-white rounded-lg border border-outline-soft shadow-modal max-w-3xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto animate-slide-down">
                         <div className="flex items-center justify-between border-b border-outline-soft pb-3">
                             <h2 className="text-base font-bold text-on-surface">
-                                Modifier Réquisition : {editReq.numero}
+                                {editReq.statusCode?.startsWith('returned_to_') ? 'Corriger et resoumettre' : 'Modifier Réquisition'} : {editReq.numero}
                             </h2>
                             <button
                                 type="button"
@@ -760,7 +768,7 @@ export default function RequisitionsIndex({
                                     disabled={savingEdit}
                                     className="px-4 py-2 bg-primary text-white rounded-md font-semibold hover:bg-primary-light disabled:opacity-60 transition"
                                 >
-                                    {savingEdit ? 'Enregistrement…' : 'Enregistrer'}
+                                    {savingEdit ? 'Envoi…' : editReq.statusCode?.startsWith('returned_to_') ? 'Corriger et resoumettre' : 'Enregistrer'}
                                 </button>
                             </div>
                         </form>

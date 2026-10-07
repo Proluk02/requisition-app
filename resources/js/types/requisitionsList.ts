@@ -43,6 +43,8 @@ export interface RequisitionSuivi {
     montantLettres: string;
     dateSoumission: string;
     observation?: string;
+    statusCode?: string;
+    statusLabel?: string;
     etapeActuelle: WorkflowStep;
     dernierCommentaire?: string;
     articles: DetailArticle[];

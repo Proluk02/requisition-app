@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\RequisitionController;
+use App\Models\CashRegister;
 use App\Models\Project;
 use App\Models\Demande;
 use App\Models\DemandeJustificatif;
@@ -19,7 +20,9 @@ it('persists the project manager approval decision in the database', function ()
         'description' => 'Project for testing',
     ]);
 
-    Role::firstOrCreate(['name' => 'project_manager']);
+    Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
+    Role::firstOrCreate(['name' => 'beneficiary', 'guard_name' => 'web']);
+    Role::firstOrCreate(['name' => 'finance', 'guard_name' => 'web']);
 
     $manager = User::factory()->create([
         'name' => 'Project Manager',
@@ -28,6 +31,14 @@ it('persists the project manager approval decision in the database', function ()
     $manager->assignRole('project_manager');
 
     $staff = User::factory()->create();
+    $staff->assignRole('beneficiary');
+    CashRegister::create([
+        'name' => 'Caisse principale',
+        'code' => 'CP',
+        'devise' => 'USD',
+        'solde_actuel' => 0,
+        'is_active' => true,
+    ]);
 
     $requisition = Requisition::create([
         'user_id' => $staff->id,
@@ -42,10 +53,24 @@ it('persists the project manager approval decision in the database', function ()
         'montant_total' => 1500,
         'status' => 'draft',
     ]);
+    $demande = Demande::create([
+        'requisition_id' => $requisition->id,
+        'activite' => 'Fournitures',
+        'code_all_budget' => '',
+        'nature' => 'Achat',
+        'quantite' => 1,
+        'frais_unitaire' => 1500,
+        'total_ligne' => 1500,
+    ]);
 
     $request = Request::create('/requisitions/' . $requisition->id . '/manager-decision', 'PATCH', [
         'decision' => 'approve',
         'caisse_decaissement' => 'Caisse principale',
+        'password' => 'password',
+        'allocations' => [[
+            'demande_id' => $demande->id,
+            'code_allocation' => 'BUD-001',
+        ]],
     ]);
     $request->setUserResolver(fn () => $manager);
 
@@ -103,6 +128,7 @@ it('forbids a project manager from deciding another project requisition', functi
     ]);
 
     Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
+    Role::firstOrCreate(['name' => 'finance', 'guard_name' => 'web']);
     $manager = User::factory()->create([
         'status' => 'active',
         'project_id' => $managerProject->id,
@@ -169,6 +195,79 @@ it('forbids a project manager from deciding a requisition that is no longer a dr
     $this->assertDatabaseHas('requisitions', [
         'id' => $requisition->id,
         'status' => 'visa_mp',
+    ]);
+});
+
+it('forbids a project manager from deciding a draft not submitted by a beneficiary', function () {
+    $project = Project::create([
+        'name' => 'USIMAMIZI BORA',
+        'full_name' => 'USIMAMIZI BORA',
+    ]);
+
+    Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
+    $manager = User::factory()->create([
+        'status' => 'active',
+        'project_id' => $project->id,
+    ]);
+    $manager->assignRole('project_manager');
+
+    $initiator = User::factory()->create();
+    $requisition = Requisition::create([
+        'user_id' => $initiator->id,
+        'project_id' => $project->id,
+        'numero_requisition' => 'UB/09/105',
+        'nature_requisition' => 'Achat',
+        'projet' => $project->name,
+        'devise' => 'USD',
+        'montant_total' => 100,
+        'status' => 'draft',
+    ]);
+
+    $this->actingAs($manager)
+        ->patch(route('requisitions.manager-decision', $requisition), [
+            'decision' => 'reject',
+            'motif_rejet' => 'Initiateur non bénéficiaire',
+        ])
+        ->assertForbidden();
+
+    $this->assertDatabaseHas('requisitions', [
+        'id' => $requisition->id,
+        'status' => 'draft',
+    ]);
+});
+
+it('forbids a project manager from editing another users requisition', function () {
+    $project = Project::create([
+        'name' => 'USIMAMIZI BORA',
+        'full_name' => 'USIMAMIZI BORA',
+    ]);
+
+    Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
+    $manager = User::factory()->create([
+        'status' => 'active',
+        'project_id' => $project->id,
+    ]);
+    $manager->assignRole('project_manager');
+
+    $initiator = User::factory()->create();
+    $requisition = Requisition::create([
+        'user_id' => $initiator->id,
+        'project_id' => $project->id,
+        'numero_requisition' => 'UB/09/106',
+        'nature_requisition' => 'Achat',
+        'projet' => $project->name,
+        'devise' => 'USD',
+        'montant_total' => 100,
+        'status' => 'draft',
+    ]);
+
+    $this->actingAs($manager)
+        ->patch(route('requisitions.update', $requisition), [])
+        ->assertForbidden();
+
+    $this->assertDatabaseHas('requisitions', [
+        'id' => $requisition->id,
+        'status' => 'draft',
     ]);
 });
 
@@ -445,6 +544,13 @@ it('shows no requisitions to a project manager without an assigned project', fun
             'project_id' => $project->id,
         ]);
         $manager->assignRole('project_manager');
+        CashRegister::create([
+            'name' => 'Caisse principale',
+            'code' => 'CP',
+            'devise' => 'USD',
+            'solde_actuel' => 0,
+            'is_active' => true,
+        ]);
 
         $this->actingAs($manager)
             ->post(route('requisitions.store'), [
@@ -468,14 +574,13 @@ it('shows no requisitions to a project manager without an assigned project', fun
                     'justificatifs' => [],
                 ]],
             ])
-            ->assertRedirect('/requisitions');
+            ->assertRedirect(route('dashboard'));
 
-        $this->assertDatabaseHas('requisitions', [
-            'numero_requisition' => 'PM-DRAFT-001',
-            'user_id' => $manager->id,
-            'project_id' => $project->id,
-            'status' => 'visa_mp',
-        ]);
+        $managerRequisition = Requisition::where('user_id', $manager->id)
+            ->where('project_id', $project->id)
+            ->firstOrFail();
+        expect($managerRequisition->project_id)->toBe($project->id)
+            ->and($managerRequisition->status)->toBe('visa_mp');
 
         $this->actingAs($manager)
             ->get(route('dashboard'))
@@ -485,7 +590,6 @@ it('shows no requisitions to a project manager without an assigned project', fun
                 ->where('requisitions.0.canDecide', false)
             );
 
-        $managerRequisition = Requisition::where('numero_requisition', 'PM-DRAFT-001')->firstOrFail();
         $this->actingAs($manager)
             ->patch(route('requisitions.manager-decision', $managerRequisition), [
                 'decision' => 'approve',
@@ -505,11 +609,19 @@ it('shows no requisitions to a project manager without an assigned project', fun
         ]);
 
         Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
+        Role::firstOrCreate(['name' => 'finance', 'guard_name' => 'web']);
         $manager = User::factory()->create([
             'status' => 'active',
             'project_id' => $assignedProject->id,
         ]);
         $manager->assignRole('project_manager');
+        CashRegister::create([
+            'name' => 'Caisse principale',
+            'code' => 'CP',
+            'devise' => 'USD',
+            'solde_actuel' => 0,
+            'is_active' => true,
+        ]);
 
         $this->actingAs($manager)
             ->post(route('requisitions.store'), [
@@ -543,12 +655,20 @@ it('shows no requisitions to a project manager without an assigned project', fun
     it('allows a project manager to edit their own visa_mp requisition and add a file', function () {
         $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
         Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
+        Role::firstOrCreate(['name' => 'finance', 'guard_name' => 'web']);
         $manager = User::factory()->create([
             'status' => 'active',
             'project_id' => $project->id,
             'role' => 'project_manager',
         ]);
         $manager->assignRole('project_manager');
+        CashRegister::create([
+            'name' => 'Caisse principale',
+            'code' => 'CP',
+            'devise' => 'USD',
+            'solde_actuel' => 0,
+            'is_active' => true,
+        ]);
 
         $requisition = Requisition::create([
             'user_id' => $manager->id,
@@ -620,9 +740,17 @@ it('shows no requisitions to a project manager without an assigned project', fun
         Storage::disk('public')->assertExists(DemandeJustificatif::where('demande_id', $demande->id)->firstOrFail()->file_path);
     });
 
-    it('allows a project manager to edit a Finance-returned draft from another initiator', function () {
+    it('allows the project manager to correct and resubmit a Finance-returned requisition', function () {
         $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
         Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
+        Role::firstOrCreate(['name' => 'finance', 'guard_name' => 'web']);
+        CashRegister::create([
+            'name' => 'EU',
+            'code' => 'EU',
+            'devise' => 'USD',
+            'solde_actuel' => 0,
+            'is_active' => true,
+        ]);
         $manager = User::factory()->create([
             'status' => 'active',
             'project_id' => $project->id,
@@ -640,7 +768,7 @@ it('shows no requisitions to a project manager without an assigned project', fun
             'devise' => 'USD',
             'observation' => 'Motif rejet Finance: code budgétaire incorrect',
             'montant_total' => 100,
-            'status' => 'draft',
+            'status' => 'returned_to_project_manager',
         ]);
         $demande = Demande::create([
             'requisition_id' => $requisition->id,
@@ -653,13 +781,6 @@ it('shows no requisitions to a project manager without an assigned project', fun
             'frais_unitaire' => 50,
             'total_ligne' => 100,
         ]);
-
-        $this->actingAs($manager)
-            ->patch(route('requisitions.manager-decision', $requisition), [
-                'decision' => 'approve',
-                'caisse_decaissement' => 'EU',
-            ])
-            ->assertForbidden();
 
         $this->actingAs($manager)
             ->patch(route('requisitions.update', $requisition), [
@@ -686,7 +807,7 @@ it('shows no requisitions to a project manager without an assigned project', fun
         ]);
         $this->assertDatabaseHas('requisitions', [
             'id' => $requisition->id,
-            'status' => 'draft',
+            'status' => 'visa_mp',
             'montant_total' => 110,
         ]);
 
@@ -695,7 +816,7 @@ it('shows no requisitions to a project manager without an assigned project', fun
                 'decision' => 'approve',
                 'caisse_decaissement' => 'EU',
             ])
-            ->assertRedirect();
+            ->assertForbidden();
 
         $this->assertDatabaseHas('requisitions', [
             'id' => $requisition->id,
@@ -703,7 +824,7 @@ it('shows no requisitions to a project manager without an assigned project', fun
         ]);
     });
 
-    it('counts Finance-returned drafts in the project manager correction queue', function () {
+    it('shows Finance-returned requisitions in the project manager correction queue', function () {
         $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
         Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
         $manager = User::factory()->create(['status' => 'active', 'project_id' => $project->id]);
@@ -711,8 +832,8 @@ it('shows no requisitions to a project manager without an assigned project', fun
         $staff = User::factory()->create();
 
         foreach ([
-            ['numero' => 'RETURNED-BY-FINANCE', 'status' => 'draft', 'observation' => 'Motif rejet Finance: pièce manquante'],
-            ['numero' => 'REJECTED-BY-MP', 'status' => 'rejetee', 'observation' => 'Motif rejet MP: non pertinent'],
+            ['numero' => 'RETURNED-BY-FINANCE', 'status' => 'returned_to_project_manager', 'observation' => 'Motif rejet Finance: pièce manquante'],
+            ['numero' => 'REJECTED-BY-MP', 'status' => 'returned_to_beneficiary', 'observation' => 'Motif rejet MP: non pertinent'],
             ['numero' => 'NORMAL-DRAFT', 'status' => 'draft', 'observation' => 'Nouvelle demande'],
         ] as $row) {
             Requisition::create([

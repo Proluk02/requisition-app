@@ -125,13 +125,13 @@ class RoleAndDataSeeder extends Seeder
 
         $admin = User::updateOrCreate(
             [
-                'email' => 'prolukeka@gmail.com',
+                'email' => 'admin@jibulab.com',
             ],
             [
                 'name' => 'Administrateur',
                 'first_name' => 'Prosper',
                 'last_name' => 'Lukeka',
-                'password' => Hash::make('password123'),
+                'password' => Hash::make('admin020304'),
                 'role' => 'admin',
                 'status' => 'active',
                 'email_verified_at' => now(),
@@ -148,13 +148,13 @@ class RoleAndDataSeeder extends Seeder
 
         $staff = User::updateOrCreate(
             [
-                'email' => 'prolukdev@gmail.com',
+                'email' => 'eunice@jibulab.com',
             ],
             [
-                'name' => 'Staff Beneficiary',
-                'first_name' => 'Staff',
-                'last_name' => 'Beneficiary',
-                'password' => Hash::make('Staff@123456'),
+                'name' => 'Miss Eunice',
+                'first_name' => 'Eunice',
+                'last_name' => 'Kenyan',
+                'password' => Hash::make('eunice020304'),
                 'role' => 'beneficiary',
                 'status' => 'active',
                 'email_verified_at' => now(),

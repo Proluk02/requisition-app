@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
+import RequisitionCorrectionForm, { type RequisitionCorrectionData } from '@/Components/RequisitionCorrectionForm';
 import {
     Wallet,
     ShieldCheck,
@@ -62,6 +63,7 @@ interface FinanceRequisition {
     statusCode: string;
     statusLabel: string;
     canDecide: boolean;
+    canCorrect?: boolean;
     financeRejected: boolean;
     dateSoumission: string;
     lignes: FinanceLine[];
@@ -127,6 +129,7 @@ export default function FinanceDashboard({
     const [statusFilter, setStatusFilter] = useState('all');
 
     const [selected, setSelected] = useState<FinanceRequisition | null>(null);
+    const [correcting, setCorrecting] = useState<RequisitionCorrectionData | null>(null);
     const [rejecting, setRejecting] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
 
@@ -156,7 +159,7 @@ export default function FinanceDashboard({
             if (statusFilter === 'controle_finance' && item.statusCode !== 'controle_finance') return false;
             if (statusFilter === 'decaissement_caisse' && item.statusCode !== 'decaissement_caisse') return false;
             if (statusFilter === 'decaisse' && item.statusCode !== 'decaisse') return false;
-            if (statusFilter === 'returned' && !item.financeRejected) return false;
+            if (statusFilter === 'returned' && !item.canCorrect && !item.financeRejected) return false;
 
             if (selectedProject !== 'all' && item.project_id !== selectedProject && item.projet !== selectedProject) {
                 return false;
@@ -258,9 +261,10 @@ export default function FinanceDashboard({
                             if (item.id === updatedId) {
                                 return {
                                     ...item,
-                                    statusCode: 'draft',
-                                    statusLabel: 'Renvoyée en correction',
+                                    statusCode: 'returned_to_project_manager',
+                                    statusLabel: 'Renvoyée au Manager de Projet',
                                     canDecide: false,
+                                    canCorrect: false,
                                     financeRejected: true,
                                 };
                             }
@@ -591,6 +595,31 @@ export default function FinanceDashboard({
                                                 </span>
                                             </td>
                                             <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                                                {item.canCorrect && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setCorrecting({
+                                                            id: item.id,
+                                                            numero: item.numero,
+                                                            nature: item.nature,
+                                                            devise: item.devise,
+                                                            caisse: item.caisseAttribuee || 'Caisse principale',
+                                                            observation: item.observation,
+                                                            lignes: item.lignes.map((line) => ({
+                                                                id: line.id,
+                                                                activite: line.activite,
+                                                                codeBudget: line.codeBudget,
+                                                                nature: line.nature,
+                                                                quantiteOuDuree: line.quantiteOuDuree,
+                                                                unite: line.unite,
+                                                                prixUnitaire: line.prixUnitaire,
+                                                            })),
+                                                        })}
+                                                        className="mr-2 rounded border border-amber-600 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-50"
+                                                    >
+                                                        Corriger
+                                                    </button>
+                                                )}
                                                 <button
                                                     type="button"
                                                     onClick={() => {
@@ -925,6 +954,19 @@ export default function FinanceDashboard({
                         </form>
                     </div>
                 </div>
+            )}
+
+            {correcting && (
+                <RequisitionCorrectionForm
+                    key={correcting.id}
+                    requisition={correcting}
+                    onClose={() => setCorrecting(null)}
+                    onSuccess={() => {
+                        setRequisitions((items) => items.filter((item) => item.id !== correcting.id));
+                        setCorrecting(null);
+                        showToast('success', `Réquisition ${correcting.numero} corrigée et transmise au PAM.`);
+                    }}
+                />
             )}
         </AppLayout>
     );

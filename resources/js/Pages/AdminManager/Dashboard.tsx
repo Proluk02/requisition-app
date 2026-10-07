@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { Head, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
+import RequisitionCorrectionForm, { type RequisitionCorrectionData } from '@/Components/RequisitionCorrectionForm';
 
 interface Justificatif {
     id: string;
@@ -33,11 +34,13 @@ interface RequisitionAdmin {
     nature: 'Achat' | 'Service';
     devise: 'USD' | 'FC' | 'EUR';
     montantTotal: number;
+    caisseAttribuee?: string;
     observation: string | null;
     is_urgent?: boolean;
     statusCode: string;
     statusLabel: string;
     canDecide: boolean;
+    canCorrect?: boolean;
     dateSoumission: string;
     lignes: LigneRequisition[];
 }
@@ -58,6 +61,7 @@ export default function AdminManagerDashboard({ requisitions: initialRequisition
 
     // Modales
     const [selected, setSelected] = useState<RequisitionAdmin | null>(null);
+    const [correcting, setCorrecting] = useState<RequisitionCorrectionData | null>(null);
     const [rejecting, setRejecting] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
 
@@ -236,17 +240,44 @@ export default function AdminManagerDashboard({ requisitions: initialRequisition
                                                 )}
                                             </td>
                                             <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setSelected(item);
-                                                        setRejecting(false);
-                                                        setRejectionReason('');
-                                                    }}
-                                                    className="px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow-sm transition"
-                                                >
-                                                    Examiner & Viser
-                                                </button>
+                                                {item.canCorrect && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setCorrecting({
+                                                            id: item.id,
+                                                            numero: item.numero,
+                                                            nature: item.nature,
+                                                            devise: item.devise,
+                                                            caisse: item.caisseAttribuee || 'Caisse principale',
+                                                            observation: item.observation,
+                                                            lignes: item.lignes.map((line) => ({
+                                                                id: line.id,
+                                                                activite: line.activite,
+                                                                codeBudget: line.codeBudget,
+                                                                nature: line.nature,
+                                                                quantiteOuDuree: line.quantiteOuDuree,
+                                                                unite: line.unite,
+                                                                prixUnitaire: line.prixUnitaire,
+                                                            })),
+                                                        })}
+                                                        className="mr-2 rounded border border-amber-600 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-50"
+                                                    >
+                                                        Corriger
+                                                    </button>
+                                                )}
+                                                {item.canDecide && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setSelected(item);
+                                                            setRejecting(false);
+                                                            setRejectionReason('');
+                                                        }}
+                                                        className="px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow-sm transition"
+                                                    >
+                                                        Examiner & Viser
+                                                    </button>
+                                                )}
                                             </td>
                                         </tr>
                                     ))
@@ -348,7 +379,7 @@ export default function AdminManagerDashboard({ requisitions: initialRequisition
                         </div>
 
                         {/* ACTIONS : ACCORDER VISA ADMINISTRATIF OU REJETER */}
-                        <div className="border-t pt-4 space-y-3">
+                        {selected.canDecide && <div className="border-t pt-4 space-y-3">
                             {!rejecting ? (
                                 <div className="flex items-center justify-between">
                                     <button
@@ -418,7 +449,7 @@ export default function AdminManagerDashboard({ requisitions: initialRequisition
                                     </div>
                                 </div>
                             )}
-                        </div>
+                        </div>}
 
                     </div>
                 </div>
@@ -476,6 +507,22 @@ export default function AdminManagerDashboard({ requisitions: initialRequisition
                         </form>
                     </div>
                 </div>
+            )}
+
+            {correcting && (
+                <RequisitionCorrectionForm
+                    key={correcting.id}
+                    requisition={correcting}
+                    onClose={() => setCorrecting(null)}
+                    onSuccess={() => {
+                        setRequisitions((items) => items.filter((item) => item.id !== correcting.id));
+                        setCorrecting(null);
+                        setToast({
+                            type: 'success',
+                            message: `Réquisition ${correcting.numero} corrigée et resoumise à la Direction.`,
+                        });
+                    }}
+                />
             )}
         </AppLayout>
     );
