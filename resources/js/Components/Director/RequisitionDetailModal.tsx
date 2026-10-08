@@ -21,6 +21,7 @@ interface Requisition {
     devise: string;
     montantTotal: number;
     statusCode: string;
+    is_urgent: boolean;
     signatures: {
         role: string;
         nom: string;
@@ -99,7 +100,7 @@ export default function RequisitionDetailModal({ open, requisition, onClose, onP
                         <h3 className="text-[11px] font-bold uppercase tracking-widest text-gray-500 mb-3">
                             Circuit d'approbation
                         </h3>
-                        <WorkflowStepper statusCode={r.statusCode} />
+                        <WorkflowStepper statusCode={r.statusCode} isUrgent={r.is_urgent} />
                     </section>
 
                     <section>

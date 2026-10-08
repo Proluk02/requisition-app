@@ -207,3 +207,19 @@ it('returns an urgent requisition to its initiator and sends approval directly t
         ->assertRedirect();
     $this->assertDatabaseHas('requisitions', ['id' => $requisition->id, 'status' => 'decaissement_caisse']);
 });
+
+it('shows the PAM a complete requisition history separately from its actionable queue', function () {
+    $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
+    $pam = workflowUser('admin_manager');
+    $beneficiary = workflowUser('beneficiary');
+    workflowRequisition($beneficiary, $project, 'controle_finance');
+    workflowRequisition($beneficiary, $project, 'decaisse');
+
+    $this->actingAs($pam)
+        ->get(route('dashboard'))
+        ->assertInertia(fn (\Inertia\Testing\AssertableInertia $page) => $page
+            ->component('AdminManager/Dashboard')
+            ->has('requisitions', 1)
+            ->has('historyRequisitions', 2)
+        );
+});

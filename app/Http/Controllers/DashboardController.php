@@ -379,6 +379,10 @@ class DashboardController extends Controller
 
     private function renderAdminManagerDashboard(User $user)
     {
+        $allRequisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user'])
+            ->orderByDesc('created_at')
+            ->get();
+
         $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user'])
             ->where(function ($query) use ($user) {
                 $query->whereIn('status', ['controle_finance', 'returned_to_admin_manager'])
@@ -392,6 +396,27 @@ class DashboardController extends Controller
 
         return Inertia::render('AdminManager/Dashboard', [
             'isInterim' => (bool) $user->is_director_interim,
+            'historyRequisitions' => $allRequisitions->map(fn ($r) => [
+                'id' => (string) $r->id,
+                'numero' => $r->numero_requisition,
+                'projet' => $r->projet,
+                'initiateurNom' => $r->user?->name ?? 'Inconnu',
+                'nature' => $r->nature_requisition,
+                'devise' => $r->devise,
+                'montantTotal' => (float) $r->montant_total,
+                'caisseAttribuee' => $r->caisse_decaissement ?? 'Caisse principale',
+                'statusCode' => $r->status,
+                'statusLabel' => $this->mapWorkflowLevel($r->status)['label'],
+                'is_urgent' => (bool) $r->is_urgent,
+                'signatures' => $r->signatures->map(fn ($signature) => [
+                    'role' => $signature->role_signataire,
+                    'nom' => $signature->nom_signataire,
+                    'action' => $signature->action,
+                    'date' => $signature->signed_at->format('d/m/Y H:i'),
+                    'code' => $signature->signature_code,
+                    'hash' => $signature->signature_hash,
+                ])->values()->all(),
+            ])->values()->all(),
             'requisitions' => $requisitions->map(fn ($r) => [
                 'id' => (string) $r->id,
                 'numero' => $r->numero_requisition,
@@ -580,16 +605,16 @@ class DashboardController extends Controller
     private function mapWorkflowStatus(string $status): array
     {
         return match ($status) {
-            'draft' => ['key' => 'brouillon', 'label' => 'Brouillon', 'validator' => 'Manager Projet'],
+            'draft' => ['key' => 'visa_mp', 'label' => 'En attente du Manager de Projet', 'validator' => 'Manager Projet'],
             'returned_to_beneficiary', 'returned_to_urgent_initiator' => ['key' => 'brouillon', 'label' => 'À corriger par l’initiateur', 'validator' => 'Initiateur'],
             'returned_to_project_manager' => ['key' => 'visa_mp', 'label' => 'À corriger par le Manager de Projet', 'validator' => 'Manager Projet'],
             'returned_to_finance' => ['key' => 'controle_finance', 'label' => 'À corriger par les Finances', 'validator' => 'Manager Finances'],
             'returned_to_admin_manager' => ['key' => 'visa_admin', 'label' => 'À corriger par le PAM', 'validator' => 'Manager Admin'],
-            'urgent_direction' => ['key' => 'urgent', 'label' => 'Dérogation Urgente', 'validator' => 'Directrice'],
-            'visa_mp' => ['key' => 'chef_projet', 'label' => 'Visa Chef Projet', 'validator' => 'Manager Projet'],
-            'controle_finance' => ['key' => 'finance_budget', 'label' => 'Contrôle Finances', 'validator' => 'Manager Finances'],
-            'visa_admin' => ['key' => 'finance_budget', 'label' => 'Administration', 'validator' => 'Manager Admin'],
-            'approbation_direction' => ['key' => 'finance_budget', 'label' => 'Approbation Direction', 'validator' => 'Directrice Générale'],
+            'urgent_direction' => ['key' => 'approbation_direction', 'label' => 'Dérogation urgente', 'validator' => 'Directrice'],
+            'visa_mp' => ['key' => 'controle_finance', 'label' => 'Visa MP accordé', 'validator' => 'Manager Finances'],
+            'controle_finance' => ['key' => 'visa_admin', 'label' => 'Contrôle Finances validé', 'validator' => 'Manager Admin'],
+            'visa_admin' => ['key' => 'approbation_direction', 'label' => 'Visa administratif accordé', 'validator' => 'Directrice Générale'],
+            'approbation_direction' => ['key' => 'approbation_direction', 'label' => 'Approbation Direction', 'validator' => 'Directrice Générale'],
             'decaissement_caisse' => ['key' => 'caisse_pret', 'label' => 'Caisse (Prêt)', 'validator' => 'Caisse'],
             'decaisse' => ['key' => 'caisse_pret', 'label' => 'Décaissé', 'validator' => 'Caisse'],
             'cloture' => ['key' => 'caisse_pret', 'label' => 'Clôturé', 'validator' => 'Clôture'],

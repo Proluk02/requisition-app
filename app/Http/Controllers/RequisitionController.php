@@ -1030,18 +1030,18 @@ class RequisitionController extends Controller
     protected function mapStatusToWorkflow(string $status): string
     {
         return match ($status) {
-            'draft' => 'brouillon',
+            'draft' => 'visa_mp',
             'urgent_direction' => 'approbation_direction',
             'returned_to_beneficiary', 'returned_to_urgent_initiator' => 'brouillon',
             'returned_to_project_manager' => 'visa_mp',
             'returned_to_finance' => 'controle_finance',
             'returned_to_admin_manager' => 'visa_admin',
-            'visa_mp' => 'visa_mp',
-            'controle_finance' => 'controle_finance',
-            'visa_admin' => 'visa_admin',
+            'visa_mp' => 'controle_finance',
+            'controle_finance' => 'visa_admin',
+            'visa_admin' => 'approbation_direction',
             'approbation_direction' => 'approbation_direction',
             'decaissement_caisse' => 'decaissement_caisse',
-            'decaisse' => 'decaisse',
+            'decaisse' => 'cloture',
             'cloture' => 'cloture',
             default => 'brouillon',
         };

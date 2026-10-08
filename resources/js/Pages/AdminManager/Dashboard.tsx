@@ -3,6 +3,8 @@ import { Head, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
 import RequisitionCorrectionForm, { type RequisitionCorrectionData } from '@/Components/RequisitionCorrectionForm';
+import SignatureHistory from '@/Components/Director/SignatureHistory';
+import WorkflowStepper from '@/Components/Director/WorkflowStepper';
 
 interface Justificatif {
     id: string;
@@ -45,14 +47,40 @@ interface RequisitionAdmin {
     lignes: LigneRequisition[];
 }
 
+interface HistoryRequisition {
+    id: string;
+    numero: string;
+    projet: string;
+    initiateurNom: string;
+    nature: 'Achat' | 'Service';
+    devise: 'USD' | 'FC' | 'EUR';
+    montantTotal: number;
+    caisseAttribuee: string;
+    statusCode: string;
+    statusLabel: string;
+    is_urgent: boolean;
+    signatures: {
+        role: string;
+        nom: string;
+        action: string;
+        date: string;
+        code?: string;
+        hash: string;
+    }[];
+}
+
 interface Props extends PageProps {
     requisitions?: RequisitionAdmin[];
+    historyRequisitions?: HistoryRequisition[];
 }
 
 const money = (amount: number, currency: string) =>
     `${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${currency}`;
 
-export default function AdminManagerDashboard({ requisitions: initialRequisitions = [] }: Props) {
+export default function AdminManagerDashboard({
+    requisitions: initialRequisitions = [],
+    historyRequisitions = [],
+}: Props) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
 
@@ -61,6 +89,7 @@ export default function AdminManagerDashboard({ requisitions: initialRequisition
 
     // Modales
     const [selected, setSelected] = useState<RequisitionAdmin | null>(null);
+    const [historySelected, setHistorySelected] = useState<HistoryRequisition | null>(null);
     const [correcting, setCorrecting] = useState<RequisitionCorrectionData | null>(null);
     const [rejecting, setRejecting] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
@@ -287,6 +316,60 @@ export default function AdminManagerDashboard({ requisitions: initialRequisition
                     </div>
                 </div>
             </div>
+
+            <section className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
+                <header className="p-4 border-b border-[#E2E8F0]">
+                    <h2 className="text-sm font-bold text-[#0B192C]">Historique de toutes les réquisitions</h2>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                        Consultation de l’ensemble des dossiers et de leurs visas, quel que soit leur statut.
+                    </p>
+                </header>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                            <tr className="bg-[#0B192C] text-white uppercase text-[10px] font-bold tracking-wider">
+                                <th className="px-4 py-3">Numéro</th>
+                                <th className="px-4 py-3">Initiateur</th>
+                                <th className="px-4 py-3">Projet</th>
+                                <th className="px-4 py-3 text-right">Montant</th>
+                                <th className="px-4 py-3">Statut</th>
+                                <th className="px-4 py-3 text-right">Historique</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
+                            {historyRequisitions.map((item) => (
+                                <tr key={item.id} className="hover:bg-[#F9F9FF]">
+                                    <td className="px-4 py-3 font-mono font-bold text-[#04326D]">{item.numero}</td>
+                                    <td className="px-4 py-3">{item.initiateurNom}</td>
+                                    <td className="px-4 py-3">{item.projet}</td>
+                                    <td className="px-4 py-3 text-right font-mono font-bold">{money(item.montantTotal, item.devise)}</td>
+                                    <td className="px-4 py-3">
+                                        <span className={`rounded px-2 py-1 text-[10px] font-bold ${
+                                            item.statusCode.startsWith('returned_')
+                                                ? 'bg-red-100 text-red-800'
+                                                : 'bg-gray-100 text-gray-700'
+                                        }`}>
+                                            {item.is_urgent ? 'Urgente · ' : ''}{item.statusLabel}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-right">
+                                        <button
+                                            type="button"
+                                            onClick={() => setHistorySelected(item)}
+                                            className="rounded border border-[#04326D] px-3 py-1.5 font-bold text-[#04326D] hover:bg-blue-50"
+                                        >
+                                            Consulter
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                            {historyRequisitions.length === 0 && (
+                                <tr><td colSpan={6} className="py-8 text-center text-gray-400">Aucune réquisition enregistrée.</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
 
             {/* MODALE D'EXAMEN ET VISA ADMINISTRATIF */}
             {selected && (
@@ -523,6 +606,36 @@ export default function AdminManagerDashboard({ requisitions: initialRequisition
                         });
                     }}
                 />
+            )}
+
+            {historySelected && (
+                <div
+                    className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
+                    onClick={() => setHistorySelected(null)}
+                >
+                    <div
+                        className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded border border-[#B2BED6] bg-white p-6 shadow-2xl space-y-5"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <header className="flex items-start justify-between border-b pb-3">
+                            <div>
+                                <h2 className="font-bold text-[#0B192C]">Réquisition {historySelected.numero}</h2>
+                                <p className="mt-1 text-xs text-gray-500">
+                                    {historySelected.initiateurNom} · {historySelected.projet} · {money(historySelected.montantTotal, historySelected.devise)}
+                                </p>
+                            </div>
+                            <button type="button" onClick={() => setHistorySelected(null)} aria-label="Fermer" className="text-xl text-gray-500">&times;</button>
+                        </header>
+                        <div>
+                            <h3 className="mb-3 text-[11px] font-bold uppercase tracking-widest text-gray-500">Circuit d’approbation</h3>
+                            <WorkflowStepper statusCode={historySelected.statusCode} isUrgent={historySelected.is_urgent} />
+                        </div>
+                        <div>
+                            <h3 className="mb-3 text-[11px] font-bold uppercase tracking-widest text-gray-500">Historique des visas électroniques</h3>
+                            <SignatureHistory signatures={historySelected.signatures} />
+                        </div>
+                    </div>
+                </div>
             )}
         </AppLayout>
     );

@@ -12,17 +12,37 @@ const ORDER = STEPS.map((s) => s.key);
 
 interface Props {
     statusCode: string;
+    isUrgent?: boolean;
 }
 
-export default function WorkflowStepper({ statusCode }: Props) {
-    const currentIdx = ORDER.indexOf(statusCode);
+const CURRENT_STEP: Record<string, string> = {
+    draft: 'visa_mp',
+    visa_mp: 'controle_finance',
+    controle_finance: 'visa_admin',
+    visa_admin: 'approbation_direction',
+    urgent_direction: 'approbation_direction',
+    decaissement_caisse: 'decaissement_caisse',
+    decaisse: 'cloture',
+    cloture: 'cloture',
+    returned_to_beneficiary: 'draft',
+    returned_to_urgent_initiator: 'draft',
+    returned_to_project_manager: 'visa_mp',
+    returned_to_finance: 'controle_finance',
+    returned_to_admin_manager: 'visa_admin',
+};
+
+export default function WorkflowStepper({ statusCode, isUrgent = false }: Props) {
+    const currentStep = CURRENT_STEP[statusCode] ?? statusCode;
+    const currentIdx = ORDER.indexOf(currentStep);
     const isFinal = statusCode === 'decaisse' || statusCode === 'cloture';
 
     return (
         <div className="flex items-start justify-between relative pt-1">
             <div className="absolute left-3 right-3 top-4 h-px bg-[#E2E8F0]" />
             {STEPS.map((step, idx) => {
-                const done = idx < currentIdx || isFinal;
+                const urgentRoute = isUrgent && ['urgent_direction', 'decaissement_caisse', 'decaisse', 'cloture'].includes(statusCode);
+                const skippedInUrgentRoute = urgentRoute && idx < 4;
+                const done = !skippedInUrgentRoute && (idx < currentIdx || isFinal);
                 const active = idx === currentIdx && !isFinal;
 
                 const circle = done

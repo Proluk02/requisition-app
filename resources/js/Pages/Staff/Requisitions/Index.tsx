@@ -160,7 +160,7 @@ export default function RequisitionsIndex({
         });
     };
 
-    const getStepClasses = (currentStep: WorkflowStep, stepIndex: number) => {
+    const getStepClasses = (currentStep: WorkflowStep, stepIndex: number, isUrgent = false, isFinal = false) => {
         const order: WorkflowStep[] = [
             'brouillon',
             'visa_mp',
@@ -171,6 +171,10 @@ export default function RequisitionsIndex({
             'cloture',
         ];
         const currentIndex = order.indexOf(currentStep);
+        const urgentRoute = isUrgent && ['approbation_direction', 'decaissement_caisse', 'cloture'].includes(currentStep);
+
+        if (urgentRoute && stepIndex < 4) return 'bg-gray-100 text-gray-400 border-gray-200';
+        if (isFinal) return 'bg-success text-white border-success';
 
         if (stepIndex < currentIndex) return 'bg-success text-white border-success';
         if (stepIndex === currentIndex)
@@ -490,6 +494,8 @@ export default function RequisitionsIndex({
                                             className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs border-2 transition ${getStepClasses(
                                                 viewReq.etapeActuelle,
                                                 idx,
+                                                viewReq.is_urgent,
+                                                viewReq.statusCode === 'decaisse' || viewReq.statusCode === 'cloture',
                                             )}`}
                                         >
                                             {idx + 1}
