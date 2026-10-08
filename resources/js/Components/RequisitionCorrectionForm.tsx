@@ -30,6 +30,7 @@ interface Props {
 
 export default function RequisitionCorrectionForm({ requisition, onClose, onSuccess }: Props) {
     const [form, setForm] = useState(requisition);
+    const [attachments, setAttachments] = useState<Record<string, File[]>>({});
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -43,7 +44,8 @@ export default function RequisitionCorrectionForm({ requisition, onClose, onSucc
     const submit = (event: React.FormEvent) => {
         event.preventDefault();
         setError(null);
-        router.patch(route('requisitions.update', form.id), {
+        router.post(route('requisitions.update', form.id), {
+            _method: 'patch',
             nature_requisition: form.nature,
             caisse_decaissement: form.caisse,
             devise: form.devise,
@@ -56,9 +58,16 @@ export default function RequisitionCorrectionForm({ requisition, onClose, onSucc
                 quantiteOuDuree: line.quantiteOuDuree,
                 unite: line.unite,
                 prixUnitaire: line.prixUnitaire,
+                justificatifs: (attachments[line.id] ?? []).map((file) => ({
+                    description: file.name,
+                    date: new Date().toISOString().slice(0, 10),
+                    montant: 0,
+                    file,
+                })),
             })),
         }, {
             preserveScroll: true,
+            forceFormData: true,
             onStart: () => setSaving(true),
             onFinish: () => setSaving(false),
             onError: (errors) => setError(Object.values(errors)[0] ?? 'Erreur lors de la correction.'),
@@ -121,6 +130,24 @@ export default function RequisitionCorrectionForm({ requisition, onClose, onSucc
                             </label>
                             <label className="text-xs font-semibold sm:col-span-2">Prix unitaire
                                 <input type="number" min="0" step="0.01" required value={line.prixUnitaire} onChange={(e) => updateLine(line.id, { prixUnitaire: Number(e.target.value) })} className="mt-1 w-full rounded border p-2" />
+                            </label>
+                            <label className="text-xs font-semibold sm:col-span-12">
+                                Ajouter un justificatif (PDF, JPG ou PNG, 10 Mo maximum)
+                                <input
+                                    type="file"
+                                    accept=".pdf,.jpg,.jpeg,.png"
+                                    multiple
+                                    onChange={(event) => setAttachments((current) => ({
+                                        ...current,
+                                        [line.id]: Array.from(event.target.files ?? []),
+                                    }))}
+                                    className="mt-1 block w-full rounded border p-2 font-normal"
+                                />
+                                {(attachments[line.id] ?? []).length > 0 && (
+                                    <span className="mt-1 block font-normal text-gray-500">
+                                        {(attachments[line.id] ?? []).map((file) => file.name).join(', ')}
+                                    </span>
+                                )}
                             </label>
                         </div>
                     ))}

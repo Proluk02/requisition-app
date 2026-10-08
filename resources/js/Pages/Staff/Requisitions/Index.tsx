@@ -62,6 +62,8 @@ export default function RequisitionsIndex({
 
     const [viewReq, setViewReq] = useState<RequisitionSuivi | null>(null);
     const [editReq, setEditReq] = useState<RequisitionSuivi | null>(null);
+    const [editAttachments, setEditAttachments] = useState<Record<string, File[]>>({});
+    const [editError, setEditError] = useState<string | null>(null);
     const [printReq, setPrintReq] = useState<RequisitionSuivi | null>(null);
     const [savingEdit, setSavingEdit] = useState(false);
 
@@ -113,9 +115,10 @@ export default function RequisitionsIndex({
             etapeActuelle: resubmittedUrgent ? 'approbation_direction' : 'brouillon',
         };
 
-        router.patch(
+        router.post(
             route('requisitions.update', updated.id),
             {
+                _method: 'patch',
                 caisse_decaissement: updated.caisse,
                 devise: updated.devise,
                 observation: updated.observation || null,
@@ -124,12 +127,20 @@ export default function RequisitionsIndex({
                     activite: article.activite,
                     quantiteOuDuree: article.quantiteOuDuree,
                     prixUnitaire: article.prixUnitaire,
+                    justificatifs: (editAttachments[article.id] ?? []).map((file) => ({
+                        description: file.name,
+                        date: new Date().toISOString().slice(0, 10),
+                        montant: 0,
+                        file,
+                    })),
                 })),
             },
             {
                 preserveScroll: true,
+                forceFormData: true,
                 onStart: () => setSavingEdit(true),
                 onFinish: () => setSavingEdit(false),
+                onError: (errors) => setEditError(Object.values(errors)[0] ?? 'Erreur lors de la correction.'),
                 onSuccess: () => {
                     setRequisitions((prev) =>
                         prev.map((r) => (r.id === updated.id ? updated : r)),
@@ -414,9 +425,11 @@ export default function RequisitionsIndex({
                                                         <>
                                                             <button
                                                                 type="button"
-                                                                onClick={() =>
-                                                                    setEditReq(JSON.parse(JSON.stringify(req)))
-                                                                }
+                                                                onClick={() => {
+                                                                    setEditReq(JSON.parse(JSON.stringify(req)));
+                                                                    setEditAttachments({});
+                                                                    setEditError(null);
+                                                                }}
                                                                 className="p-1.5 text-tertiary hover:text-tertiary-dark hover:bg-tertiary-soft rounded-md transition"
                                                                 title="Modifier"
                                                             >
@@ -645,6 +658,11 @@ export default function RequisitionsIndex({
                         </div>
 
                         <form onSubmit={handleSaveEdit} className="space-y-4 text-xs">
+                            {editError && (
+                                <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-700">
+                                    {editError}
+                                </p>
+                            )}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div>
                                     <label className="block font-semibold text-gray-700 mb-1">
@@ -756,6 +774,24 @@ export default function RequisitionsIndex({
                                             <div className="md:col-span-3 text-right font-mono font-bold text-xs text-on-surface">
                                                 {art.total.toLocaleString()} {editReq.devise}
                                             </div>
+                                            <label className="block text-xs font-semibold text-gray-700 md:col-span-12">
+                                                Ajouter un justificatif (PDF, JPG ou PNG, 10 Mo maximum)
+                                                <input
+                                                    type="file"
+                                                    accept=".pdf,.jpg,.jpeg,.png"
+                                                    multiple
+                                                    onChange={(event) => setEditAttachments((current) => ({
+                                                        ...current,
+                                                        [art.id]: Array.from(event.target.files ?? []),
+                                                    }))}
+                                                    className="mt-1 block w-full rounded border border-outline-variant bg-white p-2 font-normal"
+                                                />
+                                                {(editAttachments[art.id] ?? []).length > 0 && (
+                                                    <span className="mt-1 block font-normal text-gray-500">
+                                                        {(editAttachments[art.id] ?? []).map((file) => file.name).join(', ')}
+                                                    </span>
+                                                )}
+                                            </label>
                                         </div>
                                     ))}
                                 </div>

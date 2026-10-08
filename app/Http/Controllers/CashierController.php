@@ -377,9 +377,19 @@ class CashierController extends Controller
         abort_unless($user->hasRole('cashier') || $user->hasRole('admin'), 403);
         abort_unless($requisition->status === 'decaissement_caisse', 403, 'Réquisition non autorisée au décaissement.');
 
-        $cashRegister = CashRegister::where('name', $requisition->caisse_decaissement)->first() ?? CashRegister::first();
+        $cashRegister = CashRegister::query()
+            ->where('name', $requisition->caisse_decaissement)
+            ->where('is_active', true)
+            ->first();
 
-        $session = $cashRegister?->activeSession;
+        if (! $cashRegister) {
+            return Redirect::back()->with(
+                'error',
+                "Impossible de décaisser : la caisse « {$requisition->caisse_decaissement} » n'existe pas ou est inactive."
+            );
+        }
+
+        $session = $cashRegister->activeSession;
         if (! $session || $session->status !== 'ouverte') {
             return Redirect::back()->with('error', "Impossible de décaisser : le guichet « {$requisition->caisse_decaissement} » n'est pas ouvert aujourd'hui.");
         }
@@ -411,6 +421,11 @@ class CashierController extends Controller
                 ?? '6.112.a';
 
             $montantDecaisse = (float) $lockedRequisition->montant_total;
+            $observation = preg_replace(
+                '/(?:^|\R)Motif rejet (?:MP|Finance|Administratif|Direction(?: \(P\.O\. Intérim\)| \(Urgence\))?):[^\r\n]*/u',
+                '',
+                $lockedRequisition->observation ?? ''
+            );
 
             CashMovement::create([
                 'cash_register_id' => $cashRegister->id,
@@ -424,7 +439,7 @@ class CashierController extends Controller
                 'montant' => $montantDecaisse,
                 'devise' => $lockedRequisition->devise,
                 'montant_en_lettres' => trim($validated['montant_en_lettres']),
-                'motif' => "En règlement de : " . ($lockedRequisition->observation ?: $lockedRequisition->nature_requisition),
+                'motif' => 'En règlement de : ' . (trim($observation ?? '') ?: $lockedRequisition->nature_requisition),
                 'imputation' => $primaryImputation,
                 'mode_paiement' => $validated['mode_paiement'],
                 'reference_externe' => $validated['reference_paiement'] ?? $lockedRequisition->numero_requisition,

@@ -532,6 +532,42 @@ it('shows no requisitions to a project manager without an assigned project', fun
             );
     });
 
+    it('loads active cash registers from the database for project manager decisions', function () {
+        $project = Project::create([
+            'name' => 'USIMAMIZI BORA',
+            'full_name' => 'USIMAMIZI BORA',
+        ]);
+        Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
+        $manager = User::factory()->create([
+            'status' => 'active',
+            'project_id' => $project->id,
+        ]);
+        $manager->assignRole('project_manager');
+
+        CashRegister::create([
+            'name' => 'Caisse DB active',
+            'code' => 'CDB',
+            'devise' => 'USD',
+            'solde_actuel' => 0,
+            'is_active' => true,
+        ]);
+        CashRegister::create([
+            'name' => 'Caisse désactivée',
+            'code' => 'OFF',
+            'devise' => 'USD',
+            'solde_actuel' => 0,
+            'is_active' => false,
+        ]);
+
+        $this->actingAs($manager)
+            ->get(route('dashboard'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('ProjectManager/Dashboard')
+                ->has('cashRegisters', 1)
+                ->where('cashRegisters.0.name', 'Caisse DB active')
+            );
+    });
+
     it('creates a project manager requisition already past their own approval stage', function () {
         $project = Project::create([
             'name' => 'USIMAMIZI BORA',

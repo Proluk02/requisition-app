@@ -10,6 +10,7 @@ use App\Models\Requisition;
 use App\Models\RequisitionSignature;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -143,7 +144,7 @@ class RequisitionController extends Controller
 
         $validated = $request->validate([
             'nature_requisition' => ['sometimes', 'in:Achat,Service'],
-            'caisse_decaissement' => ['required', 'string', 'max:255', 'exists:cash_registers,name'],
+            'caisse_decaissement' => ['required', 'string', 'max:255', Rule::exists('cash_registers', 'name')->where('is_active', true)],
             'devise' => ['required', 'in:USD,FC,EUR'],
             'observation' => ['nullable', 'string'],
             'articles' => ['required', 'array', 'min:1'],
@@ -296,7 +297,7 @@ class RequisitionController extends Controller
             'nature_requisition' => ['required', 'in:Achat,Service'],
             'projet' => ['required', 'string', 'exists:projects,name'],
             'project_code' => ['nullable', 'string'],
-            'caisse_decaissement' => ['required', 'string', 'exists:cash_registers,name'],
+            'caisse_decaissement' => ['required', 'string', Rule::exists('cash_registers', 'name')->where('is_active', true)],
             'devise' => ['required', 'in:USD,FC,EUR'],
             'observation' => ['nullable', 'string'],
             'montant_total' => ['required', 'numeric', 'min:0'],
@@ -441,7 +442,13 @@ class RequisitionController extends Controller
             'decision' => ['required', 'in:approve,reject'],
             'pin' => ['nullable', 'string'],
             'password' => ['nullable', 'string'],
-            'caisse_decaissement' => ['required_if:decision,approve', 'nullable', 'string', 'max:255', 'exists:cash_registers,name'],
+            'caisse_decaissement' => [
+                'required_if:decision,approve',
+                'nullable',
+                'string',
+                'max:255',
+                Rule::exists('cash_registers', 'name')->where('is_active', true),
+            ],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
             'allocations' => ['required_if:decision,approve', 'array', 'min:1'],
             'allocations.*.demande_id' => ['required', 'string', 'distinct'],
@@ -516,10 +523,7 @@ class RequisitionController extends Controller
                 return;
             }
 
-            $lockedRequisition->update([
-                'status' => 'returned_to_beneficiary',
-                'observation' => trim(($lockedRequisition->observation ? $lockedRequisition->observation . PHP_EOL : '') . 'Motif rejet MP: ' . $validated['motif_rejet']),
-            ]);
+            $lockedRequisition->update(['status' => 'returned_to_beneficiary']);
 
             $this->enregistrerSignature(
                 $lockedRequisition,
@@ -606,10 +610,7 @@ class RequisitionController extends Controller
                 return;
             }
 
-            $lockedRequisition->update([
-                'status' => 'returned_to_project_manager',
-                'observation' => trim(($lockedRequisition->observation ? $lockedRequisition->observation . PHP_EOL : '') . 'Motif rejet Finance: ' . $validated['motif_rejet']),
-            ]);
+            $lockedRequisition->update(['status' => 'returned_to_project_manager']);
 
             $this->enregistrerSignature(
                 $lockedRequisition,
@@ -702,10 +703,7 @@ class RequisitionController extends Controller
                 return;
             }
 
-            $lockedRequisition->update([
-                'status' => 'returned_to_finance',
-                'observation' => trim(($lockedRequisition->observation ? $lockedRequisition->observation . PHP_EOL : '') . 'Motif rejet Administratif: ' . $validated['motif_rejet']),
-            ]);
+            $lockedRequisition->update(['status' => 'returned_to_finance']);
 
             $this->enregistrerSignature(
                 $lockedRequisition,
@@ -811,13 +809,8 @@ class RequisitionController extends Controller
                 return;
             }
 
-            $motifDirection = $isInterim
-                ? 'Motif rejet Direction (P.O. Intérim): ' . $validated['motif_rejet']
-                : 'Motif rejet Direction: ' . $validated['motif_rejet'];
-
             $lockedRequisition->update([
                 'status' => 'returned_to_admin_manager',
-                'observation' => trim(($lockedRequisition->observation ? $lockedRequisition->observation . PHP_EOL : '') . $motifDirection),
             ]);
 
             $this->enregistrerSignature(
@@ -906,10 +899,7 @@ class RequisitionController extends Controller
                 return;
             }
 
-            $lockedRequisition->update([
-                'status' => 'returned_to_urgent_initiator',
-                'observation' => trim(($lockedRequisition->observation ? $lockedRequisition->observation . PHP_EOL : '') . 'Motif rejet Direction (Urgence): ' . $validated['motif_rejet']),
-            ]);
+            $lockedRequisition->update(['status' => 'returned_to_urgent_initiator']);
             $this->enregistrerSignature(
                 requisition: $lockedRequisition,
                 user: $user,

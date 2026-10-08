@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Head, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
@@ -9,6 +9,8 @@ import Toast, { ToastType } from '@/Components/Director/Toast';
 import EmptyState from '@/Components/Director/EmptyState';
 import PinSignatureModal from '@/Components/Director/PinSignatureModal';
 import RequisitionDetailModal from '@/Components/Director/RequisitionDetailModal';
+import type { RequisitionSuivi } from '@/types/requisitionsList';
+import { numberToWordsFR } from '@/lib/numberToWords';
 import { Calendar, Eye, Printer, ShieldCheck } from 'lucide-react';
 
 interface WorkflowLevel {
@@ -109,6 +111,9 @@ export default function DirectorDashboard({
     const [detailReq, setDetailReq] = useState<RequisitionDirectrice | null>(null);
     const [printReq, setPrintReq] = useState<RequisitionDirectrice | null>(null);
     const [signReq, setSignReq] = useState<RequisitionDirectrice | null>(null);
+    const [rejectReq, setRejectReq] = useState<RequisitionDirectrice | null>(null);
+    const [rejectionReason, setRejectionReason] = useState('');
+    const [rejecting, setRejecting] = useState(false);
     const [pinError, setPinError] = useState<string | null>(null);
     const [signing, setSigning] = useState(false);
     const [toast, setToast] = useState<{ type: ToastType; message: string } | null>(null);
@@ -166,12 +171,102 @@ export default function DirectorDashboard({
 
     const handlePrint = (req: RequisitionDirectrice) => {
         setPrintReq(req);
-        setTimeout(() => window.print(), 300);
     };
+
+    useEffect(() => {
+        if (!printReq) return;
+
+        let secondFrame = 0;
+        const firstFrame = window.requestAnimationFrame(() => {
+            secondFrame = window.requestAnimationFrame(() => window.print());
+        });
+        const clearPrintRequest = () => setPrintReq(null);
+        window.addEventListener('afterprint', clearPrintRequest);
+
+        return () => {
+            window.cancelAnimationFrame(firstFrame);
+            window.cancelAnimationFrame(secondFrame);
+            window.removeEventListener('afterprint', clearPrintRequest);
+        };
+    }, [printReq]);
+
+    const handleReject = (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!rejectReq || !rejectionReason.trim()) return;
+
+        setRejecting(true);
+        router.patch(
+            route('requisitions.director-decision', rejectReq.id),
+            { decision: 'reject', motif_rejet: rejectionReason },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setToast({
+                        type: 'success',
+                        message: `Réquisition ${rejectReq.numero} renvoyée au PAM pour correction.`,
+                    });
+                    setRejectReq(null);
+                    setRejectionReason('');
+                },
+                onError: () => setToast({
+                    type: 'error',
+                    message: 'Le refus n’a pas pu être enregistré. Veuillez réessayer.',
+                }),
+                onFinish: () => setRejecting(false),
+            },
+        );
+    };
+
+    const printRequisition = printReq ? {
+        id: printReq.id,
+        numero: printReq.numero,
+        projet: printReq.projet,
+        site: '',
+        nature: printReq.nature,
+        caisse: printReq.caisseAttribuee,
+        devise: printReq.devise,
+        montantTotal: printReq.montantTotal,
+        montantLettres: numberToWordsFR(printReq.montantTotal, printReq.devise),
+        dateSoumission: printReq.dateSoumission,
+        observation: printReq.observation ?? undefined,
+        is_urgent: printReq.is_urgent,
+        etapeActuelle: 'approbation_direction' as const,
+        articles: printReq.lignes.map((line) => ({
+            id: line.id,
+            activite: line.activite,
+            codeBudget: line.codeAllocation ?? '',
+            nature: printReq.nature,
+            quantiteOuDuree: line.quantiteOuDuree,
+            unite: line.unite,
+            prixUnitaire: line.prixUnitaire,
+            total: line.total,
+            justificatifsCount: line.justificatifs.length,
+        })),
+        signatures: printReq.signatures,
+        initiateurNom: printReq.initiateurNom,
+    } satisfies RequisitionSuivi & { initiateurNom: string; signatures: RequisitionDirectrice['signatures'] } : null;
 
     return (
         <AppLayout>
             <Head title="Direction Générale — Supervision" />
+            <style>{`
+                #bon-pasteur-print-zone { display: none; }
+                @media print {
+                    body * { visibility: hidden !important; }
+                    #bon-pasteur-print-zone,
+                    #bon-pasteur-print-zone * { visibility: visible !important; }
+                    #bon-pasteur-print-zone {
+                        display: block !important;
+                        position: fixed !important;
+                        inset: 0 !important;
+                        width: 100% !important;
+                        min-height: 194mm !important;
+                        background: white !important;
+                        z-index: 2147483647 !important;
+                    }
+                    #bon-pasteur-official-sheet { width: 100% !important; min-height: 194mm !important; }
+                }
+            `}</style>
 
             <div className="space-y-6 no-print">
                 {isInterim && (
@@ -416,13 +511,25 @@ export default function DirectorDashboard({
                                                     onClick={(e) => e.stopPropagation()}
                                                 >
                                                     {req.statusCode === 'visa_admin' && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleOpenSignature(req)}
-                                                            className="px-2.5 py-1 bg-[#10B981] hover:bg-[#059669] text-white rounded text-[11px] font-bold transition"
-                                                        >
-                                                            Bon à payer
-                                                        </button>
+                                                        <>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleOpenSignature(req)}
+                                                                className="px-2.5 py-1 bg-[#10B981] hover:bg-[#059669] text-white rounded text-[11px] font-bold transition"
+                                                            >
+                                                                Bon à payer
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setRejectReq(req);
+                                                                    setRejectionReason('');
+                                                                }}
+                                                                className="px-2.5 py-1 bg-red-700 hover:bg-red-800 text-white rounded text-[11px] font-bold transition"
+                                                            >
+                                                                Rejeter
+                                                            </button>
+                                                        </>
                                                     )}
                                                     <IconButton
                                                         title="Consulter"
@@ -462,11 +569,52 @@ export default function DirectorDashboard({
                 onSubmit={handleSubmitSignature}
             />
 
+            {rejectReq && (
+                <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4">
+                    <form onSubmit={handleReject} className="w-full max-w-lg space-y-4 rounded bg-white p-6 shadow-xl">
+                        <h2 className="font-bold text-gray-900">
+                            Rejeter la réquisition {rejectReq.numero}
+                        </h2>
+                        <p className="text-sm text-gray-600">
+                            Le dossier sera retourné au PAM pour correction, puis resoumis à la Direction.
+                        </p>
+                        <label className="block text-sm font-semibold text-gray-700">
+                            Motif du refus
+                            <textarea
+                                required
+                                autoFocus
+                                rows={4}
+                                value={rejectionReason}
+                                onChange={(event) => setRejectionReason(event.target.value)}
+                                className="mt-1 w-full rounded border p-2 text-sm"
+                            />
+                        </label>
+                        <div className="flex justify-end gap-2">
+                            <button
+                                type="button"
+                                disabled={rejecting}
+                                onClick={() => setRejectReq(null)}
+                                className="rounded border px-4 py-2 text-sm"
+                            >
+                                Annuler
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={rejecting || !rejectionReason.trim()}
+                                className="rounded bg-red-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
+                            >
+                                {rejecting ? 'Envoi…' : 'Rejeter et renvoyer au PAM'}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
+
             {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} />}
 
-            {printReq && (
+            {printRequisition && (
                 <div id="bon-pasteur-print-zone">
-                    <OfficialPrintSheet requisition={printReq as any} />
+                    <OfficialPrintSheet requisition={printRequisition} />
                 </div>
             )}
         </AppLayout>

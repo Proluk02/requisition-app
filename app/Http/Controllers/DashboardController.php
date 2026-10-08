@@ -48,6 +48,10 @@ class DashboardController extends Controller
 
             return Inertia::render('ProjectManager/Dashboard', [
                 'requisitions' => $this->buildProjectManagerRequisitionList($requisitionsQuery->get(), $user->id),
+                'cashRegisters' => CashRegister::query()
+                    ->where('is_active', true)
+                    ->orderBy('name')
+                    ->get(['id', 'name', 'devise']),
             ]);
         }
 

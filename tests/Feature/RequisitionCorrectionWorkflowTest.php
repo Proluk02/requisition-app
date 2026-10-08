@@ -1,10 +1,16 @@
 <?php
 
 use App\Models\CashRegister;
+use App\Models\CashMovement;
+use App\Models\CashRegisterSession;
 use App\Models\Demande;
+use App\Models\DemandeJustificatif;
 use App\Models\Project;
 use App\Models\Requisition;
 use App\Models\User;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Role;
 
 function workflowUser(string $role, ?Project $project = null): User
@@ -83,6 +89,7 @@ it('returns a project-manager rejection to the beneficiary for correction and re
     $manager = workflowUser('project_manager', $project);
     $beneficiary = workflowUser('beneficiary');
     $requisition = workflowRequisition($beneficiary, $project, 'draft');
+    $requisition->update(['observation' => 'Achat de fournitures']);
     $demande = workflowDemand($requisition);
 
     $this->actingAs($manager)
@@ -93,6 +100,12 @@ it('returns a project-manager rejection to the beneficiary for correction and re
         ->assertRedirect();
 
     $this->assertDatabaseHas('requisitions', ['id' => $requisition->id, 'status' => 'returned_to_beneficiary']);
+    $this->assertDatabaseHas('requisitions', [
+        'id' => $requisition->id,
+        'observation' => 'Achat de fournitures',
+    ]);
+    expect($requisition->signatures()->where('action', 'rejected')->value('commentaire'))
+        ->toBe('Corriger la quantité');
 
     $this->actingAs($beneficiary)
         ->patch(route('requisitions.update', $requisition), correctionPayload($demande))
@@ -109,6 +122,100 @@ it('returns a project-manager rejection to the beneficiary for correction and re
         ->assertRedirect();
 
     $this->assertDatabaseHas('requisitions', ['id' => $requisition->id, 'status' => 'returned_to_beneficiary']);
+});
+
+it('rejects a project manager decision using an inactive cash register', function () {
+    $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
+    $manager = workflowUser('project_manager', $project);
+    $beneficiary = workflowUser('beneficiary');
+    $requisition = workflowRequisition($beneficiary, $project, 'draft');
+    $demande = workflowDemand($requisition);
+    CashRegister::create([
+        'name' => 'Caisse inactive',
+        'code' => 'OFF',
+        'devise' => 'USD',
+        'solde_actuel' => 0,
+        'is_active' => false,
+    ]);
+
+    $this->actingAs($manager)
+        ->patch(route('requisitions.manager-decision', $requisition), [
+            'decision' => 'approve',
+            'pin' => '1234',
+            'caisse_decaissement' => 'Caisse inactive',
+            'allocations' => [[
+                'demande_id' => $demande->id,
+                'code_allocation' => 'BUD-001',
+            ]],
+        ])
+        ->assertSessionHasErrors('caisse_decaissement');
+
+    $this->assertDatabaseHas('requisitions', [
+        'id' => $requisition->id,
+        'status' => 'draft',
+    ]);
+});
+
+it('keeps rejection history out of the cashier exit voucher observation', function () {
+    $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
+    $cashier = workflowUser('cashier');
+    $cashier->update(['signature_pin' => Hash::make('1234')]);
+    $beneficiary = workflowUser('beneficiary');
+    $requisition = workflowRequisition($beneficiary, $project, 'decaissement_caisse');
+    $requisition->update([
+        'observation' => "Achat de fournitures\nMotif rejet Finance: correction antérieure\nMotif rejet Direction: ancienne décision",
+    ]);
+    $demande = workflowDemand($requisition);
+    $demande->update(['code_allocation' => 'BUD-001']);
+    $cashRegister = CashRegister::where('name', 'EU')->firstOrFail();
+    $session = CashRegisterSession::create([
+        'cash_register_id' => $cashRegister->id,
+        'cashier_id' => $cashier->id,
+        'date_session' => now()->toDateString(),
+        'solde_ouverture' => 1000,
+        'total_entrees' => 0,
+        'total_sorties' => 0,
+        'status' => 'ouverte',
+        'opened_at' => now(),
+    ]);
+
+    $this->actingAs($cashier)
+        ->patch(route('requisitions.cashier-disburse', $requisition), [
+            'mode_paiement' => 'Espèces',
+            'montant_en_lettres' => 'Cent dollars',
+            'observation' => null,
+            'pin' => '1234',
+        ])
+        ->assertRedirect();
+
+    $movement = CashMovement::where('requisition_id', $requisition->id)->firstOrFail();
+    expect($movement->motif)->toBe('En règlement de : Achat de fournitures')
+        ->and($movement->session_id)->toBe($session->id);
+});
+
+it('stores a new supporting document uploaded with a requisition correction', function () {
+    Storage::fake('public');
+    $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
+    workflowUser('project_manager', $project);
+    $beneficiary = workflowUser('beneficiary');
+    $requisition = workflowRequisition($beneficiary, $project, 'returned_to_beneficiary');
+    $demande = workflowDemand($requisition);
+    $file = UploadedFile::fake()->create('devis.pdf', 100, 'application/pdf');
+    $payload = correctionPayload($demande);
+    $payload['articles'][0]['justificatifs'] = [[
+        'description' => 'Devis fournisseur',
+        'date' => '2026-10-08',
+        'montant' => 0,
+        'file' => $file,
+    ]];
+
+    $this->actingAs($beneficiary)
+        ->patch(route('requisitions.update', $requisition), $payload)
+        ->assertRedirect();
+
+    $justificatif = DemandeJustificatif::where('demande_id', $demande->id)->firstOrFail();
+    expect($justificatif->original_name)->toBe('devis.pdf');
+    Storage::disk('public')->assertExists($justificatif->file_path);
 });
 
 it('returns a Finance rejection to the project manager and resumes at Finance after correction', function () {

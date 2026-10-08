@@ -67,18 +67,18 @@ interface RequisitionMP {
     lignes: LigneDemande[];
 }
 
-const CAISSES_DISPONIBLES = [
-    'EU',
-    'Caisse principale',
-    'Saint Jean Eudes',
-    'Local Fund 1 (Boulangerie)',
-    'Local Fund 2',
-];
+interface CashRegisterOption {
+    id: string;
+    name: string;
+    devise: string;
+}
 
 export default function ProjectManagerDashboard({
     requisitions = [],
+    cashRegisters = [],
 }: {
     requisitions?: RequisitionMP[];
+    cashRegisters?: CashRegisterOption[];
 }) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
@@ -87,7 +87,7 @@ export default function ProjectManagerDashboard({
     const [filterStatut, setFilterStatut] = useState<string>('all');
 
     const [selectedReq, setSelectedReq] = useState<RequisitionMP | null>(null);
-    const [caisseChoisie, setCaisseChoisie] = useState<string>('Caisse principale');
+    const [caisseChoisie, setCaisseChoisie] = useState<string>('');
     const [allocations, setAllocations] = useState<Record<string, string>>({});
     const [modeRejet, setModeRejet] = useState<boolean>(false);
     const [motifRejet, setMotifRejet] = useState<string>('');
@@ -120,7 +120,12 @@ export default function ProjectManagerDashboard({
 
     const handleOuvrirArbitrage = (req: RequisitionMP) => {
         setSelectedReq(req);
-        setCaisseChoisie(req.caisseAttribuee || req.caisseSouhaitee || 'Caisse principale');
+        const requestedRegister = req.caisseAttribuee || req.caisseSouhaitee;
+        setCaisseChoisie(
+            cashRegisters.some((register) => register.name === requestedRegister)
+                ? requestedRegister
+                : cashRegisters[0]?.name ?? ''
+        );
         setModeRejet(false);
         setMotifRejet('');
 
@@ -676,9 +681,10 @@ export default function ProjectManagerDashboard({
                                         }
                                         className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                                     >
-                                        {CAISSES_DISPONIBLES.map((c) => (
-                                            <option key={c} value={c}>
-                                                {c}
+                                        <option value="">Sélectionner une caisse active</option>
+                                        {cashRegisters.map((c) => (
+                                            <option key={c.id} value={c.name}>
+                                                {c.name} ({c.devise})
                                             </option>
                                         ))}
                                     </select>
@@ -811,6 +817,24 @@ export default function ProjectManagerDashboard({
                                                 </span>
                                             </div>
                                         </div>
+                                        <label className="block text-xs font-semibold text-gray-700">
+                                            Ajouter un justificatif (PDF, JPG ou PNG, 10 Mo maximum)
+                                            <input
+                                                type="file"
+                                                accept=".pdf,.jpg,.jpeg,.png"
+                                                multiple
+                                                onChange={(event) => setEditFiles((current) => ({
+                                                    ...current,
+                                                    [line.id]: Array.from(event.target.files ?? []),
+                                                }))}
+                                                className="mt-1 block w-full rounded border border-outline-variant bg-white p-2 font-normal"
+                                            />
+                                            {(editFiles[line.id] ?? []).length > 0 && (
+                                                <span className="mt-1 block font-normal text-gray-500">
+                                                    {(editFiles[line.id] ?? []).map((file) => file.name).join(', ')}
+                                                </span>
+                                            )}
+                                        </label>
                                     </div>
                                 ))}
                             </div>
@@ -1003,14 +1027,21 @@ export default function ProjectManagerDashboard({
                                             <select
                                                 value={caisseChoisie}
                                                 onChange={(e) => setCaisseChoisie(e.target.value)}
+                                                required
                                                 className="w-full border border-primary rounded-md p-2 text-xs font-semibold text-on-surface bg-white focus:outline-none focus:ring-1 focus:ring-primary/30 transition"
                                             >
-                                                {CAISSES_DISPONIBLES.map((c) => (
-                                                    <option key={c} value={c}>
-                                                        {c}
+                                                <option value="">Sélectionner une caisse active</option>
+                                                {cashRegisters.map((register) => (
+                                                    <option key={register.id} value={register.name}>
+                                                        {register.name} ({register.devise})
                                                     </option>
                                                 ))}
                                             </select>
+                                            {cashRegisters.length === 0 && (
+                                                <p className="text-[11px] font-medium text-error-dark">
+                                                    Aucune caisse active n’est configurée. Le visa ne peut pas être accordé.
+                                                </p>
+                                            )}
                                         </div>
 
                                         <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
@@ -1034,6 +1065,7 @@ export default function ProjectManagerDashboard({
                                                 <button
                                                     type="button"
                                                     onClick={handleDeclencherApprobation}
+                                                    disabled={!caisseChoisie || cashRegisters.length === 0}
                                                     className="inline-flex items-center gap-2 px-4 py-2 bg-success hover:bg-success-dark text-white rounded-md text-xs font-semibold shadow-sm hover:shadow-md transition-all active:scale-[0.98]"
                                                 >
                                                     <ShieldCheck className="w-4 h-4" />
