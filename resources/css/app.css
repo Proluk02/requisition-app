@@ -7,18 +7,45 @@
         @apply bg-surface text-on-surface antialiased;
         font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     }
+
+    input::placeholder,
+    textarea::placeholder {
+        color: theme('colors.placeholder.DEFAULT') !important; /* #1e3a8a */
+        opacity: 1 !important;                                /* Firefox réduit par défaut */
+        font-weight: 400 !important;                          /* pas d'héritage bizarre */
+        -webkit-font-smoothing: auto !important;              /* ← anti-flou Webkit */
+        -moz-osx-font-smoothing: auto !important;             /* ← anti-flou Firefox */
+    }
+
+    /* Champs discrets : PIN, codes, mots de passe visibles */
+    input[type='password']::placeholder,
+    input[inputmode='numeric']::placeholder,
+    .placeholder-muted::placeholder {
+        color: theme('colors.placeholder.muted') !important; /* #334155 */
+    }
+
+    /* Dark mode */
+    .dark input::placeholder,
+    .dark textarea::placeholder {
+        color: theme('colors.placeholder.dark') !important;  /* #cbd5e1 */
+        opacity: 1 !important;
+        -webkit-font-smoothing: auto !important;
+        -moz-osx-font-smoothing: auto !important;
+    }
 }
 
-/* Scrollbar personnalisée style maquette */
-::-webkit-scrollbar {
-    width: 6px;
-}
-::-webkit-scrollbar-track {
-    background: transparent;
-}
-::-webkit-scrollbar-thumb {
-    @apply bg-outline-variant rounded-full;
-}
-::-webkit-scrollbar-thumb:hover {
-    @apply bg-outline;
+@layer utilities {
+    /* Scrollbar personnalisée style maquette */
+    ::-webkit-scrollbar {
+        width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+        @apply bg-outline-variant rounded-full;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        @apply bg-outline;
+    }
 }

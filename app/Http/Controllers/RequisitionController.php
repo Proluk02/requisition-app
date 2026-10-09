@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BudgetLine;
 use App\Models\CashRegister;
 use App\Models\Demande;
 use App\Models\DemandeJustificatif;
@@ -388,7 +389,7 @@ class RequisitionController extends Controller
             $demande = Demande::create([
                 'requisition_id' => $requisition->id,
                 'activite' => $ligne['activite'],
-                'code_all_budget' => '',
+                'code_all_budget' => $ligne['code_activite'] ?? '',
                 'code_allocation' => null,
                 'nature' => $ligne['code_activite'] ?? null,
                 'quantite' => $ligne['quantite'] ?? 0,
@@ -435,8 +436,11 @@ class RequisitionController extends Controller
 
         abort_unless($user?->hasRole('project_manager'), 403, 'Action réservée au Manager de Projet.');
         abort_unless($user->project_id !== null && $user->project_id === $requisition->project_id, 403, 'Cette réquisition appartient à un autre projet.');
-        abort_unless($requisition->status === 'draft' && $requisition->user?->hasRole('beneficiary'), 403,
-            'Le Manager de Projet ne peut décider que sur une réquisition soumise par un bénéficiaire en statut Brouillon.');
+        abort_unless(
+            in_array($requisition->status, ['draft', 'returned_to_project_manager'], true),
+            403,
+            'Cette réquisition n’est pas en attente de visa par le Manager de Projet.'
+        );
 
         $validated = $request->validate([
             'decision' => ['required', 'in:approve,reject'],
@@ -470,20 +474,36 @@ class RequisitionController extends Controller
             $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
             abort_unless(
                 $lockedRequisition->project_id === $user->project_id
-                    && $lockedRequisition->status === 'draft'
-                    && $lockedRequisition->user?->hasRole('beneficiary'),
+                    && in_array($lockedRequisition->status, ['draft', 'returned_to_project_manager'], true),
                 403,
-                'Le Manager de Projet ne peut décider que sur une réquisition soumise par un bénéficiaire en statut Brouillon.'
+                'Cette réquisition n’est plus disponible pour visa.'
             );
 
             if ($validated['decision'] === 'approve') {
                 $demandes = $lockedRequisition->demandes()->lockForUpdate()->get()->keyBy('id');
+
                 foreach ($validated['allocations'] as $allocation) {
                     $demande = $demandes->get($allocation['demande_id']);
-                    if ($demande) {
-                        $demande->update([
-                            'code_allocation' => trim($allocation['code_allocation']),
-                            'code_all_budget' => trim($allocation['code_allocation']),
+                    if (! $demande) continue;
+
+                    $codeAlloc = trim($allocation['code_allocation']);
+
+                    $demande->update([
+                        'code_allocation' => $codeAlloc,
+                        'code_all_budget' => $codeAlloc,
+                    ]);
+
+                    // RÉPERCUSSION BUDGÉTAIRE IMMÉDIATE : ENGAGEMENT DES CRÉDITS SUR LA LIGNE
+                    $budgetLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
+                        ->where('code', $codeAlloc)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if ($budgetLine) {
+                        $montantLigne = (float) $demande->total_ligne;
+                        $budgetLine->increment('montant_engage', $montantLigne);
+                        $budgetLine->update([
+                            'solde' => round($budgetLine->budget_initial - (float) $budgetLine->montant_engage - (float) $budgetLine->montant_decaisse, 2),
                         ]);
                     }
                 }
@@ -535,19 +555,27 @@ class RequisitionController extends Controller
 
             $this->notifierUtilisateur(
                 userId: $lockedRequisition->user_id,
-                titre: 'Réquisition rejetée par le MP',
-                message: "Votre réquisition {$lockedRequisition->numero_requisition} a été rejetée : {$validated['motif_rejet']}"
+                titre: 'Réquisition renvoyée pour correction',
+                message: "Votre réquisition {$lockedRequisition->numero_requisition} a été renvoyée par le MP : {$validated['motif_rejet']}"
             );
         });
 
         return Redirect::back()->with(
             $validated['decision'] === 'approve' ? 'success' : 'error',
             $validated['decision'] === 'approve'
-                ? 'Visa Manager de Projet accordé avec certificat cryptographique.'
-                : 'Réquisition rejetée par le Manager de Projet.'
+                ? 'Visa Manager de Projet accordé avec certificat cryptographique et engagement budgétaire réservé.'
+                : 'Réquisition renvoyée pour correction.'
         );
     }
 
+    /**
+     * DÉCISION DU MANAGER DES FINANCES (VISA 2)
+     * Le Manager Finance a le plein pouvoir de tout corriger :
+     * - Correction des désignations, quantités, prix unitaires
+     * - Réassignation des codes d'imputation budgétaire
+     * - Modification de la caisse de décaissement
+     * - Enregistrement et mise à jour immédiate des engagements budgétaires
+     */
     public function financeDecision(Request $request, Requisition $requisition)
     {
         $user = $request->user();
@@ -560,6 +588,13 @@ class RequisitionController extends Controller
             'pin' => ['nullable', 'string'],
             'password' => ['nullable', 'string'],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
+            'caisse_decaissement' => ['nullable', 'string', 'max:255', Rule::exists('cash_registers', 'name')->where('is_active', true)],
+            'articles' => ['nullable', 'array'],
+            'articles.*.id' => ['required_with:articles', 'string'],
+            'articles.*.activite' => ['nullable', 'string', 'max:255'],
+            'articles.*.code_allocation' => ['nullable', 'string', 'max:255'],
+            'articles.*.quantiteOuDuree' => ['nullable', 'numeric', 'min:0'],
+            'articles.*.prixUnitaire' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         if ($validated['decision'] === 'approve') {
@@ -578,14 +613,79 @@ class RequisitionController extends Controller
             abort_unless($lockedRequisition->status === 'visa_mp', 403, 'Cette réquisition n’est plus en attente de visa financier.');
 
             if ($validated['decision'] === 'approve') {
-                $lockedRequisition->update(['status' => 'controle_finance']);
+                $demandes = $lockedRequisition->demandes()->lockForUpdate()->get()->keyBy('id');
+                $nouveauMontantTotal = 0;
+
+                // Application des corrections apportées par le Manager Finance
+                if (! empty($validated['articles'])) {
+                    foreach ($validated['articles'] as $artData) {
+                        $demande = $demandes->get($artData['id']);
+                        if (! $demande) continue;
+
+                        $ancienCode = trim((string) ($demande->code_allocation ?: $demande->code_all_budget));
+                        $ancienTotal = (float) $demande->total_ligne;
+
+                        $qte = isset($artData['quantiteOuDuree']) ? (float) $artData['quantiteOuDuree'] : (float) ($demande->quantite ?: $demande->duree ?: 0);
+                        $pu = isset($artData['prixUnitaire']) ? (float) $artData['prixUnitaire'] : (float) $demande->frais_unitaire;
+                        $nouveauTotal = round($qte * $pu, 2);
+                        $nouveauCode = isset($artData['code_allocation']) ? trim($artData['code_allocation']) : $ancienCode;
+                        $nouvelleActivite = $artData['activite'] ?? $demande->activite;
+
+                        $isService = strtolower($lockedRequisition->nature_requisition) === 'service';
+
+                        $demande->update([
+                            'activite' => $nouvelleActivite,
+                            'code_allocation' => $nouveauCode,
+                            'code_all_budget' => $nouveauCode,
+                            'quantite' => $isService ? 0 : $qte,
+                            'duree' => $isService ? $qte : 0,
+                            'frais_unitaire' => $pu,
+                            'total_ligne' => $nouveauTotal,
+                        ]);
+
+                        $nouveauMontantTotal += $nouveauTotal;
+
+                        // Réajustement des engagements budgétaires si changement de code ou de montant
+                        if ($ancienCode !== $nouveauCode || $ancienTotal != $nouveauTotal) {
+                            if (! empty($ancienCode)) {
+                                $oldLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
+                                    ->where('code', $ancienCode)
+                                    ->first();
+                                if ($oldLine) {
+                                    $oldLine->decrement('montant_engage', min((float) $oldLine->montant_engage, $ancienTotal));
+                                    $oldLine->update(['solde' => round($oldLine->budget_initial - (float) $oldLine->montant_engage - (float) $oldLine->montant_decaisse, 2)]);
+                                }
+                            }
+
+                            if (! empty($nouveauCode)) {
+                                $newLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
+                                    ->where('code', $nouveauCode)
+                                    ->first();
+                                if ($newLine) {
+                                    $newLine->increment('montant_engage', $nouveauTotal);
+                                    $newLine->update(['solde' => round($newLine->budget_initial - (float) $newLine->montant_engage - (float) $newLine->montant_decaisse, 2)]);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    $nouveauMontantTotal = (float) $lockedRequisition->montant_total;
+                }
+
+                $nouvelleCaisse = $validated['caisse_decaissement'] ?? $lockedRequisition->caisse_decaissement;
+
+                $lockedRequisition->update([
+                    'status' => 'controle_finance',
+                    'caisse_decaissement' => $nouvelleCaisse,
+                    'montant_total' => round($nouveauMontantTotal, 2),
+                ]);
 
                 $this->enregistrerSignature(
                     $lockedRequisition,
                     $user,
                     'finance',
                     'approved',
-                    'Visa de contrôle financier et budgétaire accordé.'
+                    'Visa de contrôle financier accordé avec validation des imputations budgétaires.'
                 );
 
                 $this->notifierUtilisateur(
@@ -608,6 +708,22 @@ class RequisitionController extends Controller
                 );
 
                 return;
+            }
+
+            // En cas de renvoi par la Finance : libération des crédits engagés
+            foreach ($lockedRequisition->demandes as $demande) {
+                $codeAlloc = trim((string) ($demande->code_allocation ?: $demande->code_all_budget));
+                if (! empty($codeAlloc)) {
+                    $bLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
+                        ->where('code', $codeAlloc)
+                        ->first();
+                    if ($bLine) {
+                        $bLine->decrement('montant_engage', min((float) $bLine->montant_engage, (float) $demande->total_ligne));
+                        $bLine->update([
+                            'solde' => round($bLine->budget_initial - (float) $bLine->montant_engage - (float) $bLine->montant_decaisse, 2),
+                        ]);
+                    }
+                }
             }
 
             $lockedRequisition->update(['status' => 'returned_to_project_manager']);
@@ -636,7 +752,7 @@ class RequisitionController extends Controller
         return Redirect::back()->with(
             $validated['decision'] === 'approve' ? 'success' : 'error',
             $validated['decision'] === 'approve'
-                ? 'Visa financier apposé avec succès.'
+                ? 'Visa financier apposé avec succès et ajustement des crédits enregistré.'
                 : 'Dossier renvoyé pour correction budgétaire.'
         );
     }

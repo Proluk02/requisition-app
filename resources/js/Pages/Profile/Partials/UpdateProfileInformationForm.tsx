@@ -5,7 +5,7 @@ import TextInput from '@/Components/TextInput';
 import { Transition } from '@headlessui/react';
 import { Link, useForm, usePage } from '@inertiajs/react';
 import { FormEventHandler } from 'react';
-import { User, Mail, CheckCircle2, AlertCircle } from 'lucide-react';
+import { User, Mail, CheckCircle2, AlertCircle, Pencil } from 'lucide-react';
 
 export default function UpdateProfileInformation({
     mustVerifyEmail,
@@ -28,6 +28,8 @@ export default function UpdateProfileInformation({
         patch(route('profile.update'));
     };
 
+    const hasChanges = data.name !== user.name || data.email !== user.email;
+
     return (
         <section className={className}>
             <header className="flex items-start gap-3 mb-6">
@@ -47,30 +49,46 @@ export default function UpdateProfileInformation({
             <form onSubmit={submit} className="space-y-5">
                 <div>
                     <InputLabel htmlFor="name" value="Nom complet" />
-                    <TextInput
-                        id="name"
-                        className="mt-1.5 block w-full border-outline-variant text-sm p-2.5 rounded-md focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
-                        value={data.name}
-                        onChange={(e) => setData('name', e.target.value)}
-                        required
-                        isFocused
-                        autoComplete="name"
-                    />
+                    <div className="relative mt-1.5">
+                        <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none z-10" />
+                        <TextInput
+                            id="name"
+                            className="block w-full border-outline-variant text-sm p-2.5 pl-10"
+                            value={data.name}
+                            onChange={(e) => setData('name', e.target.value)}
+                            required
+                            isFocused
+                            autoComplete="name"
+                            placeholder="Ex : Jean Dupont"
+                        />
+                    </div>
                     <InputError className="mt-1.5" message={errors.name} />
+                    <p className="mt-1 text-[11px] text-gray-500 flex items-center gap-1">
+                        <Pencil className="w-3 h-3" />
+                        Ce nom apparaîtra sur vos documents signés.
+                    </p>
                 </div>
 
                 <div>
                     <InputLabel htmlFor="email" value="Adresse email" />
-                    <TextInput
-                        id="email"
-                        type="email"
-                        className="mt-1.5 block w-full border-outline-variant text-sm p-2.5 rounded-md focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
-                        value={data.email}
-                        onChange={(e) => setData('email', e.target.value)}
-                        required
-                        autoComplete="username"
-                    />
+                    <div className="relative mt-1.5">
+                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none z-10" />
+                        <TextInput
+                            id="email"
+                            type="email"
+                            className="block w-full border-outline-variant text-sm p-2.5 pl-10"
+                            value={data.email}
+                            onChange={(e) => setData('email', e.target.value)}
+                            required
+                            autoComplete="username"
+                            placeholder="Ex : jean.dupont@exemple.com"
+                        />
+                    </div>
                     <InputError className="mt-1.5" message={errors.email} />
+                    <p className="mt-1 text-[11px] text-gray-500 flex items-center gap-1">
+                        <Mail className="w-3 h-3" />
+                        Utilisée pour la connexion et les notifications.
+                    </p>
                 </div>
 
                 {mustVerifyEmail && user.email_verified_at === null && (
@@ -101,11 +119,17 @@ export default function UpdateProfileInformation({
 
                 <div className="flex items-center gap-4 pt-2">
                     <PrimaryButton
-                        disabled={processing}
-                        className="bg-primary hover:bg-primary-light text-white text-xs font-semibold py-2.5 px-5 rounded-md shadow-sm hover:shadow-md transition-all active:scale-[0.98] disabled:opacity-60"
+                        disabled={processing || !hasChanges}
+                        className="bg-primary hover:bg-primary-light text-white text-xs font-semibold py-2.5 px-5 rounded-md shadow-sm hover:shadow-md transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                         {processing ? 'Enregistrement…' : 'Enregistrer'}
                     </PrimaryButton>
+
+                    {!hasChanges && !recentlySuccessful && (
+                        <p className="text-xs text-gray-500 italic">
+                            Aucune modification en attente
+                        </p>
+                    )}
 
                     <Transition
                         show={recentlySuccessful}

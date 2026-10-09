@@ -57,6 +57,12 @@ export default {
                     DEFAULT: '#F58F20',
                     soft: '#FFF4E6',
                 },
+                // Placeholders — bleu foncé net (light) / gris clair (dark)
+                placeholder: {
+                    DEFAULT: '#1e3a8a', // blue-900 — très lisible sur fond blanc
+                    muted: '#334155',   // slate-700 — champs discrets (PIN, codes)
+                    dark: '#cbd5e1',    // slate-300 — dark mode
+                },
             },
             fontFamily: {
                 sans: ['Inter', ...defaultTheme.fontFamily.sans],

@@ -22,20 +22,29 @@ export default forwardRef(function TextInput(
     }));
 
     useEffect(() => {
-        if (isFocused) {
-            localRef.current?.focus();
-        }
+        if (isFocused) localRef.current?.focus();
     }, [isFocused]);
 
     return (
         <input
             {...props}
             type={type}
-            className={
-                'rounded-md border-outline-variant bg-white shadow-sm text-sm transition-colors placeholder:text-gray-400 focus:border-primary focus:ring-1 focus:ring-primary/20 focus:outline-none dark:border-white/15 dark:bg-white/5 dark:text-gray-200 dark:placeholder:text-gray-500 dark:focus:border-primary dark:focus:ring-primary/40 ' +
-                className
-            }
             ref={localRef}
+            className={[
+                // Base
+                'rounded-md border border-outline-variant bg-white text-sm text-on-surface shadow-sm',
+                // Placeholder — la couleur vient du CSS global, on force juste l'opacité
+                'placeholder:opacity-100',
+                // Focus
+                'focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/20',
+                // Disabled
+                'disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500',
+                // Dark mode
+                'dark:border-white/15 dark:bg-white/5 dark:text-gray-200',
+                // Transition
+                'transition-colors',
+                className,
+            ].join(' ')}
         />
     );
 });

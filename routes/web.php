@@ -17,6 +17,7 @@ use App\Http\Controllers\PettyCashController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProjectManager\ReportingController;
 use App\Http\Controllers\RequisitionController;
+use App\Models\BudgetLine;
 use App\Models\CashRegister;
 use App\Models\Project;
 use Illuminate\Foundation\Application;
@@ -116,14 +117,24 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 
     Route::get('/requisitions', [RequisitionController::class, 'index'])->name('requisitions.index');
-    Route::get('/requisitions/create', function () {
+    Route::get('/requisitions/create', function (Request $request) {
+        $user = $request->user();
         $caisses = CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name', 'devise']);
         $projectsList = Project::orderBy('name')->get(['id', 'name', 'full_name']);
+
+        $budgetLinesQuery = BudgetLine::orderBy('code');
+        if ($user->project_id) {
+            $budgetLinesQuery->where('project_id', $user->project_id);
+        }
+        $budgetLines = $budgetLinesQuery->get(['id', 'project_id', 'code', 'libelle', 'devise', 'solde']);
+
         return Inertia::render('Staff/Requisitions/Create', [
             'caisses' => $caisses,
             'projectsList' => $projectsList,
+            'budgetLines' => $budgetLines,
         ]);
     })->name('requisitions.create');
+
     Route::post('/requisitions', [RequisitionController::class, 'store'])->name('requisitions.store');
     Route::get('/requisitions/justificatifs/{justificatif}', [RequisitionController::class, 'showJustificatif'])->name('requisitions.justificatif.show');
     Route::patch('/requisitions/{requisition}', [RequisitionController::class, 'update'])->name('requisitions.update');

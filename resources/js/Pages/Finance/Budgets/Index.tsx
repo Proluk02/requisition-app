@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Head, router, useForm, usePage } from '@inertiajs/react';
+import { Head, useForm, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
 import {
@@ -7,15 +7,13 @@ import {
     FileSpreadsheet,
     Plus,
     Search,
-    Building2,
     Users,
     CheckCircle2,
     AlertCircle,
     X,
     Upload,
-    ArrowUpRight,
-    FolderKanban,
     Layers,
+    RotateCcw,
 } from 'lucide-react';
 
 interface ProjectOption {
@@ -67,9 +65,6 @@ interface StatsBudgets {
 }
 
 interface Props extends PageProps {
-    selectedProject: string;
-    selectedDonor: string;
-    search: string;
     projects: ProjectOption[];
     donors: DonorOption[];
     donorsSummary: DonorSummary[];
@@ -81,21 +76,17 @@ const money = (n: number, currency = '$') =>
     `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${currency}`;
 
 export default function BudgetIndex({
-    selectedProject = 'all',
-    selectedDonor = 'all',
-    search: initialSearch = '',
     projects = [],
     donors = [],
     donorsSummary = [],
     budgetLines = [],
-    stats,
 }: Props) {
     const { flash } = usePage<PageProps>().props;
 
     const [activeTab, setActiveTab] = useState<'lignes' | 'donateurs'>('lignes');
-    const [projectFilter, setProjectFilter] = useState(selectedProject);
-    const [donorFilter, setDonorFilter] = useState(selectedDonor);
-    const [search, setSearch] = useState(initialSearch);
+    const [projectFilter, setProjectFilter] = useState<string>('all');
+    const [donorFilter, setDonorFilter] = useState<string>('all');
+    const [search, setSearch] = useState<string>('');
 
     const [importModalOpen, setImportModalOpen] = useState(false);
     const [donorModalOpen, setDonorModalOpen] = useState(false);
@@ -128,13 +119,47 @@ export default function BudgetIndex({
         budget_initial: '',
     });
 
-    const handleApplyFilters = (p = projectFilter, d = donorFilter, s = search) => {
-        router.get(
-            route('finance.budgets.index'),
-            { project_id: p, donor_id: d, search: s },
-            { preserveState: true, preserveScroll: true }
-        );
-    };
+    // Filtrage 100% côté client (JavaScript) en mémoire : réactif, instantané, zéro requête serveur
+    const filteredBudgetLines = useMemo(() => {
+        const query = search.trim().toLowerCase();
+
+        return budgetLines.filter((line) => {
+            if (projectFilter !== 'all' && line.project_id !== projectFilter) {
+                return false;
+            }
+
+            if (donorFilter !== 'all') {
+                if (donorFilter === 'none' && line.donor_id !== null) return false;
+                if (donorFilter !== 'none' && line.donor_id !== donorFilter) return false;
+            }
+
+            if (query !== '') {
+                const matchCode = line.code.toLowerCase().includes(query);
+                const matchLibelle = line.libelle.toLowerCase().includes(query);
+                const matchProject = line.project_name.toLowerCase().includes(query);
+                const matchDonor = line.donor_name.toLowerCase().includes(query);
+
+                if (!matchCode && !matchLibelle && !matchProject && !matchDonor) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+    }, [budgetLines, projectFilter, donorFilter, search]);
+
+    // Recalcul dynamique des KPIs financiers selon la sélection en cours
+    const liveStats = useMemo(() => {
+        const usdLines = filteredBudgetLines.filter((l) => l.devise === 'USD');
+
+        return {
+            totalInitialUSD: usdLines.reduce((acc, l) => acc + l.budget_initial, 0),
+            totalEngageUSD: usdLines.reduce((acc, l) => acc + l.montant_engage, 0),
+            totalDecaisseUSD: usdLines.reduce((acc, l) => acc + l.montant_decaisse, 0),
+            totalSoldeUSD: usdLines.reduce((acc, l) => acc + l.solde, 0),
+            totalCount: filteredBudgetLines.length,
+        };
+    }, [filteredBudgetLines]);
 
     const handleImportSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -204,7 +229,7 @@ export default function BudgetIndex({
                             Gestion des Budgets & Donateurs
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
-                            Maquette budgétaire de référence, codification analytique stricte et suivi de consommation par bailleur de fonds.
+                            Maquette budgétaire de référence, codification analytique stricte et recherche instantanée en direct.
                         </p>
                     </div>
 
@@ -251,25 +276,26 @@ export default function BudgetIndex({
                     </div>
                 )}
 
+                {/* Synthèse des KPIs financiers recalculée en temps réel */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between">
                         <span className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">
-                            Budget Alloué Total
+                            Budget Alloué (Sélection)
                         </span>
                         <p className="text-2xl font-black text-[#0B192C] mt-2 font-mono tabular-nums">
-                            {money(stats.totalInitialUSD, 'USD')}
+                            {money(liveStats.totalInitialUSD, 'USD')}
                         </p>
                         <span className="text-[10px] text-gray-400 mt-1">
-                            Sur {stats.totalLinesCount} ligne(s) budgétaire(s)
+                            Sur {liveStats.totalCount} ligne(s) affichée(s)
                         </span>
                     </div>
 
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between">
-                        <span className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">
+                        <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#F58F20]">
                             Montant Engagé (Visas)
                         </span>
                         <p className="text-2xl font-black text-[#F58F20] mt-2 font-mono tabular-nums">
-                            {money(stats.totalEngageUSD, 'USD')}
+                            {money(liveStats.totalEngageUSD, 'USD')}
                         </p>
                         <span className="text-[10px] text-gray-400 mt-1">
                             En circuit d'approbation
@@ -277,11 +303,11 @@ export default function BudgetIndex({
                     </div>
 
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between">
-                        <span className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">
+                        <span className="text-[10.5px] font-bold uppercase tracking-wider text-emerald-800">
                             Montant Décaissé (Caisse)
                         </span>
                         <p className="text-2xl font-black text-emerald-700 mt-2 font-mono tabular-nums">
-                            {money(stats.totalDecaisseUSD, 'USD')}
+                            {money(liveStats.totalDecaisseUSD, 'USD')}
                         </p>
                         <span className="text-[10px] text-gray-400 mt-1">
                             Fonds remis au guichet
@@ -293,7 +319,7 @@ export default function BudgetIndex({
                             Solde Budgétaire Disponible
                         </span>
                         <p className="text-2xl font-black text-white mt-2 font-mono tabular-nums">
-                            {money(stats.totalSoldeUSD, 'USD')}
+                            {money(liveStats.totalSoldeUSD, 'USD')}
                         </p>
                         <span className="text-[10px] text-[#B2BED6] mt-1">
                             Reliquat net non engagé
@@ -316,7 +342,7 @@ export default function BudgetIndex({
                                 <Layers className="w-3.5 h-3.5" />
                                 <span>Lignes Budgétaires</span>
                                 <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-blue-100 text-[#04326D] font-bold">
-                                    {budgetLines.length}
+                                    {filteredBudgetLines.length}
                                 </span>
                             </button>
 
@@ -341,10 +367,7 @@ export default function BudgetIndex({
                             <div className="flex flex-wrap items-center gap-2 pb-2 sm:pb-0">
                                 <select
                                     value={projectFilter}
-                                    onChange={(e) => {
-                                        setProjectFilter(e.target.value);
-                                        handleApplyFilters(e.target.value, donorFilter, search);
-                                    }}
+                                    onChange={(e) => setProjectFilter(e.target.value)}
                                     className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold"
                                 >
                                     <option value="all">Tous les projets</option>
@@ -357,13 +380,11 @@ export default function BudgetIndex({
 
                                 <select
                                     value={donorFilter}
-                                    onChange={(e) => {
-                                        setDonorFilter(e.target.value);
-                                        handleApplyFilters(projectFilter, e.target.value, search);
-                                    }}
+                                    onChange={(e) => setDonorFilter(e.target.value)}
                                     className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold"
                                 >
                                     <option value="all">Tous les donateurs</option>
+                                    <option value="none">Fonds Propres (Sans donateur)</option>
                                     {donors.map((d) => (
                                         <option key={d.id} value={d.id}>
                                             {d.name}
@@ -375,13 +396,38 @@ export default function BudgetIndex({
                                     <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                                     <input
                                         type="text"
-                                        placeholder="Code (ex: 1.1.3.a) ou libellé..."
+                                        placeholder="Filtrer en direct (code, libellé)..."
                                         value={search}
                                         onChange={(e) => setSearch(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleApplyFilters(projectFilter, donorFilter, search)}
-                                        className="pl-8 pr-3 py-1 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D] w-52"
+                                        className="pl-8 pr-7 py-1 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D] w-56 font-medium"
                                     />
+                                    {search && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setSearch('')}
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                            title="Effacer"
+                                        >
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    )}
                                 </div>
+
+                                {(projectFilter !== 'all' || donorFilter !== 'all' || search !== '') && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setProjectFilter('all');
+                                            setDonorFilter('all');
+                                            setSearch('');
+                                        }}
+                                        className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-[11px] font-semibold transition"
+                                        title="Réinitialiser les filtres"
+                                    >
+                                        <RotateCcw className="w-3 h-3" />
+                                        <span>Reset</span>
+                                    </button>
+                                )}
                             </div>
                         )}
                     </div>
@@ -402,14 +448,14 @@ export default function BudgetIndex({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
-                                    {budgetLines.length === 0 ? (
+                                    {filteredBudgetLines.length === 0 ? (
                                         <tr>
                                             <td colSpan={8} className="py-12 text-center text-gray-400 italic">
-                                                Aucune ligne budgétaire trouvée. Cliquez sur « Importer Budget Excel » pour charger la maquette de référence.
+                                                Aucune ligne budgétaire ne correspond aux critères de recherche.
                                             </td>
                                         </tr>
                                     ) : (
-                                        budgetLines.map((line) => (
+                                        filteredBudgetLines.map((line) => (
                                             <tr key={line.id} className="hover:bg-[#F9F9FF] transition">
                                                 <td className="py-3 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
                                                     {line.code}

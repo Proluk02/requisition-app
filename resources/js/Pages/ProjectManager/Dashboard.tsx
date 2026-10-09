@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
@@ -19,6 +19,10 @@ import {
     KeyRound,
     Loader2,
     Filter,
+    AlertTriangle,
+    Printer,
+    ChevronDown,
+    Check,
 } from 'lucide-react';
 
 interface Justificatif {
@@ -47,6 +51,7 @@ interface RequisitionMP {
     id: string;
     numero: string;
     projet: string;
+    project_id?: string;
     initiateurNom: string;
     initiateurRole: string;
     nature: 'Achat' | 'Service';
@@ -73,24 +78,41 @@ interface CashRegisterOption {
     devise: string;
 }
 
+interface BudgetLineOption {
+    id: string;
+    code: string;
+    libelle: string;
+    devise: string;
+    solde: number;
+    budget_initial: number;
+}
+
 export default function ProjectManagerDashboard({
     requisitions = [],
     cashRegisters = [],
+    projectBudgetLines = [],
 }: {
     requisitions?: RequisitionMP[];
     cashRegisters?: CashRegisterOption[];
+    projectBudgetLines?: BudgetLineOption[];
 }) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
 
     const [demandes, setDemandes] = useState<RequisitionMP[]>(requisitions);
     const [filterStatut, setFilterStatut] = useState<string>('all');
+    const [filterCaisse, setFilterCaisse] = useState<string>('all');
+    const [search, setSearch] = useState<string>('');
 
     const [selectedReq, setSelectedReq] = useState<RequisitionMP | null>(null);
     const [caisseChoisie, setCaisseChoisie] = useState<string>('');
     const [allocations, setAllocations] = useState<Record<string, string>>({});
     const [modeRejet, setModeRejet] = useState<boolean>(false);
     const [motifRejet, setMotifRejet] = useState<string>('');
+
+    // Dropdowns d'autocomplétion prédictive
+    const [activeArbitrageLineId, setActiveArbitrageLineId] = useState<string | null>(null);
+    const [activeEditLineId, setActiveEditLineId] = useState<string | null>(null);
 
     const [passwordModalOpen, setPasswordModalOpen] = useState<boolean>(false);
     const [passwordSaisi, setPasswordSaisi] = useState<string>('');
@@ -112,11 +134,76 @@ export default function ProjectManagerDashboard({
         setTimeout(() => setToast(null), 5000);
     };
 
+    const budgetLinesMap = useMemo(() => {
+        const map = new Map<string, BudgetLineOption>();
+        projectBudgetLines.forEach((line) => {
+            map.set(line.code.trim().toLowerCase(), line);
+        });
+        return map;
+    }, [projectBudgetLines]);
+
+    // Moteur de suggestions prédictives instantanées (commence par "2", "2.3", "6"...)
+    const getCodeSuggestions = (query: string) => {
+        const q = (query || '').trim().toLowerCase();
+        if (!q) {
+            return projectBudgetLines.slice(0, 8);
+        }
+
+        const startsWith = projectBudgetLines.filter((b) =>
+            b.code.toLowerCase().startsWith(q)
+        );
+
+        const contains = projectBudgetLines.filter(
+            (b) =>
+                !b.code.toLowerCase().startsWith(q) &&
+                (b.code.toLowerCase().includes(q) || b.libelle.toLowerCase().includes(q))
+        );
+
+        return [...startsWith, ...contains].slice(0, 10);
+    };
+
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            const target = event.target as HTMLElement;
+            if (!target.closest('.budget-combobox-wrapper')) {
+                setActiveArbitrageLineId(null);
+                setActiveEditLineId(null);
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
     const demandesFiltrees = useMemo(() => {
-        if (filterStatut === 'all') return demandes;
-        if (filterStatut === 'a_corriger') return demandes.filter((d) => d.needsCorrection);
-        return demandes.filter((d) => d.statut === filterStatut);
-    }, [demandes, filterStatut]);
+        return demandes.filter((d) => {
+            if (filterStatut === 'a_corriger' && !d.needsCorrection) return false;
+            if (filterStatut !== 'all' && filterStatut !== 'a_corriger' && d.statut !== filterStatut) return false;
+
+            if (filterCaisse !== 'all') {
+                const caisse = d.caisseAttribuee || d.caisseSouhaitee;
+                if (caisse !== filterCaisse) return false;
+            }
+
+            if (search.trim() !== '') {
+                const q = search.trim().toLowerCase();
+                const matchNum = d.numero.toLowerCase().includes(q);
+                const matchNom = d.initiateurNom.toLowerCase().includes(q);
+                const matchObs = (d.observation || '').toLowerCase().includes(q);
+                if (!matchNum && !matchNom && !matchObs) return false;
+            }
+
+            return true;
+        });
+    }, [demandes, filterStatut, filterCaisse, search]);
+
+    const statsFiltrees = useMemo(() => {
+        return {
+            totalUSD: demandesFiltrees.filter((d) => d.devise === 'USD').reduce((acc, d) => acc + d.montantTotal, 0),
+            totalFC: demandesFiltrees.filter((d) => d.devise === 'FC').reduce((acc, d) => acc + d.montantTotal, 0),
+            count: demandesFiltrees.length,
+            decaissees: demandesFiltrees.filter((d) => d.statusCode === 'decaisse').length,
+        };
+    }, [demandesFiltrees]);
 
     const handleOuvrirArbitrage = (req: RequisitionMP) => {
         setSelectedReq(req);
@@ -128,6 +215,7 @@ export default function ProjectManagerDashboard({
         );
         setModeRejet(false);
         setMotifRejet('');
+        setActiveArbitrageLineId(null);
 
         const initialAllocations: Record<string, string> = {};
         req.lignes.forEach((ligne) => {
@@ -148,7 +236,7 @@ export default function ProjectManagerDashboard({
         if (ligneSansCode) {
             showToast(
                 'error',
-                'En tant que Manager de Projet, vous devez attribuer un code budgétaire à chaque ligne.'
+                'En tant que Manager de Projet, vous devez attribuer un code budgétaire à chaque article.'
             );
             return;
         }
@@ -198,7 +286,7 @@ export default function ProjectManagerDashboard({
                     );
                     showToast(
                         'success',
-                        `Visa Manager de Projet apposé avec succès sur ${selectedReq.numero}.`
+                        `Visa Manager de Projet apposé avec succès sur ${selectedReq.numero}. Les crédits budgétaires sont réservés.`
                     );
                     setSelectedReq(null);
                     setPasswordSaisi('');
@@ -246,7 +334,7 @@ export default function ProjectManagerDashboard({
                                 : d
                         )
                     );
-                    showToast('error', `Réquisition ${selectedReq.numero} rejetée.`);
+                    showToast('error', `Réquisition ${selectedReq.numero} renvoyée pour correction.`);
                     setSelectedReq(null);
                     setModeRejet(false);
                     setMotifRejet('');
@@ -259,6 +347,7 @@ export default function ProjectManagerDashboard({
         setEditingReq({ ...req, lignes: req.lignes.map((l) => ({ ...l })) });
         setEditFiles({});
         setEditError(null);
+        setActiveEditLineId(null);
     };
 
     const updateEditingLine = (lineId: string, changes: Partial<LigneDemande>) => {
@@ -333,9 +422,9 @@ export default function ProjectManagerDashboard({
 
     const renderStatutBadge = (req: RequisitionMP) => {
         let cls = 'bg-gray-100 text-gray-700';
-        if (req.canDecide) cls = 'bg-tertiary-soft text-tertiary-dark';
-        else if (req.statut === 'valide_mp') cls = 'bg-success-soft text-success-dark';
-        else if (req.needsCorrection) cls = 'bg-error-soft text-error-dark';
+        if (req.canDecide) cls = 'bg-amber-100 text-amber-900 border border-amber-300';
+        else if (req.statut === 'valide_mp') cls = 'bg-blue-100 text-[#04326D]';
+        else if (req.needsCorrection) cls = 'bg-red-100 text-red-800';
         return (
             <span className={`${cls} px-2.5 py-1 rounded-full text-[10px] font-bold`}>
                 {req.statusLabel}
@@ -347,339 +436,340 @@ export default function ProjectManagerDashboard({
         <AppLayout>
             <Head title="Validation Manager de Projet" />
 
-            {toast && (
-                <div
-                    className={`fixed bottom-6 right-6 z-[90] p-4 rounded-lg shadow-modal border flex items-center gap-3 text-xs font-semibold animate-slide-in-right ${
-                        toast.type === 'success'
-                            ? 'bg-success text-white border-success-dark'
-                            : 'bg-error text-white border-error-dark'
-                    }`}
-                >
-                    {toast.type === 'success' ? (
-                        <CheckCircle2 className="w-4 h-4" />
-                    ) : (
-                        <AlertCircle className="w-4 h-4" />
-                    )}
-                    <p>{toast.message}</p>
-                    <button
-                        onClick={() => setToast(null)}
-                        className="ml-2 p-0.5 rounded hover:bg-white/20 transition"
-                        aria-label="Fermer"
+            <style>{`
+                @media print {
+                    nav, aside, header, .no-print-area, button, select, input {
+                        display: none !important;
+                    }
+                    #pm-filtered-report-sheet {
+                        display: block !important;
+                        position: fixed;
+                        left: 0;
+                        top: 0;
+                        width: 100vw;
+                        height: auto;
+                        padding: 24px;
+                        background: white !important;
+                        color: black !important;
+                    }
+                }
+                @media screen {
+                    #pm-filtered-report-sheet { display: none; }
+                }
+            `}</style>
+
+            <div className="space-y-6 no-print-area">
+                {toast && (
+                    <div
+                        className={`fixed bottom-6 right-6 z-[90] p-4 rounded-lg shadow-modal border flex items-center gap-3 text-xs font-semibold animate-slide-in-right ${
+                            toast.type === 'success'
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-red-600 text-white'
+                        }`}
                     >
-                        <X className="w-3.5 h-3.5" />
-                    </button>
-                </div>
-            )}
-
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-outline-soft pb-5">
-                <div>
-                    <h1 className="text-xl font-bold text-on-surface flex items-center gap-2">
-                        <ShieldCheck className="w-5 h-5 text-primary" />
-                        Validation des Réquisitions —{' '}
-                        <span className="text-primary">{user.project?.name || 'Projet'}</span>
-                    </h1>
-                    <p className="text-xs text-gray-500 mt-1">
-                        Manager de Projet : <strong className="text-on-surface">{user.name}</strong>{' '}
-                        • Contrôle opérationnel, attribution des codes budgétaires et signature
-                        électronique.
-                    </p>
-                </div>
-
-                <Link
-                    href={route('requisitions.create')}
-                    className="inline-flex items-center gap-2 bg-primary hover:bg-primary-light text-white px-4 py-2.5 rounded-md text-xs font-semibold shadow-sm hover:shadow-md transition-all active:scale-[0.98]"
-                >
-                    <Plus className="w-4 h-4" strokeWidth={2.5} />
-                    <span>Initier Réquisition Projet</span>
-                </Link>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white border-2 border-tertiary/40 rounded-lg p-5 shadow-card hover:shadow-md transition-shadow">
-                    <div className="flex items-center justify-between mb-3">
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface">
-                            En attente de Visa MP
-                        </span>
-                        <div className="w-8 h-8 rounded-md bg-tertiary-soft flex items-center justify-center">
-                            <Clock className="w-4 h-4 text-tertiary" />
-                        </div>
+                        {toast.type === 'success' ? (
+                            <CheckCircle2 className="w-4 h-4" />
+                        ) : (
+                            <AlertCircle className="w-4 h-4" />
+                        )}
+                        <p>{toast.message}</p>
+                        <button
+                            onClick={() => setToast(null)}
+                            className="ml-2 p-0.5 rounded hover:bg-white/20 transition"
+                            aria-label="Fermer"
+                        >
+                            <X className="w-3.5 h-3.5" />
+                        </button>
                     </div>
-                    <p className="text-2xl font-black text-tertiary">
-                        {demandes.filter((d) => d.canDecide).length}{' '}
-                        <span className="text-base font-bold text-gray-500">dossier(s)</span>
-                    </p>
-                    <p className="text-[11px] text-gray-500 mt-1">
-                        Nécessite attribution des codes budgétaires
-                    </p>
-                </div>
+                )}
 
-                <div className="bg-white border border-outline-soft rounded-lg p-5 shadow-card hover:shadow-md transition-shadow">
-                    <div className="flex items-center justify-between mb-3">
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
-                            Validées (Transmises Finances)
-                        </span>
-                        <div className="w-8 h-8 rounded-md bg-success-soft flex items-center justify-center">
-                            <CheckCircle2 className="w-4 h-4 text-success" />
-                        </div>
-                    </div>
-                    <p className="text-2xl font-black text-success">
-                        {demandes.filter((d) => d.statut === 'valide_mp').length}{' '}
-                        <span className="text-base font-bold text-gray-500">dossier(s)</span>
-                    </p>
-                    <p className="text-[11px] text-gray-500 mt-1">Signées électroniquement</p>
-                </div>
-
-                <div className="bg-white border border-outline-soft rounded-lg p-5 shadow-card hover:shadow-md transition-shadow">
-                    <div className="flex items-center justify-between mb-3">
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
-                            À corriger (Renvoyées Finance)
-                        </span>
-                        <div className="w-8 h-8 rounded-md bg-error-soft flex items-center justify-center">
-                            <AlertCircle className="w-4 h-4 text-error" />
-                        </div>
-                    </div>
-                    <p className="text-2xl font-black text-error">
-                        {demandes.filter((d) => d.needsCorrection).length}{' '}
-                        <span className="text-base font-bold text-gray-500">dossier(s)</span>
-                    </p>
-                    <p className="text-[11px] text-gray-500 mt-1">
-                        Nécessite correction par le MP
-                    </p>
-                </div>
-            </div>
-
-            <div className="bg-white border border-outline-soft rounded-lg shadow-card overflow-hidden">
-                <div className="p-4 border-b border-outline-soft flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                {/* En-tête avec bouton direct d'impression de rapport */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 pb-5">
                     <div>
-                        <h2 className="text-xs font-bold text-on-surface uppercase tracking-wider">
-                            Demandes de l'Équipe du Projet ({user.project?.name})
-                        </h2>
-                        <p className="text-[11px] text-gray-500 mt-0.5">
-                            Consultez et validez les réquisitions soumises par votre équipe.
+                        <h1 className="text-xl font-bold text-[#0B192C] flex items-center gap-2">
+                            <ShieldCheck className="w-5 h-5 text-[#04326D]" />
+                            <span>Validation des Réquisitions — {user.project?.name || 'Projet'}</span>
+                        </h1>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Manager de Projet : <strong className="text-gray-900">{user.name}</strong> • Contrôle opérationnel, sélection prédictive des lignes budgétaires et filtrage par caisse.
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-2 text-xs">
-                        <Filter className="w-3.5 h-3.5 text-gray-400" />
-                        <select
-                            value={filterStatut}
-                            onChange={(e) => setFilterStatut(e.target.value)}
-                            className="border border-outline-variant rounded-md px-2.5 py-1.5 text-xs bg-white text-gray-700 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => window.print()}
+                            className="inline-flex items-center gap-1.5 bg-white border border-[#B2BED6] hover:bg-gray-50 text-[#0B192C] px-3.5 py-2 rounded font-bold text-xs shadow-sm transition"
                         >
-                            <option value="all">Toutes</option>
-                            <option value="en_attente_mp">À arbitrer (Visa MP)</option>
-                            <option value="valide_mp">Validées (Transmises)</option>
-                            <option value="a_corriger">À corriger</option>
-                            <option value="rejete_mp">Rejetées</option>
-                        </select>
+                            <Printer className="w-4 h-4 text-[#04326D]" />
+                            <span>Générer Rapport ({demandesFiltrees.length})</span>
+                        </button>
+
+                        <Link
+                            href={route('requisitions.create')}
+                            className="inline-flex items-center gap-2 bg-[#04326D] hover:bg-[#06428f] text-white px-4 py-2 rounded text-xs font-bold shadow-sm transition"
+                        >
+                            <Plus className="w-4 h-4" />
+                            <span>Initier Réquisition</span>
+                        </Link>
                     </div>
                 </div>
 
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                            <tr className="bg-sidebar text-white uppercase text-[10px] font-bold tracking-wider">
-                                <th className="py-3 px-4">Numéro</th>
-                                <th className="py-3 px-4">Date</th>
-                                <th className="py-3 px-4">Initiateur</th>
-                                <th className="py-3 px-4">Nature</th>
-                                <th className="py-3 px-4">Observation</th>
-                                <th className="py-3 px-4 text-right">Montant Total</th>
-                                <th className="py-3 px-4 text-center">Urgence</th>
-                                <th className="py-3 px-4 text-center">Statut</th>
-                                <th className="py-3 px-4 text-right">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-outline-soft text-gray-700">
-                            {demandesFiltrees.length === 0 ? (
-                                <tr>
-                                    <td colSpan={9} className="py-12 text-center">
-                                        <FileText
-                                            className="w-10 h-10 mx-auto text-gray-300 mb-2"
-                                            strokeWidth={1.5}
-                                        />
-                                        <p className="text-gray-500 font-medium text-sm">
-                                            Aucune réquisition à afficher
-                                        </p>
-                                        <p className="text-gray-400 text-[11px] mt-1">
-                                            Modifiez vos filtres ou attendez une nouvelle demande.
-                                        </p>
-                                    </td>
+                {/* Compteurs KPIs */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="bg-white border-2 border-[#F58F20]/40 rounded p-5 shadow-sm flex flex-col justify-between">
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-[#0B192C]">
+                                En attente de Visa MP
+                            </span>
+                            <div className="w-8 h-8 rounded bg-amber-50 flex items-center justify-center">
+                                <Clock className="w-4 h-4 text-[#F58F20]" />
+                            </div>
+                        </div>
+                        <p className="text-2xl font-black text-[#F58F20]">
+                            {demandes.filter((d) => d.canDecide).length}{' '}
+                            <span className="text-base font-bold text-gray-500">dossier(s)</span>
+                        </p>
+                        <p className="text-[11px] text-gray-500 mt-1">Prêts pour validation</p>
+                    </div>
+
+                    <div className="bg-white border border-[#B2BED6] rounded p-5 shadow-sm flex flex-col justify-between">
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                                Validées MP (Transmises)
+                            </span>
+                            <div className="w-8 h-8 rounded bg-blue-50 flex items-center justify-center">
+                                <CheckCircle2 className="w-4 h-4 text-[#04326D]" />
+                            </div>
+                        </div>
+                        <p className="text-2xl font-black text-[#04326D]">
+                            {demandes.filter((d) => d.statut === 'valide_mp').length}{' '}
+                            <span className="text-base font-bold text-gray-500">dossier(s)</span>
+                        </p>
+                        <p className="text-[11px] text-gray-500 mt-1">Crédits engagés en base</p>
+                    </div>
+
+                    <div className="bg-white border border-[#B2BED6] rounded p-5 shadow-sm flex flex-col justify-between">
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                                À corriger / Renvoyées
+                            </span>
+                            <div className="w-8 h-8 rounded bg-red-50 flex items-center justify-center">
+                                <AlertCircle className="w-4 h-4 text-red-600" />
+                            </div>
+                        </div>
+                        <p className="text-2xl font-black text-red-600">
+                            {demandes.filter((d) => d.needsCorrection).length}{' '}
+                            <span className="text-base font-bold text-gray-500">dossier(s)</span>
+                        </p>
+                        <p className="text-[11px] text-gray-500 mt-1">Nécessitent correction</p>
+                    </div>
+                </div>
+
+                {/* Filtres multiples : Statut + Caisse + Recherche libre */}
+                <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
+                    <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-50">
+                        <div>
+                            <h2 className="text-xs font-bold text-[#0B192C] uppercase tracking-wider">
+                                Demandes de l'Équipe ({user.project?.name})
+                            </h2>
+                            <p className="text-[11px] text-gray-500 mt-0.5">
+                                Filtrage par caisse assignée et recherche instantanée.
+                            </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                            <div className="flex items-center gap-1.5 bg-white border border-[#B2BED6] rounded px-2.5 py-1">
+                                <Filter className="w-3.5 h-3.5 text-gray-400" />
+                                <select
+                                    value={filterStatut}
+                                    onChange={(e) => setFilterStatut(e.target.value)}
+                                    className="border-none bg-transparent text-xs p-0 text-gray-700 font-semibold focus:ring-0"
+                                >
+                                    <option value="all">Tous les statuts</option>
+                                    <option value="en_attente_mp">À arbitrer (Visa MP)</option>
+                                    <option value="valide_mp">Validées MP (Transmises)</option>
+                                    <option value="a_corriger">À corriger</option>
+                                    <option value="rejete_mp">Rejetées</option>
+                                </select>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 bg-white border border-[#B2BED6] rounded px-2.5 py-1">
+                                <span className="font-bold text-gray-500 text-[11px]">Caisse :</span>
+                                <select
+                                    value={filterCaisse}
+                                    onChange={(e) => setFilterCaisse(e.target.value)}
+                                    className="border-none bg-transparent text-xs p-0 text-gray-700 font-semibold focus:ring-0"
+                                >
+                                    <option value="all">Toutes les caisses</option>
+                                    {cashRegisters.map((c) => (
+                                        <option key={c.id} value={c.name}>
+                                            {c.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <input
+                                type="text"
+                                placeholder="Recherche numéro, initiateur..."
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white w-48 focus:outline-none focus:border-[#04326D]"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                                <tr className="bg-[#0B192C] text-white uppercase text-[10px] font-bold tracking-wider">
+                                    <th className="py-3 px-4">Numéro</th>
+                                    <th className="py-3 px-4">Date</th>
+                                    <th className="py-3 px-4">Initiateur</th>
+                                    <th className="py-3 px-4">Nature</th>
+                                    <th className="py-3 px-4">Caisse Assignée</th>
+                                    <th className="py-3 px-4 text-right">Montant Total</th>
+                                    <th className="py-3 px-4 text-center">Urgence</th>
+                                    <th className="py-3 px-4 text-center">Statut</th>
+                                    <th className="py-3 px-4 text-right">Action</th>
                                 </tr>
-                            ) : (
-                                demandesFiltrees.map((req) => (
-                                    <tr
-                                        key={req.id}
-                                        className="hover:bg-primary-soft/40 transition-colors"
-                                    >
-                                        <td className="py-3.5 px-4 font-mono font-bold text-primary whitespace-nowrap">
-                                            {req.numero}
-                                        </td>
-                                        <td className="py-3.5 px-4 whitespace-nowrap text-gray-600">
-                                            {req.dateSoumission}
-                                        </td>
-                                        <td className="py-3.5 px-4 whitespace-nowrap">
-                                            <p className="font-semibold text-on-surface">
-                                                {req.initiateurNom}
-                                            </p>
-                                            <p className="text-[10px] text-gray-400">
-                                                {req.initiateurRole}
-                                            </p>
-                                        </td>
-                                        <td className="py-3.5 px-4 whitespace-nowrap">
-                                            <span
-                                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                                    req.nature === 'Achat'
-                                                        ? 'bg-primary-soft text-primary'
-                                                        : 'bg-tertiary-soft text-tertiary'
-                                                }`}
-                                            >
-                                                {req.nature}
-                                            </span>
-                                        </td>
-                                        <td
-                                            className="py-3.5 px-4 max-w-xs truncate"
-                                            title={req.observation}
-                                        >
-                                            {req.observation || 'Sans observation'}
-                                        </td>
-                                        <td className="py-3.5 px-4 text-right font-mono font-bold text-sm text-on-surface whitespace-nowrap">
-                                            {req.montantTotal.toLocaleString()} {req.devise}
-                                        </td>
-                                        <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                                            {req.is_urgent ? (
-                                                <span className="bg-error-soft text-error-dark px-2 py-0.5 rounded font-black text-[9px] uppercase">
-                                                    URGENT
-                                                </span>
-                                            ) : (
-                                                <span className="text-gray-400 text-[10px]">
-                                                    Normal
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                                            {renderStatutBadge(req)}
-                                        </td>
-                                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                                            <div className="flex items-center justify-end gap-1">
-                                                {req.canEdit && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => openEditModal(req)}
-                                                        className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-primary text-primary rounded-md font-semibold text-xs hover:bg-primary-soft transition"
-                                                    >
-                                                        <Pencil className="w-3 h-3" />
-                                                        Corriger
-                                                    </button>
-                                                )}
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleOuvrirArbitrage(req)}
-                                                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary hover:bg-primary-light text-white rounded-md font-semibold text-xs transition"
-                                                >
-                                                    {req.canDecide ? (
-                                                        <>
-                                                            <ShieldCheck className="w-3 h-3" />
-                                                            Viser
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <Eye className="w-3 h-3" />
-                                                            Consulter
-                                                        </>
-                                                    )}
-                                                </button>
-                                            </div>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 text-gray-700">
+                                {demandesFiltrees.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={9} className="py-12 text-center text-gray-400 italic">
+                                            Aucune réquisition ne correspond aux filtres appliqués.
                                         </td>
                                     </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
+                                ) : (
+                                    demandesFiltrees.map((req) => (
+                                        <tr key={req.id} className="hover:bg-[#F9F9FF] transition">
+                                            <td className="py-3.5 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
+                                                {req.numero}
+                                            </td>
+                                            <td className="py-3.5 px-4 whitespace-nowrap text-gray-600">
+                                                {req.dateSoumission}
+                                            </td>
+                                            <td className="py-3.5 px-4 whitespace-nowrap">
+                                                <p className="font-semibold text-gray-900">{req.initiateurNom}</p>
+                                                <p className="text-[10px] text-gray-400">{req.initiateurRole}</p>
+                                            </td>
+                                            <td className="py-3.5 px-4 whitespace-nowrap">
+                                                <span
+                                                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                                        req.nature === 'Achat' ? 'bg-blue-50 text-[#04326D]' : 'bg-amber-50 text-amber-800'
+                                                    }`}
+                                                >
+                                                    {req.nature}
+                                                </span>
+                                            </td>
+                                            <td className="py-3.5 px-4 font-bold text-gray-700">
+                                                {req.caisseAttribuee || req.caisseSouhaitee || '—'}
+                                            </td>
+                                            <td className="py-3.5 px-4 text-right font-mono font-bold text-sm text-[#0B192C] whitespace-nowrap">
+                                                {req.montantTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} {req.devise}
+                                            </td>
+                                            <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                                                {req.is_urgent ? (
+                                                    <span className="bg-red-100 text-red-800 px-2 py-0.5 rounded font-black text-[9px] uppercase">
+                                                        URGENT
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-gray-400 text-[10px]">Normal</span>
+                                                )}
+                                            </td>
+                                            <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                                                {renderStatutBadge(req)}
+                                            </td>
+                                            <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                                                <div className="flex items-center justify-end gap-1">
+                                                    {req.canEdit && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => openEditModal(req)}
+                                                            className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-[#04326D] text-[#04326D] rounded font-bold text-xs hover:bg-blue-50 transition"
+                                                        >
+                                                            <Pencil className="w-3 h-3" />
+                                                            <span>Corriger</span>
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleOuvrirArbitrage(req)}
+                                                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs transition shadow-sm"
+                                                    >
+                                                        {req.canDecide ? (
+                                                            <>
+                                                                <ShieldCheck className="w-3.5 h-3.5" />
+                                                                <span>Viser</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Eye className="w-3.5 h-3.5" />
+                                                                <span>Consulter</span>
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
-            {/* MODALE CORRECTION */}
+            {/* MODALE CORRECTION (AVEC AUTOCOMPLÉTION PRÉDICTIVE DES LIGNES BUDGÉTAIRES) */}
             {editingReq && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                     <form
                         onSubmit={handleSaveEdit}
-                        className="w-full max-w-4xl max-h-[92vh] overflow-y-auto bg-white border border-outline-soft shadow-modal rounded-lg animate-slide-down"
+                        className="w-full max-w-4xl max-h-[92vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-modal rounded p-6 space-y-4 animate-slide-down"
                     >
-                        <header className="sticky top-0 z-10 flex items-start justify-between gap-4 p-5 border-b border-outline-soft bg-white rounded-t-lg">
-                            <div className="flex items-start gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-tertiary-soft flex items-center justify-center shrink-0">
-                                    <Pencil className="w-5 h-5 text-tertiary" />
-                                </div>
-                                <div>
-                                    <p className="text-[10px] uppercase font-bold text-tertiary">
-                                        Correction Réquisition
-                                    </p>
-                                    <h2 className="text-lg font-bold text-on-surface">
-                                        Dossier N° {editingReq.numero}
-                                    </h2>
-                                </div>
+                        <header className="flex items-start justify-between border-b pb-3">
+                            <div>
+                                <span className="text-[10px] font-bold uppercase text-[#04326D]">Correction Réquisition</span>
+                                <h2 className="text-lg font-bold text-[#0B192C]">Dossier N° {editingReq.numero}</h2>
                             </div>
                             <button
                                 type="button"
                                 onClick={() => setEditingReq(null)}
-                                className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100 transition"
-                                aria-label="Fermer"
+                                className="text-gray-400 hover:text-gray-600 text-lg font-bold"
                             >
-                                <X className="w-4 h-4" />
+                                <X className="w-5 h-5" />
                             </button>
                         </header>
 
-                        <div className="p-5 space-y-4 text-xs">
+                        <div className="space-y-4 text-xs">
                             {editError && (
-                                <div className="border border-error/30 bg-error-soft p-3 text-error-dark rounded-md flex items-start gap-2">
-                                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                                <div className="border border-red-300 bg-red-50 p-3 text-red-800 rounded flex items-center gap-2">
+                                    <AlertCircle className="w-4 h-4 shrink-0" />
                                     <span>{editError}</span>
-                                </div>
-                            )}
-                            {editingReq.financeReturned && (
-                                <div className="border-l-4 border-error bg-error-soft p-3 text-error-dark rounded-r-md">
-                                    <strong className="block mb-1">
-                                        Motif renvoyé par la Finance :
-                                    </strong>
-                                    <p className="mt-1 whitespace-pre-line text-[11px]">
-                                        {editingReq.observation}
-                                    </p>
                                 </div>
                             )}
 
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 <div>
-                                    <label className="block font-semibold text-gray-700 mb-1">
-                                        Nature
-                                    </label>
+                                    <label className="block font-bold text-gray-700 mb-1">Nature</label>
                                     <select
                                         value={editingReq.nature}
-                                        onChange={(e) =>
-                                            setEditingReq({
-                                                ...editingReq,
-                                                nature: e.target.value as any,
-                                            })
-                                        }
-                                        className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+                                        onChange={(e) => setEditingReq({ ...editingReq, nature: e.target.value as any })}
+                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
                                     >
                                         <option value="Achat">Achat</option>
                                         <option value="Service">Service</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block font-semibold text-gray-700 mb-1">
-                                        Caisse
-                                    </label>
+                                    <label className="block font-bold text-gray-700 mb-1">Caisse Assignée</label>
                                     <select
                                         value={editingReq.caisseSouhaitee}
-                                        onChange={(e) =>
-                                            setEditingReq({
-                                                ...editingReq,
-                                                caisseSouhaitee: e.target.value,
-                                            })
-                                        }
-                                        className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+                                        onChange={(e) => setEditingReq({ ...editingReq, caisseSouhaitee: e.target.value })}
+                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs font-bold focus:outline-none focus:border-[#04326D]"
+                                        required
                                     >
                                         <option value="">Sélectionner une caisse active</option>
                                         {cashRegisters.map((c) => (
@@ -690,18 +780,11 @@ export default function ProjectManagerDashboard({
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block font-semibold text-gray-700 mb-1">
-                                        Devise
-                                    </label>
+                                    <label className="block font-bold text-gray-700 mb-1">Devise</label>
                                     <select
                                         value={editingReq.devise}
-                                        onChange={(e) =>
-                                            setEditingReq({
-                                                ...editingReq,
-                                                devise: e.target.value as any,
-                                            })
-                                        }
-                                        className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+                                        onChange={(e) => setEditingReq({ ...editingReq, devise: e.target.value as any })}
+                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs font-bold focus:outline-none focus:border-[#04326D]"
                                     >
                                         <option value="USD">USD</option>
                                         <option value="FC">FC</option>
@@ -711,304 +794,333 @@ export default function ProjectManagerDashboard({
                             </div>
 
                             <div>
-                                <label className="block font-semibold text-gray-700 mb-1">
-                                    Observation
-                                </label>
+                                <label className="block font-bold text-gray-700 mb-1">Observation / Contexte</label>
                                 <textarea
                                     rows={2}
                                     value={editingReq.observation ?? ''}
-                                    onChange={(e) =>
-                                        setEditingReq({
-                                            ...editingReq,
-                                            observation: e.target.value,
-                                        })
-                                    }
-                                    className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+                                    onChange={(e) => setEditingReq({ ...editingReq, observation: e.target.value })}
+                                    className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
                                 />
                             </div>
 
                             <div className="space-y-3">
-                                <h3 className="font-bold text-gray-800 uppercase tracking-wider text-[11px]">
-                                    Lignes de la demande
+                                <h3 className="font-bold text-gray-800 uppercase tracking-wider text-[11px] border-b pb-1">
+                                    Lignes d'Articles & Saisie Prédictive Budgétaire
                                 </h3>
-                                {editingReq.lignes.map((line) => (
-                                    <div
-                                        key={line.id}
-                                        className="border border-outline-soft p-3 rounded-md bg-surface-muted space-y-2"
-                                    >
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                            <div>
-                                                <label className="block font-semibold text-gray-700 mb-1">
-                                                    Désignation
-                                                </label>
-                                                <input
-                                                    value={line.activite}
-                                                    onChange={(e) =>
-                                                        updateEditingLine(line.id, {
-                                                            activite: e.target.value,
-                                                        })
-                                                    }
-                                                    className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
-                                                    required
-                                                />
+                                {editingReq.lignes.map((line) => {
+                                    const codeTrim = (line.codeAllBudget || '').trim().toLowerCase();
+                                    const matched = budgetLinesMap.get(codeTrim);
+                                    const isDropdownOpen = activeEditLineId === line.id;
+                                    const suggestions = getCodeSuggestions(line.codeAllBudget || '');
+                                    const isOverdraft = matched ? line.total > matched.solde : false;
+
+                                    return (
+                                        <div key={line.id} className="border border-gray-200 p-3 rounded bg-gray-50 space-y-2.5">
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block font-bold text-gray-700 mb-1">Désignation</label>
+                                                    <input
+                                                        value={line.activite}
+                                                        onChange={(e) => updateEditingLine(line.id, { activite: e.target.value })}
+                                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs bg-white focus:outline-none focus:border-[#04326D]"
+                                                        required
+                                                    />
+                                                </div>
+
+                                                {/* Autocomplétion prédictive lors de la correction */}
+                                                <div className="relative budget-combobox-wrapper">
+                                                    <label className="block font-bold text-[#04326D] mb-1">
+                                                        Code Budgétaire (Taper pour suggestions)
+                                                    </label>
+                                                    <div className="relative">
+                                                        <input
+                                                            value={line.codeAllBudget || ''}
+                                                            onChange={(e) => {
+                                                                updateEditingLine(line.id, { codeAllBudget: e.target.value });
+                                                                setActiveEditLineId(line.id);
+                                                            }}
+                                                            onFocus={() => setActiveEditLineId(line.id)}
+                                                            placeholder="ex: 1.1, 6.112.a..."
+                                                            className="w-full border border-primary rounded p-2 pr-7 text-xs font-mono font-bold text-primary bg-white focus:outline-none focus:border-[#04326D]"
+                                                            required
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setActiveEditLineId(isDropdownOpen ? null : line.id)}
+                                                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400"
+                                                        >
+                                                            <ChevronDown className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
+
+                                                    {isDropdownOpen && (
+                                                        <div className="absolute left-0 right-0 z-50 mt-1 max-h-48 overflow-y-auto bg-white border border-[#B2BED6] rounded shadow-xl py-1 text-xs divide-y divide-gray-100">
+                                                            {suggestions.map((b) => (
+                                                                <div
+                                                                    key={b.id}
+                                                                    onClick={() => {
+                                                                        updateEditingLine(line.id, { codeAllBudget: b.code });
+                                                                        setActiveEditLineId(null);
+                                                                    }}
+                                                                    className="p-2 cursor-pointer hover:bg-blue-50 flex items-center justify-between"
+                                                                >
+                                                                    <div>
+                                                                        <span className="font-mono font-bold text-[#04326D]">{b.code}</span>
+                                                                        <p className="text-[10px] text-gray-600 truncate">{b.libelle}</p>
+                                                                    </div>
+                                                                    <span className="text-[10px] font-mono font-bold text-emerald-700">
+                                                                        {b.solde.toLocaleString()} {b.devise}
+                                                                    </span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+
+                                                    {matched && (
+                                                        <div className={`mt-1 p-1.5 rounded border text-[10px] ${isOverdraft ? 'bg-red-50 border-red-300 text-red-900' : 'bg-blue-50 border-blue-200 text-gray-800'}`}>
+                                                            <p className="font-bold truncate">{matched.libelle}</p>
+                                                            <p className="font-mono">Solde dispo : <strong>{matched.solde.toLocaleString()} {matched.devise}</strong></p>
+                                                            {isOverdraft && (
+                                                                <p className="text-red-700 font-bold uppercase mt-0.5">Dépassement de solde détecté</p>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
-                                            <div>
-                                                <label className="block font-semibold text-gray-700 mb-1">
-                                                    Code Budget
-                                                </label>
-                                                <input
-                                                    value={line.codeAllBudget}
-                                                    onChange={(e) =>
-                                                        updateEditingLine(line.id, {
-                                                            codeAllBudget: e.target.value,
-                                                        })
-                                                    }
-                                                    className="w-full border border-outline-variant rounded-md p-2 text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
-                                                    required
-                                                />
+
+                                            <div className="grid grid-cols-3 gap-3 items-end">
+                                                <div>
+                                                    <label className="block font-bold text-gray-700 mb-1">Quantité / Durée</label>
+                                                    <input
+                                                        type="number"
+                                                        step="0.01"
+                                                        min="0.01"
+                                                        value={line.quantiteOuDuree}
+                                                        onChange={(e) => updateEditingLine(line.id, { quantiteOuDuree: Number(e.target.value) })}
+                                                        className="w-full border rounded p-1.5 text-xs text-center bg-white"
+                                                        required
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block font-bold text-gray-700 mb-1">Prix Unitaire</label>
+                                                    <input
+                                                        type="number"
+                                                        step="0.01"
+                                                        min="0"
+                                                        value={line.frais}
+                                                        onChange={(e) => updateEditingLine(line.id, { frais: Number(e.target.value) })}
+                                                        className="w-full border rounded p-1.5 text-xs text-right font-mono bg-white"
+                                                        required
+                                                    />
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className="text-[10px] text-gray-500 block">Total Ligne :</span>
+                                                    <strong className="text-sm font-mono text-[#04326D]">
+                                                        {line.total.toLocaleString()} {editingReq.devise}
+                                                    </strong>
+                                                </div>
                                             </div>
                                         </div>
-                                        <div className="grid grid-cols-3 gap-3">
-                                            <div>
-                                                <label className="block font-semibold text-gray-700 mb-1">
-                                                    Quantité / Durée
-                                                </label>
-                                                <input
-                                                    type="number"
-                                                    min="0.01"
-                                                    step="0.01"
-                                                    value={line.quantiteOuDuree}
-                                                    onChange={(e) =>
-                                                        updateEditingLine(line.id, {
-                                                            quantiteOuDuree: Number(
-                                                                e.target.value,
-                                                            ),
-                                                        })
-                                                    }
-                                                    className="w-full border border-outline-variant rounded-md p-2 text-xs text-center focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
-                                                    required
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block font-semibold text-gray-700 mb-1">
-                                                    Prix Unitaire
-                                                </label>
-                                                <input
-                                                    type="number"
-                                                    min="0"
-                                                    step="0.01"
-                                                    value={line.frais}
-                                                    onChange={(e) =>
-                                                        updateEditingLine(line.id, {
-                                                            frais: Number(e.target.value),
-                                                        })
-                                                    }
-                                                    className="w-full border border-outline-variant rounded-md p-2 text-xs text-right font-bold focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
-                                                    required
-                                                />
-                                            </div>
-                                            <div className="flex flex-col justify-end text-right">
-                                                <span className="text-[10px] text-gray-500">
-                                                    Total Ligne :
-                                                </span>
-                                                <span className="font-mono font-bold text-sm text-primary">
-                                                    {line.total.toLocaleString()}{' '}
-                                                    {editingReq.devise}
-                                                </span>
-                                            </div>
-                                        </div>
-                                        <label className="block text-xs font-semibold text-gray-700">
-                                            Ajouter un justificatif (PDF, JPG ou PNG, 10 Mo maximum)
-                                            <input
-                                                type="file"
-                                                accept=".pdf,.jpg,.jpeg,.png"
-                                                multiple
-                                                onChange={(event) => setEditFiles((current) => ({
-                                                    ...current,
-                                                    [line.id]: Array.from(event.target.files ?? []),
-                                                }))}
-                                                className="mt-1 block w-full rounded border border-outline-variant bg-white p-2 font-normal"
-                                            />
-                                            {(editFiles[line.id] ?? []).length > 0 && (
-                                                <span className="mt-1 block font-normal text-gray-500">
-                                                    {(editFiles[line.id] ?? []).map((file) => file.name).join(', ')}
-                                                </span>
-                                            )}
-                                        </label>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
 
-                        <footer className="sticky bottom-0 flex justify-end gap-2 border-t border-outline-soft p-4 bg-white rounded-b-lg">
+                        <div className="flex justify-end gap-2 pt-3 border-t">
                             <button
                                 type="button"
                                 onClick={() => setEditingReq(null)}
-                                className="px-3 py-2 border border-outline-variant rounded-md text-gray-700 text-xs hover:bg-gray-50 transition"
+                                className="px-3.5 py-1.5 border rounded text-xs text-gray-600 hover:bg-gray-50"
                             >
                                 Annuler
                             </button>
                             <button
                                 type="submit"
                                 disabled={savingEdit}
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-white text-xs font-semibold rounded-md hover:bg-primary-light transition disabled:opacity-60"
+                                className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow"
                             >
-                                {savingEdit && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                                {savingEdit ? 'Enregistrement…' : 'Enregistrer les corrections'}
+                                {savingEdit ? 'Enregistrement...' : 'Enregistrer les corrections'}
                             </button>
-                        </footer>
+                        </div>
                     </form>
                 </div>
             )}
 
-            {/* MODALE ARBITRAGE */}
+            {/* MODALE D'ARBITRAGE ET ATTRIBUTION DES CODES AVEC SÉLECTION PRÉDICTIVE */}
             {selectedReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
-                    <div className="bg-white rounded-lg border border-outline-soft shadow-modal max-w-3xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto animate-slide-down">
-                        <div className="flex items-start justify-between border-b border-outline-soft pb-3">
+                    <div className="bg-white rounded border border-[#B2BED6] shadow-modal max-w-4xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto animate-slide-down">
+                        <div className="flex items-start justify-between border-b pb-3">
                             <div className="flex items-start gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-primary-soft flex items-center justify-center shrink-0">
-                                    <ShieldCheck className="w-5 h-5 text-primary" />
+                                <div className="w-10 h-10 rounded bg-blue-50 flex items-center justify-center shrink-0">
+                                    <ShieldCheck className="w-5 h-5 text-[#04326D]" />
                                 </div>
                                 <div>
                                     <span className="text-[10px] text-gray-400 font-mono uppercase tracking-wider">
-                                        Contrôle Opérationnel & Attribution Budgétaire
+                                        Arbitrage Opérationnel & Attribution Budgétaire
                                     </span>
-                                    <h2 className="text-base font-bold text-on-surface">
-                                        Réquisition N° {selectedReq.numero}{' '}
-                                        <span className="text-xs font-normal text-gray-500">
-                                            ({selectedReq.nature})
-                                        </span>
+                                    <h2 className="text-base font-bold text-[#0B192C]">
+                                        Réquisition N° {selectedReq.numero} ({selectedReq.nature})
                                     </h2>
                                     <p className="text-xs text-gray-500 mt-0.5">
-                                        Initiateur :{' '}
-                                        <strong className="text-on-surface">
-                                            {selectedReq.initiateurNom}
-                                        </strong>{' '}
-                                        • Date : {selectedReq.dateSoumission}
+                                        Demandeur : <strong className="text-[#0B192C]">{selectedReq.initiateurNom}</strong> • Date : {selectedReq.dateSoumission}
                                     </p>
                                 </div>
                             </div>
                             <button
                                 onClick={() => setSelectedReq(null)}
-                                className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100 transition"
-                                aria-label="Fermer"
+                                className="text-gray-400 hover:text-gray-600 text-lg font-bold"
                             >
-                                <X className="w-4 h-4" />
+                                <X className="w-5 h-5" />
                             </button>
                         </div>
 
                         {selectedReq.observation && (
-                            <div className="p-3 bg-surface-muted border border-outline-soft rounded-md text-xs text-gray-700">
-                                <strong className="text-on-surface">
-                                    Observation de l'initiateur :
-                                </strong>{' '}
-                                {selectedReq.observation}
+                            <div className="p-3 bg-gray-50 border rounded text-xs text-gray-700">
+                                <strong>Observation :</strong> {selectedReq.observation}
                             </div>
                         )}
 
                         <div>
-                            <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
-                                Articles, Prestations & Devis Attachés
+                            <h3 className="text-xs font-bold text-[#0B192C] uppercase tracking-wider mb-2">
+                                Articles & Saisie Prédictive de l'Imputation Budgétaire
                             </h3>
-                            <table className="w-full text-left text-xs border border-outline-soft rounded-md overflow-hidden">
-                                <thead className="bg-surface-muted font-bold text-gray-600">
+                            <table className="w-full text-left text-xs border border-gray-200 rounded overflow-hidden">
+                                <thead className="bg-gray-100 font-bold text-gray-700">
                                     <tr>
-                                        <th className="p-2">Désignation</th>
-                                        <th className="p-2 text-primary">
-                                            Code Allocation Budgétaire
-                                        </th>
-                                        <th className="p-2 text-center">
-                                            {selectedReq.nature === 'Achat' ? 'Qté' : 'Durée'}
-                                        </th>
-                                        <th className="p-2 text-right">Prix Unitaire</th>
-                                        <th className="p-2 text-right">Total</th>
-                                        <th className="p-2">Devis / Pièces</th>
+                                        <th className="p-2 w-1/4">Désignation</th>
+                                        <th className="p-2 w-2/5 text-[#04326D]">Code Budgétaire (Taper pour suggestions)</th>
+                                        <th className="p-2 text-right">Total Ligne</th>
+                                        <th className="p-2">Pièces Jointes</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-outline-soft text-gray-700">
-                                    {selectedReq.lignes.map((ligne) => (
-                                        <tr key={ligne.id}>
-                                            <td className="p-2 font-medium">{ligne.activite}</td>
-                                            <td className="p-2">
-                                                {selectedReq.canDecide ? (
-                                                    <input
-                                                        type="text"
-                                                        placeholder="ex : 6012 / 2.1.04"
-                                                        value={allocations[ligne.id] || ''}
-                                                        onChange={(e) =>
-                                                            setAllocations({
-                                                                ...allocations,
-                                                                [ligne.id]: e.target.value,
-                                                            })
-                                                        }
-                                                        className="w-32 border border-primary rounded-md p-1.5 text-xs font-mono font-bold text-primary bg-primary-soft/30 focus:outline-none focus:ring-1 focus:ring-primary/30 transition"
-                                                        required
-                                                    />
-                                                ) : (
-                                                    <span className="font-mono font-bold text-primary">
-                                                        {ligne.code_allocation ||
-                                                            ligne.codeAllBudget}
+                                <tbody className="divide-y divide-gray-200">
+                                    {selectedReq.lignes.map((ligne) => {
+                                        const codeSaisi = (allocations[ligne.id] || '').trim();
+                                        const matchedLine = budgetLinesMap.get(codeSaisi.toLowerCase());
+                                        const isDepassement = matchedLine ? ligne.total > matchedLine.solde : false;
+                                        const isDropdownOpen = activeArbitrageLineId === ligne.id;
+                                        const suggestions = getCodeSuggestions(allocations[ligne.id] || '');
+
+                                        return (
+                                            <tr key={ligne.id} className={isDepassement ? 'bg-red-50/70' : ''}>
+                                                <td className="p-2 font-medium">
+                                                    <p>{ligne.activite}</p>
+                                                    <span className="text-[10px] text-gray-400">
+                                                        {ligne.quantiteOuDuree} {ligne.unite} à {ligne.frais.toLocaleString()} {selectedReq.devise}
                                                     </span>
-                                                )}
-                                            </td>
-                                            <td className="p-2 text-center">
-                                                {ligne.quantiteOuDuree} {ligne.unite}
-                                            </td>
-                                            <td className="p-2 text-right">
-                                                {ligne.frais.toLocaleString()}{' '}
-                                                {selectedReq.devise}
-                                            </td>
-                                            <td className="p-2 text-right font-bold">
-                                                {ligne.total.toLocaleString()}{' '}
-                                                {selectedReq.devise}
-                                            </td>
-                                            <td className="p-2">
-                                                {ligne.justif && ligne.justif.length > 0 ? (
-                                                    <div className="space-y-1">
-                                                        {ligne.justif.map((j) => (
-                                                            <div
-                                                                key={j.id}
-                                                                className="bg-primary-soft text-primary px-2 py-1 rounded-md text-[10px] flex items-center justify-between gap-1"
-                                                            >
-                                                                <span
-                                                                    className="truncate max-w-[120px] flex items-center gap-1"
-                                                                    title={j.description}
+                                                </td>
+
+                                                {/* Saisie prédictive instantanée */}
+                                                <td className="p-2">
+                                                    {selectedReq.canDecide ? (
+                                                        <div className="relative budget-combobox-wrapper space-y-1">
+                                                            <div className="relative">
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="Taper le code (ex: 2, 6.112.a)..."
+                                                                    value={allocations[ligne.id] || ''}
+                                                                    onChange={(e) => {
+                                                                        setAllocations({
+                                                                            ...allocations,
+                                                                            [ligne.id]: e.target.value,
+                                                                        });
+                                                                        setActiveArbitrageLineId(ligne.id);
+                                                                    }}
+                                                                    onFocus={() => setActiveArbitrageLineId(ligne.id)}
+                                                                    className="w-full border border-[#04326D] rounded p-1.5 pr-7 text-xs font-mono font-bold text-[#04326D] bg-white focus:outline-none focus:ring-1 focus:ring-[#04326D]"
+                                                                    required
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setActiveArbitrageLineId(isDropdownOpen ? null : ligne.id)}
+                                                                    className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400"
                                                                 >
-                                                                    <Paperclip className="w-2.5 h-2.5 shrink-0" />
-                                                                    {j.scan}
-                                                                </span>
-                                                                {j.fileUrl && (
-                                                                    <a
-                                                                        href={j.fileUrl}
-                                                                        target="_blank"
-                                                                        rel="noreferrer"
-                                                                        className="inline-flex items-center gap-0.5 font-bold hover:underline"
-                                                                    >
-                                                                        <Download className="w-2.5 h-2.5" />
-                                                                        Voir
-                                                                    </a>
-                                                                )}
+                                                                    <ChevronDown className="w-3.5 h-3.5" />
+                                                                </button>
                                                             </div>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <span className="text-gray-400 italic text-[10px]">
-                                                        Aucun devis
-                                                    </span>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))}
+
+                                                            {isDropdownOpen && (
+                                                                <div className="absolute left-0 right-0 z-50 mt-1 max-h-52 overflow-y-auto bg-white border border-[#B2BED6] rounded shadow-xl py-1 text-xs divide-y divide-gray-100">
+                                                                    {suggestions.map((b) => (
+                                                                        <div
+                                                                            key={b.id}
+                                                                            onClick={() => {
+                                                                                setAllocations({
+                                                                                    ...allocations,
+                                                                                    [ligne.id]: b.code,
+                                                                                });
+                                                                                setActiveArbitrageLineId(null);
+                                                                            }}
+                                                                            className="p-2 cursor-pointer hover:bg-blue-50 flex items-center justify-between"
+                                                                        >
+                                                                            <div>
+                                                                                <span className="font-mono font-bold text-[#04326D]">{b.code}</span>
+                                                                                <p className="text-[10px] text-gray-600 truncate">{b.libelle}</p>
+                                                                            </div>
+                                                                            <span className="text-[10px] font-mono font-bold text-emerald-700">
+                                                                                {b.solde.toLocaleString()} {b.devise}
+                                                                            </span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+
+                                                            {matchedLine ? (
+                                                                <div className={`p-1.5 rounded border text-[10px] ${isDepassement ? 'bg-red-50 border-red-300 text-red-900' : 'bg-blue-50 border-blue-200 text-gray-800'}`}>
+                                                                    <p className="font-bold truncate">{matchedLine.libelle}</p>
+                                                                    <div className="flex justify-between font-mono">
+                                                                        <span>Solde de la ligne :</span>
+                                                                        <strong className={isDepassement ? 'text-red-700 font-bold' : 'text-emerald-700 font-bold'}>
+                                                                            {matchedLine.solde.toLocaleString()} {matchedLine.devise}
+                                                                        </strong>
+                                                                    </div>
+                                                                    {isDepassement && (
+                                                                        <p className="text-red-700 font-bold uppercase mt-0.5">Dépassement de solde détecté</p>
+                                                                    )}
+                                                                </div>
+                                                            ) : codeSaisi ? (
+                                                                <p className="text-[10px] text-gray-400 italic">Code libre non répertorié</p>
+                                                            ) : null}
+                                                        </div>
+                                                    ) : (
+                                                        <span className="font-mono font-bold text-[#04326D]">
+                                                            {ligne.code_allocation || ligne.codeAllBudget}
+                                                        </span>
+                                                    )}
+                                                </td>
+
+                                                <td className="p-2 text-right font-mono font-bold">
+                                                    {ligne.total.toLocaleString()} {selectedReq.devise}
+                                                </td>
+
+                                                <td className="p-2">
+                                                    {ligne.justif && ligne.justif.length > 0 ? (
+                                                        <div className="space-y-1">
+                                                            {ligne.justif.map((j) => (
+                                                                <div key={j.id} className="text-[10px] bg-blue-50 text-[#04326D] px-2 py-0.5 rounded flex items-center justify-between">
+                                                                    <span className="truncate max-w-[100px]">{j.scan}</span>
+                                                                    {j.fileUrl && (
+                                                                        <a href={j.fileUrl} target="_blank" rel="noreferrer" className="underline font-bold">
+                                                                            Voir
+                                                                        </a>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-gray-400 italic text-[10px]">Aucun devis</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
-                                <tfoot className="bg-surface-muted font-bold border-t border-outline-soft">
+                                <tfoot className="bg-gray-50 font-bold border-t">
                                     <tr>
-                                        <td colSpan={4} className="p-2 text-right">
-                                            Montant Total Général :
-                                        </td>
-                                        <td className="p-2 text-right text-primary text-sm font-mono">
-                                            {selectedReq.montantTotal.toLocaleString()}{' '}
-                                            {selectedReq.devise}
+                                        <td colSpan={2} className="p-2 text-right">Total Général :</td>
+                                        <td className="p-2 text-right text-sm font-mono text-[#04326D]">
+                                            {selectedReq.montantTotal.toLocaleString()} {selectedReq.devise}
                                         </td>
                                         <td />
                                     </tr>
@@ -1017,40 +1129,35 @@ export default function ProjectManagerDashboard({
                         </div>
 
                         {selectedReq.canDecide && (
-                            <div className="border-t border-outline-soft pt-4 space-y-4">
+                            <div className="border-t pt-4 space-y-4">
                                 {!modeRejet ? (
                                     <>
-                                        <div className="bg-primary-soft/60 p-3 rounded-md border border-primary/20 space-y-2">
-                                            <label className="block text-xs font-bold text-primary uppercase tracking-wider">
-                                                Attribution Officielle de la Caisse
+                                        <div className="bg-blue-50/60 p-3 rounded border border-blue-200 space-y-1.5">
+                                            <label className="block text-xs font-bold text-[#04326D] uppercase tracking-wider">
+                                                Attribution Officielle de la Caisse de Décaissement *
                                             </label>
                                             <select
                                                 value={caisseChoisie}
                                                 onChange={(e) => setCaisseChoisie(e.target.value)}
+                                                className="w-full border border-[#B2BED6] rounded p-2 text-xs font-bold text-[#0B192C] bg-white focus:outline-none focus:border-[#04326D]"
                                                 required
-                                                className="w-full border border-primary rounded-md p-2 text-xs font-semibold text-on-surface bg-white focus:outline-none focus:ring-1 focus:ring-primary/30 transition"
                                             >
                                                 <option value="">Sélectionner une caisse active</option>
-                                                {cashRegisters.map((register) => (
-                                                    <option key={register.id} value={register.name}>
-                                                        {register.name} ({register.devise})
+                                                {cashRegisters.map((c) => (
+                                                    <option key={c.id} value={c.name}>
+                                                        {c.name} ({c.devise})
                                                     </option>
                                                 ))}
                                             </select>
-                                            {cashRegisters.length === 0 && (
-                                                <p className="text-[11px] font-medium text-error-dark">
-                                                    Aucune caisse active n’est configurée. Le visa ne peut pas être accordé.
-                                                </p>
-                                            )}
                                         </div>
 
-                                        <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                                        <div className="flex items-center justify-between pt-2">
                                             <button
                                                 type="button"
                                                 onClick={() => setModeRejet(true)}
-                                                className="inline-flex items-center gap-1.5 px-3 py-2 border border-error/40 text-error rounded-md text-xs font-semibold hover:bg-error-soft transition"
+                                                className="px-3.5 py-2 border border-red-300 text-red-600 hover:bg-red-50 rounded text-xs font-bold transition"
                                             >
-                                                <Ban className="w-3.5 h-3.5" />
+                                                <Ban className="w-3.5 h-3.5 inline mr-1" />
                                                 Rejeter la demande
                                             </button>
 
@@ -1058,28 +1165,27 @@ export default function ProjectManagerDashboard({
                                                 <button
                                                     type="button"
                                                     onClick={() => setSelectedReq(null)}
-                                                    className="px-3 py-2 border border-outline-variant rounded-md text-xs text-gray-600 hover:bg-gray-50 transition"
+                                                    className="px-3.5 py-2 border rounded text-xs text-gray-600 hover:bg-gray-50"
                                                 >
                                                     Fermer
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={handleDeclencherApprobation}
-                                                    disabled={!caisseChoisie || cashRegisters.length === 0}
-                                                    className="inline-flex items-center gap-2 px-4 py-2 bg-success hover:bg-success-dark text-white rounded-md text-xs font-semibold shadow-sm hover:shadow-md transition-all active:scale-[0.98]"
+                                                    disabled={!caisseChoisie}
+                                                    className="px-4 py-2 bg-[#10B981] hover:bg-[#059669] text-white rounded text-xs font-bold shadow transition"
                                                 >
-                                                    <ShieldCheck className="w-4 h-4" />
+                                                    <ShieldCheck className="w-4 h-4 inline mr-1" />
                                                     Accorder Visa MP
                                                 </button>
                                             </div>
                                         </div>
                                     </>
                                 ) : (
-                                    <div className="bg-error-soft p-4 rounded-md border border-error/20 space-y-3">
+                                    <div className="bg-red-50 p-4 rounded border border-red-200 space-y-3">
                                         <div className="flex justify-between items-center">
-                                            <h4 className="text-xs font-bold text-error-dark uppercase flex items-center gap-1.5">
-                                                <AlertCircle className="w-3.5 h-3.5" />
-                                                Motif du Rejet (obligatoire)
+                                            <h4 className="text-xs font-bold text-red-800 uppercase">
+                                                Motif du Rejet (Obligatoire)
                                             </h4>
                                             <button
                                                 type="button"
@@ -1093,17 +1199,16 @@ export default function ProjectManagerDashboard({
                                             rows={3}
                                             value={motifRejet}
                                             onChange={(e) => setMotifRejet(e.target.value)}
-                                            placeholder="Indiquez clairement le motif du refus…"
-                                            className="w-full border border-error/30 rounded-md p-2 text-xs focus:outline-none focus:border-error focus:ring-1 focus:ring-error/20 bg-white transition"
+                                            placeholder="Indiquez clairement la correction requise..."
+                                            className="w-full border border-red-300 rounded p-2 text-xs bg-white focus:outline-none"
                                             required
                                         />
                                         <div className="flex justify-end gap-2">
                                             <button
                                                 type="button"
                                                 onClick={handleRejeter}
-                                                className="inline-flex items-center gap-1.5 px-4 py-2 bg-error hover:bg-error-dark text-white rounded-md text-xs font-semibold shadow-sm transition"
+                                                className="px-4 py-1.5 bg-[#DC2626] hover:bg-[#b91c1c] text-white rounded text-xs font-bold shadow"
                                             >
-                                                <Ban className="w-3.5 h-3.5" />
                                                 Confirmer le Rejet
                                             </button>
                                         </div>
@@ -1113,11 +1218,11 @@ export default function ProjectManagerDashboard({
                         )}
 
                         {!selectedReq.canDecide && (
-                            <div className="border-t border-outline-soft pt-3 flex justify-end">
+                            <div className="border-t pt-3 flex justify-end">
                                 <button
                                     type="button"
                                     onClick={() => setSelectedReq(null)}
-                                    className="px-4 py-2 bg-sidebar text-white rounded-md text-xs font-semibold hover:bg-primary transition"
+                                    className="px-4 py-2 bg-[#0B192C] text-white rounded text-xs font-bold"
                                 >
                                     Fermer
                                 </button>
@@ -1130,80 +1235,138 @@ export default function ProjectManagerDashboard({
             {/* MODALE SIGNATURE (PIN OU MOT DE PASSE) */}
             {passwordModalOpen && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-                    <div className="bg-white rounded-lg border-2 border-primary shadow-modal max-w-sm w-full p-6 space-y-4 animate-slide-down">
-                        <div className="text-center border-b border-outline-soft pb-3">
-                            <div className="w-12 h-12 mx-auto rounded-full bg-primary-soft flex items-center justify-center mb-2">
-                                <Lock className="w-5 h-5 text-primary" />
+                    <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
+                        <div className="text-center border-b pb-3">
+                            <div className="w-12 h-12 mx-auto rounded-full bg-blue-50 flex items-center justify-center mb-2">
+                                <Lock className="w-5 h-5 text-[#04326D]" />
                             </div>
-                            <h3 className="text-sm font-black uppercase text-on-surface tracking-wider">
+                            <h3 className="text-sm font-black uppercase text-[#0B192C] tracking-wider">
                                 Signature Certifiée du Visa MP
                             </h3>
                             <p className="text-[11px] text-gray-500 mt-1">
-                                Signataire : <strong className="text-on-surface">{user.name}</strong> (Manager de Projet)
+                                Signataire : <strong>{user.name}</strong> (Manager de Projet)
                             </p>
                         </div>
 
                         {pinError && (
-                            <div className="p-2.5 bg-error-soft border border-error/30 text-error-dark rounded-md text-xs flex items-center gap-2">
-                                <AlertCircle className="w-4 h-4 shrink-0" />
-                                <span>{pinError}</span>
+                            <div className="p-2.5 bg-red-50 border border-red-300 text-red-800 rounded text-xs">
+                                {pinError}
                             </div>
                         )}
 
                         <form onSubmit={handleConfirmerSignature} className="space-y-3">
                             <div>
                                 <label className="block text-[11px] font-bold text-gray-700 mb-1.5">
-                                    Saisissez votre Code PIN personnel (ou mot de passe) *
+                                    Code PIN personnel (ou mot de passe) *
                                 </label>
                                 <div className="relative">
                                     <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                                     <input
                                         type="password"
-                                        placeholder="Code PIN ou mot de passe"
+                                        placeholder="••••"
                                         value={passwordSaisi}
                                         onChange={(e) => setPasswordSaisi(e.target.value)}
-                                        className="w-full border border-outline-variant rounded-md p-2.5 pl-9 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition"
+                                        className="w-full border border-[#B2BED6] rounded p-2.5 pl-9 text-sm focus:outline-none focus:border-[#04326D]"
                                         autoFocus
                                         required
                                     />
                                 </div>
                             </div>
 
-                            <p className="text-[10px] text-gray-400 leading-relaxed flex items-start gap-1.5">
-                                <ShieldCheck className="w-3 h-3 shrink-0 mt-0.5 text-success" />
-                                Un code certifié et une empreinte SHA-256 infalsifiable seront apposés sur la réquisition.
+                            <p className="text-[10px] text-gray-400 leading-tight">
+                                Les crédits budgétaires seront immédiatement réservés en base et transmis au Manager Financier.
                             </p>
 
-                            <div className="flex justify-end gap-2 pt-2 border-t border-outline-soft">
+                            <div className="flex justify-end gap-2 pt-2 border-t">
                                 <button
                                     type="button"
                                     onClick={() => setPasswordModalOpen(false)}
-                                    className="px-3 py-2 border border-outline-variant rounded-md text-xs text-gray-600 hover:bg-gray-50 transition"
+                                    className="px-3 py-1.5 border rounded text-xs text-gray-600 hover:bg-gray-50"
                                 >
                                     Annuler
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={signingLoading}
-                                    className="inline-flex items-center gap-2 px-4 py-2 bg-success hover:bg-success-dark text-white font-semibold text-xs rounded-md shadow-sm transition disabled:opacity-50"
+                                    className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded shadow"
                                 >
-                                    {signingLoading ? (
-                                        <>
-                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                            Signature…
-                                        </>
-                                    ) : (
-                                        <>
-                                            <ShieldCheck className="w-3.5 h-3.5" />
-                                            Signer & Valider
-                                        </>
-                                    )}
+                                    {signingLoading ? 'Validation...' : 'Signer & Valider'}
                                 </button>
                             </div>
                         </form>
                     </div>
                 </div>
             )}
+
+            {/* FEUILLE D'IMPRESSION DU RAPPORT PAR CAISSE ET PAR STATUT */}
+            <div id="pm-filtered-report-sheet" className="p-8 font-sans text-black text-xs space-y-4">
+                <div className="flex justify-between items-start border-b-2 border-black pb-3">
+                    <div>
+                        <h1 className="text-base font-black uppercase">Bon Pasteur A.S.B.L. — Kolwezi</h1>
+                        <p className="text-xs font-bold text-gray-700">Synthèse Filtrée des Réquisitions Projet : {user.project?.name}</p>
+                    </div>
+                    <div className="text-right text-[11px]">
+                        <p><strong>Caisse filtrée :</strong> {filterCaisse === 'all' ? 'Toutes les caisses' : filterCaisse}</p>
+                        <p><strong>Statut filtré :</strong> {filterStatut.toUpperCase()}</p>
+                        <p><strong>Date d'édition :</strong> {new Date().toLocaleDateString('fr-FR')}</p>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3 border border-black p-3 font-mono text-xs">
+                    <div>
+                        <span className="text-[10px] uppercase text-gray-600 block">Dossiers</span>
+                        <strong>{statsFiltrees.count} réquisition(s)</strong>
+                    </div>
+                    <div>
+                        <span className="text-[10px] uppercase text-gray-600 block">Volume Total USD</span>
+                        <strong>{statsFiltrees.totalUSD.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} $</strong>
+                    </div>
+                    <div>
+                        <span className="text-[10px] uppercase text-gray-600 block">Volume Total CDF</span>
+                        <strong>{statsFiltrees.totalFC.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} FC</strong>
+                    </div>
+                </div>
+
+                <table className="w-full text-left border border-black text-xs border-collapse">
+                    <thead>
+                        <tr className="bg-gray-100 border-b border-black font-bold">
+                            <th className="p-1.5 border-r border-black">N° Réquisition</th>
+                            <th className="p-1.5 border-r border-black">Date</th>
+                            <th className="p-1.5 border-r border-black">Demandeur</th>
+                            <th className="p-1.5 border-r border-black">Nature</th>
+                            <th className="p-1.5 border-r border-black">Caisse</th>
+                            <th className="p-1.5 border-r border-black text-right">Montant</th>
+                            <th className="p-1.5">Statut</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-black">
+                        {demandesFiltrees.map((r) => (
+                            <tr key={r.id}>
+                                <td className="p-1.5 border-r border-black font-mono font-bold">{r.numero}</td>
+                                <td className="p-1.5 border-r border-black">{r.dateSoumission}</td>
+                                <td className="p-1.5 border-r border-black">{r.initiateurNom}</td>
+                                <td className="p-1.5 border-r border-black">{r.nature}</td>
+                                <td className="p-1.5 border-r border-black">{r.caisseAttribuee || r.caisseSouhaitee || '—'}</td>
+                                <td className="p-1.5 border-r border-black text-right font-mono font-bold">
+                                    {r.montantTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} {r.devise}
+                                </td>
+                                <td className="p-1.5 font-bold">{r.statusLabel}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+
+                <div className="pt-10 flex justify-between text-center">
+                    <div className="space-y-8">
+                        <p className="font-bold underline uppercase">Le Manager de Projet</p>
+                        <p>{user.name}</p>
+                    </div>
+                    <div className="space-y-8">
+                        <p className="font-bold underline uppercase">La Direction</p>
+                        <p>Pour Visa et Classement</p>
+                    </div>
+                </div>
+            </div>
         </AppLayout>
     );
 }

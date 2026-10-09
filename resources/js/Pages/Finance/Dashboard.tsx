@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
+import BudgetCodeCombobox, { BudgetLineItem } from '@/Components/BudgetCodeCombobox';
 import RequisitionCorrectionForm, { type RequisitionCorrectionData } from '@/Components/RequisitionCorrectionForm';
 import {
     Wallet,
@@ -17,7 +18,6 @@ import {
     Lock,
     KeyRound,
     Loader2,
-    FolderKanban,
     Building2,
     PieChart,
     AlertTriangle,
@@ -90,23 +90,13 @@ interface CaisseSummaryItem {
     cashiers_names: string;
 }
 
-interface PendingSessionItem {
-    id: string;
-    caisse_name: string;
-    caisse_devise: string;
-    cashier_name: string;
-    solde_ouverture: number;
-    date_session: string;
-    observation?: string;
-}
-
 interface Props extends PageProps {
     scopeLabel?: string;
     requisitions?: FinanceRequisition[];
     projects?: ProjectItem[];
     usersList?: UserItem[];
     caisses?: CaisseSummaryItem[];
-    pendingSessions?: PendingSessionItem[];
+    allBudgetLines?: BudgetLineItem[];
 }
 
 const money = (amount: number, currency: string) =>
@@ -116,7 +106,7 @@ export default function FinanceDashboard({
     requisitions: initialRequisitions = [],
     projects = [],
     caisses = [],
-    pendingSessions = [],
+    allBudgetLines = [],
 }: Props) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
@@ -128,7 +118,22 @@ export default function FinanceDashboard({
     const [selectedNature, setSelectedNature] = useState<string>('all');
     const [statusFilter, setStatusFilter] = useState('all');
 
+    // Réquisition en cours d'examen
     const [selected, setSelected] = useState<FinanceRequisition | null>(null);
+
+    // État d'édition complet pour le Manager Finance
+    const [editCaisse, setEditCaisse] = useState<string>('');
+    const [editLignes, setEditLignes] = useState<{
+        id: string;
+        activite: string;
+        code_allocation: string;
+        quantiteOuDuree: number;
+        prixUnitaire: number;
+        unite: string;
+        total: number;
+        justificatifs: FinanceJustificatif[];
+    }[]>([]);
+
     const [correcting, setCorrecting] = useState<RequisitionCorrectionData | null>(null);
     const [rejecting, setRejecting] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
@@ -137,11 +142,6 @@ export default function FinanceDashboard({
     const [pinSaisi, setPinSaisi] = useState('');
     const [pinError, setPinError] = useState<string | null>(null);
     const [processing, setProcessing] = useState(false);
-
-    const [sessionToAuthorize, setSessionToAuthorize] = useState<PendingSessionItem | null>(null);
-    const [sessionPin, setSessionPin] = useState('');
-    const [sessionPinError, setSessionPinError] = useState<string | null>(null);
-    const [authorizingSession, setAuthorizingSession] = useState(false);
 
     const [toast, setToast] = useState<{
         type: 'success' | 'error';
@@ -152,6 +152,14 @@ export default function FinanceDashboard({
         setToast({ type, message });
         setTimeout(() => setToast(null), 5000);
     };
+
+    // Lignes budgétaires du projet de la réquisition sélectionnée
+    const currentProjectBudgetLines = useMemo(() => {
+        if (!selected) return allBudgetLines;
+        if (!selected.project_id) return allBudgetLines;
+        const projectSpecific = allBudgetLines.filter((b) => b.project_id === selected.project_id);
+        return projectSpecific.length > 0 ? projectSpecific : allBudgetLines;
+    }, [allBudgetLines, selected]);
 
     const filteredRequisitions = useMemo(() => {
         return requisitions.filter((item) => {
@@ -177,6 +185,47 @@ export default function FinanceDashboard({
         });
     }, [requisitions, statusFilter, selectedProject, selectedCaisse, selectedNature]);
 
+    // Initialisation des données éditables dès l'ouverture de l'examen par le MF
+    const handleOpenExamen = (item: FinanceRequisition) => {
+        setSelected(item);
+        setEditCaisse(item.caisseAttribuee || 'Caisse principale');
+        setRejecting(false);
+        setRejectionReason('');
+        setEditLignes(
+            item.lignes.map((l) => ({
+                id: l.id,
+                activite: l.activite,
+                code_allocation: l.codeAllocation || l.codeBudget || '',
+                quantiteOuDuree: l.quantiteOuDuree,
+                prixUnitaire: l.prixUnitaire,
+                unite: l.unite,
+                total: l.total,
+                justificatifs: l.justificatifs,
+            }))
+        );
+    };
+
+    const updateEditLigne = (id: string, field: string, val: any) => {
+        setEditLignes((prev) =>
+            prev.map((ligne) => {
+                if (ligne.id !== id) return ligne;
+                const updated = { ...ligne, [field]: val };
+                if (field === 'quantiteOuDuree' || field === 'prixUnitaire') {
+                    updated.total = roundTwo((Number(updated.quantiteOuDuree) || 0) * (Number(updated.prixUnitaire) || 0));
+                }
+                return updated;
+            })
+        );
+    };
+
+    function roundTwo(num: number) {
+        return Math.round((num + Number.EPSILON) * 100) / 100;
+    }
+
+    const editTotalRequisition = useMemo(() => {
+        return editLignes.reduce((sum, l) => sum + (Number(l.total) || 0), 0);
+    }, [editLignes]);
+
     const handleTriggerApprove = () => {
         if (!selected) return;
         setPinSaisi('');
@@ -191,11 +240,21 @@ export default function FinanceDashboard({
         setProcessing(true);
         setPinError(null);
 
+        // Transmission de la validation avec les corrections apportées par le MF
         router.patch(
             route('requisitions.finance-decision', selected.id),
             {
                 decision: 'approve',
                 pin: pinSaisi.trim(),
+                password: pinSaisi.trim(),
+                caisse_decaissement: editCaisse,
+                articles: editLignes.map((l) => ({
+                    id: l.id,
+                    activite: l.activite,
+                    code_allocation: l.code_allocation.trim(),
+                    quantiteOuDuree: l.quantiteOuDuree,
+                    prixUnitaire: l.prixUnitaire,
+                })),
             },
             {
                 preserveScroll: true,
@@ -214,21 +273,23 @@ export default function FinanceDashboard({
                                     statusCode: 'controle_finance',
                                     statusLabel: 'Validée par Finance',
                                     canDecide: false,
+                                    montantTotal: editTotalRequisition,
+                                    caisseAttribuee: editCaisse,
                                 };
                             }
                             return item;
-                        }),
+                        })
                     );
 
                     showToast(
                         'success',
-                        `Visa Financier certifié apposé sur ${selected.numero}. Transmis à l'Administration.`
+                        `Visa Financier certifié apposé sur ${selected.numero}. Dossier transmis au PAM.`
                     );
                 },
                 onError: (errors) => {
-                    setPinError((errors as any).pin || 'Code PIN financier incorrect ou non configuré.');
+                    setPinError((errors as any).pin || (errors as any).password || 'Code PIN financier incorrect.');
                 },
-            },
+            }
         );
     };
 
@@ -245,6 +306,7 @@ export default function FinanceDashboard({
             {
                 decision: 'reject',
                 pin: '0000',
+                password: 'skip',
                 motif_rejet: rejectionReason,
             },
             {
@@ -269,38 +331,13 @@ export default function FinanceDashboard({
                                 };
                             }
                             return item;
-                        }),
+                        })
                     );
 
-                    showToast('error', `Réquisition ${selected.numero} renvoyée pour correction budgétaire.`);
+                    showToast('error', `Réquisition ${selected.numero} renvoyée au Chef de Projet pour correction budgétaire.`);
                 },
                 onError: (errors) => {
                     showToast('error', (errors as any).motif_rejet || 'Erreur lors du renvoi.');
-                },
-            },
-        );
-    };
-
-    const handleAuthorizeSession = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!sessionToAuthorize || !sessionPin) return;
-
-        setAuthorizingSession(true);
-        setSessionPinError(null);
-
-        router.patch(
-            route('cashier.session.authorize-opening', sessionToAuthorize.id),
-            { pin: sessionPin.trim() },
-            {
-                preserveScroll: true,
-                onFinish: () => setAuthorizingSession(false),
-                onSuccess: () => {
-                    setSessionToAuthorize(null);
-                    setSessionPin('');
-                    showToast('success', `Guichet ${sessionToAuthorize.caisse_name} ouvert avec succès.`);
-                },
-                onError: (errs) => {
-                    setSessionPinError(errs.pin || 'Code PIN financier incorrect.');
                 },
             }
         );
@@ -327,7 +364,7 @@ export default function FinanceDashboard({
                             Contrôle Budgétaire, Caisses & Visas
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
-                            Financier : <strong className="text-[#0B192C]">{user.name}</strong> • Vérification des soubassements, autorisations de caisses et contrôle d'imputation en temps réel.
+                            Financier : <strong className="text-[#0B192C]">{user.name}</strong> • Contrôle d'imputation en direct, plein pouvoir de correction budgétaire et visas certifiés.
                         </p>
                     </div>
 
@@ -341,51 +378,6 @@ export default function FinanceDashboard({
                         </Link>
                     </div>
                 </header>
-
-                {pendingSessions.length > 0 && (
-                    <div className="p-4 bg-amber-50 border-2 border-amber-400 rounded shadow-sm space-y-3">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2.5">
-                                <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0" />
-                                <div>
-                                    <h3 className="text-xs font-bold uppercase tracking-wider text-amber-950">
-                                        Demande d'Ouverture de Guichet en Attente ({pendingSessions.length})
-                                    </h3>
-                                    <p className="text-[11px] text-amber-900 mt-0.5">
-                                        Un caissier a demandé l'ouverture de sa caisse pour la journée. Votre autorisation par PIN est requise pour démarrer les opérations.
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-1">
-                            {pendingSessions.map((session) => (
-                                <div key={session.id} className="p-3 bg-white border border-amber-300 rounded flex justify-between items-center text-xs">
-                                    <div>
-                                        <strong className="text-[#0B192C] block">{session.caisse_name}</strong>
-                                        <span className="text-[11px] text-gray-500 block">
-                                            Caissier : {session.cashier_name}
-                                        </span>
-                                        <span className="text-[11px] font-mono font-bold text-amber-800">
-                                            Fond initial : {money(session.solde_ouverture, session.caisse_devise)}
-                                        </span>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setSessionToAuthorize(session);
-                                            setSessionPin('');
-                                            setSessionPinError(null);
-                                        }}
-                                        className="px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow transition shrink-0"
-                                    >
-                                        Autoriser
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
 
                 {toast && (
                     <div
@@ -438,6 +430,7 @@ export default function FinanceDashboard({
                     </div>
                 </div>
 
+                {/* Synthèse des caisses physiques */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm p-4 space-y-3">
                     <header className="flex items-center justify-between border-b pb-2">
                         <h2 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
@@ -477,6 +470,7 @@ export default function FinanceDashboard({
                     </div>
                 </div>
 
+                {/* Tableau principal des réquisitions */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="border-b px-4 py-3 bg-gray-50 flex flex-wrap items-center justify-between gap-3 text-xs">
                         <div className="flex flex-wrap items-center gap-2">
@@ -622,11 +616,7 @@ export default function FinanceDashboard({
                                                 )}
                                                 <button
                                                     type="button"
-                                                    onClick={() => {
-                                                        setSelected(item);
-                                                        setRejecting(false);
-                                                        setRejectionReason('');
-                                                    }}
+                                                    onClick={() => handleOpenExamen(item)}
                                                     className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow-sm transition"
                                                 >
                                                     <ShieldCheck className="w-3.5 h-3.5" />
@@ -642,19 +632,20 @@ export default function FinanceDashboard({
                 </div>
             </div>
 
+            {/* MODALE D'EXAMEN AVEC PLEIN POUVOIR DE MODIFICATION PAR LE MANAGER FINANCE */}
             {selected && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
-                    <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-5 animate-slide-down">
+                    <div className="w-full max-w-5xl max-h-[92vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-5 animate-slide-down">
                         <header className="flex items-start justify-between border-b pb-3">
                             <div>
                                 <span className="text-[10px] uppercase font-bold text-[#F58F20] tracking-wider">
-                                    Contrôle Budgétaire & Visa Financier (Étape 2)
+                                    Contrôle Budgétaire & Visa Financier (Plein pouvoir de correction)
                                 </span>
                                 <h2 className="text-base font-bold text-[#0B192C]">
                                     Réquisition N° {selected.numero} ({selected.nature})
                                 </h2>
                                 <p className="text-xs text-gray-500 mt-0.5">
-                                    Demandeur : <strong>{selected.initiateurNom}</strong> • Projet : {selected.projet} • Caisse : {selected.caisseAttribuee}
+                                    Demandeur : <strong className="text-gray-900">{selected.initiateurNom}</strong> • Projet : {selected.projet}
                                 </p>
                             </div>
                             <button
@@ -666,64 +657,127 @@ export default function FinanceDashboard({
                             </button>
                         </header>
 
-                        {selected.observation && (
-                            <div className="p-3 bg-amber-50 border-l-4 border-[#F58F20] text-xs text-gray-800 rounded-r">
-                                <strong>Observation :</strong> {selected.observation}
+                        {/* Modification de la Caisse attribuée */}
+                        {selected.canDecide && (
+                            <div className="p-3 bg-blue-50/70 border border-blue-200 rounded flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                                <label className="font-bold text-[#04326D] uppercase text-[11px] flex items-center gap-1.5">
+                                    <Building2 className="w-4 h-4" />
+                                    <span>Caisse de Décaissement Attribuée :</span>
+                                </label>
+                                <select
+                                    value={editCaisse}
+                                    onChange={(e) => setEditCaisse(e.target.value)}
+                                    className="border border-[#B2BED6] rounded px-3 py-1.5 font-bold text-[#0B192C] bg-white focus:outline-none focus:border-[#04326D] text-xs"
+                                >
+                                    {caisses.map((c) => (
+                                        <option key={c.id} value={c.name}>
+                                            {c.name} ({c.devise})
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
                         )}
 
+                        {/* Tableau des Lignes Budgétaires Entièrement Éditables par le Financier */}
                         <div>
-                            <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
-                                Contrôle de l'Impact Budgétaire Ligne par Ligne
-                            </h3>
-                            <table className="w-full text-left text-xs border border-gray-200 rounded overflow-hidden">
-                                <thead className="bg-gray-100 font-bold text-gray-600">
-                                    <tr>
-                                        <th className="p-2">Désignation</th>
-                                        <th className="p-2">Code Budget (MP)</th>
-                                        <th className="p-2 text-right">Solde Dispo</th>
-                                        <th className="p-2 text-right">Montant Ligne</th>
-                                        <th className="p-2 text-center">Impact Budgétaire</th>
-                                        <th className="p-2">Pièces Jointes</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y text-gray-700">
-                                    {selected.lignes.map((line) => {
-                                        const code = line.codeAllocation || line.codeBudget || 'Non attribué';
-                                        const solde = line.budget_solde_actuel;
-                                        const depassement = solde !== null && solde !== undefined && line.total > solde;
+                            <div className="flex items-center justify-between mb-2">
+                                <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                    Articles & Contrôle des Imputations (Saisie prédictive et correction des prix)
+                                </h3>
+                                <span className="text-[11px] text-gray-500">
+                                    {currentProjectBudgetLines.length} ligne(s) budgétaire(s) disponible(s) dans ce projet
+                                </span>
+                            </div>
 
-                                        return (
-                                            <tr key={line.id} className={depassement ? 'bg-red-50/60' : ''}>
-                                                <td className="p-2 font-medium">{line.activite}</td>
-                                                <td className="p-2 font-mono font-bold text-[#04326D]">{code}</td>
-                                                <td className="p-2 text-right font-mono font-bold">
-                                                    {solde !== null && solde !== undefined ? money(solde, selected.devise) : 'Non défini'}
-                                                </td>
-                                                <td className="p-2 text-right font-mono font-bold">
-                                                    {money(line.total, selected.devise)}
-                                                </td>
-                                                <td className="p-2 text-center">
-                                                    {solde === null || solde === undefined ? (
-                                                        <span className="text-[10px] text-gray-400">Non budgété</span>
-                                                    ) : depassement ? (
-                                                        <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-[10px] font-bold">
-                                                            Dépassement de crédit
-                                                        </span>
+                            <div className="border border-gray-200 rounded overflow-hidden">
+                                <table className="w-full text-left text-xs border-collapse">
+                                    <thead className="bg-[#0B192C] text-white font-bold text-[10px] uppercase tracking-wider">
+                                        <tr>
+                                            <th className="p-2.5 w-1/4">Désignation</th>
+                                            <th className="p-2.5 w-1/3">Imputation Budgétaire (Taper le code)</th>
+                                            <th className="p-2.5 w-20 text-center">Qté</th>
+                                            <th className="p-2.5 w-24 text-right">P.U. ({selected.devise})</th>
+                                            <th className="p-2.5 w-28 text-right">Total Ligne</th>
+                                            <th className="p-2.5 w-24">Pièces</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-200 text-gray-700">
+                                        {editLignes.map((line) => (
+                                            <tr key={line.id} className="hover:bg-gray-50">
+                                                <td className="p-2">
+                                                    {selected.canDecide ? (
+                                                        <input
+                                                            type="text"
+                                                            value={line.activite}
+                                                            onChange={(e) => updateEditLigne(line.id, 'activite', e.target.value)}
+                                                            className="w-full border rounded p-1.5 text-xs font-medium"
+                                                        />
                                                     ) : (
-                                                        <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                                                            Crédit suffisant
+                                                        <span className="font-medium">{line.activite}</span>
+                                                    )}
+                                                </td>
+
+                                                {/* Composant prédictif avec recherche en direct et affichage du solde */}
+                                                <td className="p-2">
+                                                    {selected.canDecide ? (
+                                                        <BudgetCodeCombobox
+                                                            value={line.code_allocation}
+                                                            onChange={(code) => updateEditLigne(line.id, 'code_allocation', code)}
+                                                            budgetLines={currentProjectBudgetLines}
+                                                            montantLigne={line.total}
+                                                            deviseRequisition={selected.devise}
+                                                            placeholder="Taper 1.1, 6.112..."
+                                                            required
+                                                        />
+                                                    ) : (
+                                                        <span className="font-mono font-bold text-[#04326D]">
+                                                            {line.code_allocation || 'Non attribué'}
                                                         </span>
                                                     )}
                                                 </td>
+
+                                                <td className="p-2 text-center">
+                                                    {selected.canDecide ? (
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0"
+                                                            value={line.quantiteOuDuree}
+                                                            onChange={(e) => updateEditLigne(line.id, 'quantiteOuDuree', e.target.value)}
+                                                            className="w-16 border rounded p-1.5 text-xs text-center font-bold"
+                                                        />
+                                                    ) : (
+                                                        <span>{line.quantiteOuDuree} {line.unite}</span>
+                                                    )}
+                                                </td>
+
+                                                <td className="p-2 text-right">
+                                                    {selected.canDecide ? (
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0"
+                                                            value={line.prixUnitaire}
+                                                            onChange={(e) => updateEditLigne(line.id, 'prixUnitaire', e.target.value)}
+                                                            className="w-24 border rounded p-1.5 text-xs text-right font-mono font-bold"
+                                                        />
+                                                    ) : (
+                                                        <span className="font-mono">{money(line.prixUnitaire, selected.devise)}</span>
+                                                    )}
+                                                </td>
+
+                                                <td className="p-2 text-right font-mono font-bold text-sm text-[#0B192C]">
+                                                    {money(line.total, selected.devise)}
+                                                </td>
+
                                                 <td className="p-2">
-                                                    {line.justificatifs.length > 0 ? (
+                                                    {line.justificatifs && line.justificatifs.length > 0 ? (
                                                         <div className="space-y-1">
                                                             {line.justificatifs.map((f) => (
-                                                                <div key={f.id} className="flex items-center justify-between text-[10px] bg-blue-50 text-[#04326D] px-2 py-0.5 rounded">
-                                                                    <span className="truncate max-w-[120px]">{f.nom}</span>
+                                                                <div key={f.id} className="text-[10px] bg-blue-50 text-[#04326D] px-1.5 py-0.5 rounded flex items-center justify-between">
+                                                                    <span className="truncate max-w-[80px]">{f.nom}</span>
                                                                     {f.fileUrl && (
-                                                                        <a href={f.fileUrl} target="_blank" rel="noreferrer" className="underline font-bold ml-1">
+                                                                        <a href={f.fileUrl} target="_blank" rel="noreferrer" className="underline font-bold">
                                                                             Voir
                                                                         </a>
                                                                     )}
@@ -731,23 +785,25 @@ export default function FinanceDashboard({
                                                             ))}
                                                         </div>
                                                     ) : (
-                                                        <span className="text-gray-400 italic text-[10px]">Aucun justificatif</span>
+                                                        <span className="text-gray-400 italic text-[10px]">Aucun</span>
                                                     )}
                                                 </td>
                                             </tr>
-                                        );
-                                    })}
-                                </tbody>
-                                <tfoot className="bg-gray-50 font-bold border-t">
-                                    <tr>
-                                        <td colSpan={3} className="p-2 text-right">Total Dossier :</td>
-                                        <td className="p-2 text-right font-mono text-sm text-[#0B192C]">
-                                            {money(selected.montantTotal, selected.devise)}
-                                        </td>
-                                        <td colSpan={2} />
-                                    </tr>
-                                </tfoot>
-                            </table>
+                                        ))}
+                                    </tbody>
+                                    <tfoot className="bg-gray-100 font-bold border-t">
+                                        <tr>
+                                            <td colSpan={4} className="p-2.5 text-right uppercase">
+                                                Montant Total Ajusté :
+                                            </td>
+                                            <td className="p-2.5 text-right font-mono text-sm text-[#0B192C]">
+                                                {money(editTotalRequisition, selected.devise)}
+                                            </td>
+                                            <td />
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
                         </div>
 
                         {selected.canDecide && (
@@ -798,7 +854,7 @@ export default function FinanceDashboard({
                                             rows={3}
                                             value={rejectionReason}
                                             onChange={(e) => setRejectionReason(e.target.value)}
-                                            placeholder="Précisez le motif comptable : dépassement de crédit, absence de proforma..."
+                                            placeholder="Précisez le problème budgétaire constaté..."
                                             className="w-full border border-red-300 rounded p-2 text-xs bg-white focus:outline-none"
                                             required
                                         />
@@ -827,6 +883,7 @@ export default function FinanceDashboard({
                 </div>
             )}
 
+            {/* MODALE SIGNATURE PAR CODE PIN FINANCIER */}
             {pinModalOpen && selected && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in">
                     <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
@@ -835,7 +892,7 @@ export default function FinanceDashboard({
                                 <Lock className="w-5 h-5 text-[#04326D]" />
                             </div>
                             <h3 className="text-sm font-bold uppercase text-[#0B192C] tracking-wide">
-                                Signature Électronique du Visa Financier
+                                Signature du Visa Financier
                             </h3>
                             <p className="text-[11px] text-gray-500 mt-1">
                                 Réquisition N° <strong className="font-mono text-[#04326D]">{selected.numero}</strong>
@@ -851,14 +908,14 @@ export default function FinanceDashboard({
                         <form onSubmit={handleConfirmSignature} className="space-y-3 text-xs">
                             <div>
                                 <label className="block font-bold text-gray-700 mb-1">
-                                    Saisissez votre Code PIN personnel financier *
+                                    Code PIN personnel du Manager Finance *
                                 </label>
                                 <div className="relative">
                                     <KeyRound className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                                     <input
                                         type="password"
                                         maxLength={6}
-                                        placeholder="Code PIN (4 à 6 chiffres)"
+                                        placeholder="••••"
                                         value={pinSaisi}
                                         onChange={(e) => setPinSaisi(e.target.value)}
                                         className="w-full pl-8 pr-3 py-2 border border-[#B2BED6] rounded text-xs font-mono tracking-widest text-[#0B192C] focus:outline-none focus:border-[#04326D]"
@@ -869,7 +926,7 @@ export default function FinanceDashboard({
                             </div>
 
                             <p className="text-[10px] text-gray-400 leading-tight">
-                                Cette signature infalsifiable atteste de la disponibilité des crédits budgétaires et autorise le passage au contrôle administratif.
+                                Les corrections et les imputations budgétaires validées seront enregistrées et transmises à l'Administration.
                             </p>
 
                             <div className="flex justify-end gap-2 pt-2 border-t">
@@ -885,70 +942,7 @@ export default function FinanceDashboard({
                                     disabled={processing}
                                     className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white rounded text-xs font-bold shadow transition"
                                 >
-                                    {processing ? 'Signature...' : 'Signer & Valider'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {sessionToAuthorize && (
-                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in">
-                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
-                        <header className="border-b pb-2">
-                            <h3 className="text-sm font-bold text-[#0B192C] uppercase tracking-wide">
-                                Autoriser l'Ouverture de Caisse
-                            </h3>
-                            <p className="text-[11px] text-gray-500">
-                                Guichet : <strong>{sessionToAuthorize.caisse_name}</strong> • Caissier : <strong>{sessionToAuthorize.cashier_name}</strong>
-                            </p>
-                        </header>
-
-                        <div className="p-3 bg-amber-50 border border-amber-300 rounded text-xs">
-                            <span className="text-[10px] font-bold text-gray-500 uppercase block">Fond de caisse déclaré :</span>
-                            <span className="text-base font-black font-mono text-[#0B192C]">
-                                {money(sessionToAuthorize.solde_ouverture, sessionToAuthorize.caisse_devise)}
-                            </span>
-                        </div>
-
-                        {sessionPinError && (
-                            <div className="p-2.5 bg-red-50 border border-red-300 text-red-800 rounded text-xs">
-                                {sessionPinError}
-                            </div>
-                        )}
-
-                        <form onSubmit={handleAuthorizeSession} className="space-y-3 text-xs">
-                            <div>
-                                <label className="block font-bold text-gray-700 mb-1">
-                                    Confirmez avec votre Code PIN financier *
-                                </label>
-                                <input
-                                    type="password"
-                                    maxLength={6}
-                                    placeholder="Code PIN"
-                                    value={sessionPin}
-                                    onChange={(e) => setSessionPin(e.target.value)}
-                                    className="w-full border border-[#B2BED6] rounded p-2 text-xs font-mono tracking-widest text-[#0B192C] focus:outline-none focus:border-[#04326D]"
-                                    autoFocus
-                                    required
-                                />
-                            </div>
-
-                            <div className="flex justify-end gap-2 pt-2 border-t">
-                                <button
-                                    type="button"
-                                    onClick={() => setSessionToAuthorize(null)}
-                                    className="px-3 py-1.5 border rounded text-xs text-gray-600 hover:bg-gray-50"
-                                >
-                                    Annuler
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={authorizingSession}
-                                    className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow"
-                                >
-                                    {authorizingSession ? 'Autorisation...' : 'Autoriser l’Ouverture'}
+                                    {processing ? 'Validation...' : 'Signer & Valider'}
                                 </button>
                             </div>
                         </form>
@@ -964,7 +958,7 @@ export default function FinanceDashboard({
                     onSuccess={() => {
                         setRequisitions((items) => items.filter((item) => item.id !== correcting.id));
                         setCorrecting(null);
-                        showToast('success', `Réquisition ${correcting.numero} corrigée et transmise au PAM.`);
+                        showToast('success', `Réquisition ${correcting.numero} corrigée et transmise.`);
                     }}
                 />
             )}

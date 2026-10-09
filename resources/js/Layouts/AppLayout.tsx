@@ -331,7 +331,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                     }`}
                                 >
                                     <FileCheck className="w-4 h-4 text-emerald-400" />
-                                    <span>{__('Décharges (Appendice 2)')}</span>
+                                    <span>{__('Return Form')}</span>
                                 </Link>
                             </div>
                         )}

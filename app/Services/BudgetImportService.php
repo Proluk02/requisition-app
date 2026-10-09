@@ -8,11 +8,12 @@ use App\Models\Project;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use ZipArchive;
 
 class BudgetImportService
 {
     /**
-     * Importe ou met à jour les lignes budgétaires à partir d'un fichier Excel ou CSV.
+     * Importe ou met à jour les lignes budgétaires à partir d'un fichier Excel (.xlsx, .xls) ou CSV.
      */
     public function import(UploadedFile $file, string $projectId): array
     {
@@ -20,10 +21,24 @@ class BudgetImportService
         $extension = strtolower($file->getClientOriginalExtension());
 
         $rows = [];
-        if (in_array($extension, ['xlsx', 'xls'], true) && class_exists(IOFactory::class)) {
-            $spreadsheet = IOFactory::load($file->getRealPath());
-            $worksheet = $spreadsheet->getActiveSheet();
-            $rows = $worksheet->toArray(null, true, true, false);
+
+        // 1. Décodage du fichier avec mécanismes de secours
+        if ($extension === 'xlsx') {
+            if (class_exists(ZipArchive::class)) {
+                $rows = $this->parseXlsxNative($file->getRealPath());
+            }
+
+            if (empty($rows) && class_exists(IOFactory::class)) {
+                $rows = $this->parsePhpSpreadsheet($file->getRealPath());
+            }
+
+            if (empty($rows) && PHP_OS_FAMILY === 'Windows') {
+                $rows = $this->parseXlsxWindowsNative($file->getRealPath());
+            }
+        } elseif ($extension === 'xls') {
+            if (class_exists(IOFactory::class)) {
+                $rows = $this->parsePhpSpreadsheet($file->getRealPath());
+            }
         } else {
             $rows = $this->parseCsv($file->getRealPath());
         }
@@ -31,15 +46,15 @@ class BudgetImportService
         if (empty($rows) || count($rows) < 2) {
             return [
                 'success' => false,
-                'message' => 'Le fichier est vide ou ne contient aucune ligne de données.',
+                'message' => 'Impossible de lire le fichier. Veuillez activer l’extension zip dans php.ini ou enregistrer votre feuille sous format CSV (.csv) dans Excel.',
                 'imported' => 0,
                 'updated' => 0,
-                'errors' => ['Format de fichier invalide ou vide.'],
+                'errors' => ['Format illisible ou extension zip inactive dans php.ini.'],
             ];
         }
 
-        $headers = array_map(fn ($h) => strtolower(trim((string) $h)), array_shift($rows));
-        $headerMap = $this->mapHeaders($headers);
+        // 2. Détection dynamique de la ligne d'en-tête
+        [$headerMap, $dataRows] = $this->extractHeaderAndDataRows($rows);
 
         $importedCount = 0;
         $updatedCount = 0;
@@ -48,41 +63,44 @@ class BudgetImportService
         DB::beginTransaction();
 
         try {
-            foreach ($rows as $index => $row) {
+            foreach ($dataRows as $index => $row) {
                 $rowNumber = $index + 2;
 
                 if ($this->isEmptyRow($row)) {
                     continue;
                 }
 
-                $cat = $this->getValue($row, $headerMap['category_code'] ?? null);
-                $subcat = $this->getValue($row, $headerMap['subcategory_code'] ?? null);
-                $desc = $this->getValue($row, $headerMap['descript_code'] ?? null);
-                $split = $this->getValue($row, $headerMap['split_code'] ?? null);
-                $directCode = $this->getValue($row, $headerMap['code'] ?? null);
+                $cat = $this->getValue($row, $headerMap['category_code'] ?? 0);
+                $subcat = $this->getValue($row, $headerMap['subcategory_code'] ?? 1);
+                $desc = $this->getValue($row, $headerMap['descript_code'] ?? 2);
+                $split = $this->getValue($row, $headerMap['split_code'] ?? 3);
+                $directCode = $this->getValue($row, $headerMap['code'] ?? 4);
 
                 $code = $directCode ?: BudgetLine::buildCode($cat, $subcat, $desc, $split);
+                $code = trim(preg_replace('/\s+/', '', (string) $code));
 
                 if (empty($code)) {
-                    $errors[] = "Ligne {$rowNumber} ignorée : impossible de déterminer le code budgétaire.";
+                    $errors[] = "Ligne {$rowNumber} ignorée : code budgétaire absent.";
                     continue;
                 }
 
-                $libelle = $this->getValue($row, $headerMap['libelle'] ?? null) ?: "Ligne budgétaire {$code}";
-                $devise = strtoupper($this->getValue($row, $headerMap['devise'] ?? null) ?: 'USD');
+                $libelle = $this->getValue($row, $headerMap['libelle'] ?? 5) ?: "Ligne {$code}";
+                $devise = strtoupper((string) ($this->getValue($row, $headerMap['devise'] ?? 6) ?: 'USD'));
                 if (! in_array($devise, ['USD', 'FC', 'EUR'], true)) {
                     $devise = 'USD';
                 }
 
-                $rawBudget = $this->getValue($row, $headerMap['budget_initial'] ?? null);
+                $rawBudget = $this->getValue($row, $headerMap['budget_initial'] ?? 7);
                 $budgetInitial = $this->sanitizeAmount($rawBudget);
 
-                $donorName = $this->getValue($row, $headerMap['donor'] ?? null);
+                $donorName = $this->getValue($row, $headerMap['donor'] ?? 8);
                 $donorId = null;
+
                 if (! empty($donorName)) {
+                    $donorNameClean = trim((string) $donorName);
                     $donor = Donor::firstOrCreate(
-                        ['name' => trim($donorName)],
-                        ['code' => strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $donorName), 0, 8))]
+                        ['name' => $donorNameClean],
+                        ['code' => strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $donorNameClean), 0, 8))]
                     );
                     $donorId = $donor->id;
                 }
@@ -101,7 +119,7 @@ class BudgetImportService
                         'libelle' => $libelle,
                         'devise' => $devise,
                         'budget_initial' => $budgetInitial,
-                        'solde' => round($budgetInitial - $existingLine->montant_engage - $existingLine->montant_decaisse, 2),
+                        'solde' => round($budgetInitial - (float) $existingLine->montant_decaisse, 2),
                     ]);
                     $updatedCount++;
                 } else {
@@ -128,7 +146,7 @@ class BudgetImportService
 
             return [
                 'success' => true,
-                'message' => "Importation terminée : {$importedCount} ligne(s) créée(s), {$updatedCount} mise(s) à jour.",
+                'message' => "Importation réussie : {$importedCount} ligne(s) créée(s), {$updatedCount} mise(s) à jour pour le projet {$project->name}.",
                 'imported' => $importedCount,
                 'updated' => $updatedCount,
                 'errors' => $errors,
@@ -138,7 +156,7 @@ class BudgetImportService
 
             return [
                 'success' => false,
-                'message' => "Échec de l'importation : " . $e->getMessage(),
+                'message' => "Erreur lors de l'enregistrement : " . $e->getMessage(),
                 'imported' => 0,
                 'updated' => 0,
                 'errors' => [$e->getMessage()],
@@ -147,8 +165,181 @@ class BudgetImportService
     }
 
     /**
-     * Lit un fichier CSV avec détection automatique du délimiteur.
+     * Lecteur natif via ZipArchive lorsque l'extension PHP est active.
      */
+    protected function parseXlsxNative(string $filePath): array
+    {
+        if (! class_exists(ZipArchive::class)) {
+            return [];
+        }
+
+        $zip = new ZipArchive();
+        if ($zip->open($filePath) !== true) {
+            return [];
+        }
+
+        $sharedStrings = [];
+        $stringsXml = $zip->getFromName('xl/sharedStrings.xml');
+        if ($stringsXml) {
+            $xml = @simplexml_load_string($stringsXml);
+            if ($xml) {
+                foreach ($xml->si as $si) {
+                    if (isset($si->t)) {
+                        $sharedStrings[] = (string) $si->t;
+                    } elseif (isset($si->r)) {
+                        $text = '';
+                        foreach ($si->r as $r) {
+                            $text .= (string) $r->t;
+                        }
+                        $sharedStrings[] = $text;
+                    } else {
+                        $sharedStrings[] = '';
+                    }
+                }
+            }
+        }
+
+        $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
+        if (! $sheetXml) {
+            for ($i = 0; $i < $zip->numFiles; $i++) {
+                $name = $zip->getNameIndex($i);
+                if (str_starts_with($name, 'xl/worksheets/sheet') && str_ends_with($name, '.xml')) {
+                    $sheetXml = $zip->getFromIndex($i);
+                    break;
+                }
+            }
+        }
+
+        $zip->close();
+
+        if (! $sheetXml) {
+            return [];
+        }
+
+        return $this->parseSheetXmlString($sheetXml, $sharedStrings);
+    }
+
+    /**
+     * Secours natif Windows : utilise tar.exe de Windows 10/11 pour extraire le XLSX sans extension PHP.
+     */
+    protected function parseXlsxWindowsNative(string $filePath): array
+    {
+        $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'xlsx_' . uniqid();
+        if (! @mkdir($tempDir) && ! is_dir($tempDir)) {
+            return [];
+        }
+
+        $cmd = 'tar -xf ' . escapeshellarg($filePath) . ' -C ' . escapeshellarg($tempDir) . ' 2>NUL';
+        @exec($cmd);
+
+        $stringsPath = $tempDir . DIRECTORY_SEPARATOR . 'xl' . DIRECTORY_SEPARATOR . 'sharedStrings.xml';
+        $sheetPath = $tempDir . DIRECTORY_SEPARATOR . 'xl' . DIRECTORY_SEPARATOR . 'worksheets' . DIRECTORY_SEPARATOR . 'sheet1.xml';
+
+        $sharedStrings = [];
+        if (file_exists($stringsPath)) {
+            $xml = @simplexml_load_file($stringsPath);
+            if ($xml) {
+                foreach ($xml->si as $si) {
+                    if (isset($si->t)) {
+                        $sharedStrings[] = (string) $si->t;
+                    } elseif (isset($si->r)) {
+                        $text = '';
+                        foreach ($si->r as $r) {
+                            $text .= (string) $r->t;
+                        }
+                        $sharedStrings[] = $text;
+                    } else {
+                        $sharedStrings[] = '';
+                    }
+                }
+            }
+        }
+
+        $rows = [];
+        if (file_exists($sheetPath)) {
+            $sheetXml = file_get_contents($sheetPath);
+            if ($sheetXml) {
+                $rows = $this->parseSheetXmlString($sheetXml, $sharedStrings);
+            }
+        }
+
+        // Nettoyage du dossier temporaire
+        $this->deleteDirectory($tempDir);
+
+        return $rows;
+    }
+
+    /**
+     * Analyse le contenu XML de la feuille et associe les chaînes partagées.
+     */
+    protected function parseSheetXmlString(string $sheetXml, array $sharedStrings): array
+    {
+        $sheet = @simplexml_load_string($sheetXml);
+        if (! $sheet || ! isset($sheet->sheetData)) {
+            return [];
+        }
+
+        $rows = [];
+        foreach ($sheet->sheetData->row as $row) {
+            $rowData = [];
+            $maxColIndex = 0;
+
+            foreach ($row->c as $cell) {
+                $ref = (string) $cell['r'];
+                preg_match('/^([A-Z]+)(\d+)$/', $ref, $matches);
+                $colLetters = $matches[1] ?? 'A';
+                $colIndex = $this->columnLetterToIndex($colLetters);
+
+                $type = (string) $cell['t'];
+                $val = isset($cell->v) ? (string) $cell->v : '';
+
+                if ($type === 's') {
+                    $val = $sharedStrings[(int) $val] ?? '';
+                } elseif ($type === 'inlineStr' && isset($cell->is->t)) {
+                    $val = (string) $cell->is->t;
+                }
+
+                $rowData[$colIndex] = $val;
+                if ($colIndex > $maxColIndex) {
+                    $maxColIndex = $colIndex;
+                }
+            }
+
+            $fullRow = [];
+            for ($c = 0; $c <= $maxColIndex; $c++) {
+                $fullRow[$c] = $rowData[$c] ?? '';
+            }
+
+            if (! empty(array_filter($fullRow, fn ($v) => trim((string) $v) !== ''))) {
+                $rows[] = $fullRow;
+            }
+        }
+
+        return $rows;
+    }
+
+    protected function columnLetterToIndex(string $letters): int
+    {
+        $letters = strtoupper(trim($letters));
+        $index = 0;
+        $len = strlen($letters);
+        for ($i = 0; $i < $len; $i++) {
+            $index = $index * 26 + (ord($letters[$i]) - ord('A') + 1);
+        }
+        return $index - 1;
+    }
+
+    protected function parsePhpSpreadsheet(string $path): array
+    {
+        try {
+            $spreadsheet = IOFactory::load($path);
+            $worksheet = $spreadsheet->getActiveSheet();
+            return $worksheet->toArray(null, true, false, false);
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
     protected function parseCsv(string $path): array
     {
         $rows = [];
@@ -163,7 +354,7 @@ class BudgetImportService
 
         $firstLine = fgets($handle);
         rewind($handle);
-        $delimiter = str_contains($firstLine, ';') ? ';' : ',';
+        $delimiter = str_contains((string) $firstLine, ';') ? ';' : ',';
 
         while (($data = fgetcsv($handle, 4096, $delimiter)) !== false) {
             $rows[] = $data;
@@ -173,38 +364,64 @@ class BudgetImportService
         return $rows;
     }
 
-    /**
-     * Associe les colonnes du tableau aux attributs RMS.
-     */
-    protected function mapHeaders(array $headers): array
+    protected function extractHeaderAndDataRows(array $rows): array
     {
-        $map = [];
+        $headerRowIndex = 0;
 
-        foreach ($headers as $index => $header) {
-            $clean = preg_replace('/[^a-z0-9]/', '', strtolower($header));
-
-            if (in_array($clean, ['code', 'codebudget', 'codebudgetaire', 'codeligne'], true)) {
-                $map['code'] = $index;
-            } elseif (in_array($clean, ['category', 'categorycode', 'cat', 'codecat'], true)) {
-                $map['category_code'] = $index;
-            } elseif (in_array($clean, ['subcategory', 'subcategorycode', 'subcat', 'codesubcat'], true)) {
-                $map['subcategory_code'] = $index;
-            } elseif (in_array($clean, ['descript', 'descriptcode', 'desc', 'codedesc'], true)) {
-                $map['descript_code'] = $index;
-            } elseif (in_array($clean, ['split', 'splitcode', 'codesplit'], true)) {
-                $map['split_code'] = $index;
-            } elseif (in_array($clean, ['libelle', 'description', 'intitule', 'activite', 'ligne'], true)) {
-                $map['libelle'] = $index;
-            } elseif (in_array($clean, ['budget', 'budgetinitial', 'montant', 'initial', 'alloue'], true)) {
-                $map['budget_initial'] = $index;
-            } elseif (in_array($clean, ['devise', 'currency', 'monnaie'], true)) {
-                $map['devise'] = $index;
-            } elseif (in_array($clean, ['donor', 'donateur', 'bailleur', 'partenaire'], true)) {
-                $map['donor'] = $index;
+        foreach ($rows as $index => $row) {
+            foreach ($row as $cell) {
+                $clean = strtolower(trim((string) $cell));
+                if (
+                    str_contains($clean, 'code') ||
+                    str_contains($clean, 'libelle') ||
+                    str_contains($clean, 'categor') ||
+                    str_contains($clean, 'budget')
+                ) {
+                    $headerRowIndex = $index;
+                    break 2;
+                }
             }
         }
 
-        return $map;
+        $headerCells = $rows[$headerRowIndex] ?? [];
+        $dataRows = array_slice($rows, $headerRowIndex + 1);
+
+        $map = [];
+        foreach ($headerCells as $colIndex => $cellValue) {
+            $clean = preg_replace('/[^a-z0-9]/', '', strtolower(trim((string) $cellValue)));
+
+            if (in_array($clean, ['code', 'codebudget', 'codebudgetaire', 'codeligne', 'imputation'], true)) {
+                $map['code'] = $colIndex;
+            } elseif (str_contains($clean, 'subcat') || str_contains($clean, 'souscat')) {
+                $map['subcategory_code'] = $colIndex;
+            } elseif (str_contains($clean, 'cat')) {
+                $map['category_code'] = $colIndex;
+            } elseif (str_contains($clean, 'desc')) {
+                $map['descript_code'] = $colIndex;
+            } elseif (str_contains($clean, 'split') || str_contains($clean, 'div')) {
+                $map['split_code'] = $colIndex;
+            } elseif (str_contains($clean, 'libel') || str_contains($clean, 'intitul') || str_contains($clean, 'activit')) {
+                $map['libelle'] = $colIndex;
+            } elseif (str_contains($clean, 'budget') || str_contains($clean, 'montant') || str_contains($clean, 'allou')) {
+                $map['budget_initial'] = $colIndex;
+            } elseif (str_contains($clean, 'devise') || str_contains($clean, 'curr') || str_contains($clean, 'monn')) {
+                $map['devise'] = $colIndex;
+            } elseif (str_contains($clean, 'donat') || str_contains($clean, 'donor') || str_contains($clean, 'baill')) {
+                $map['donor'] = $colIndex;
+            }
+        }
+
+        $map['category_code'] ??= 0;
+        $map['subcategory_code'] ??= 1;
+        $map['descript_code'] ??= 2;
+        $map['split_code'] ??= 3;
+        $map['code'] ??= 4;
+        $map['libelle'] ??= 5;
+        $map['devise'] ??= 6;
+        $map['budget_initial'] ??= 7;
+        $map['donor'] ??= 8;
+
+        return [$map, $dataRows];
     }
 
     protected function getValue(array $row, ?int $index): ?string
@@ -217,20 +434,39 @@ class BudgetImportService
         return $val !== '' ? $val : null;
     }
 
-    protected function sanitizeAmount(?string $val): float
+    protected function sanitizeAmount(mixed $val): float
     {
-        if (empty($val)) {
+        if ($val === null || $val === '') {
             return 0.0;
         }
 
-        $clean = str_replace([' ', "\xc2\xa0", '$', 'FC', 'CDF'], '', $val);
-        $clean = str_replace(',', '.', $clean);
+        if (is_numeric($val)) {
+            return (float) $val;
+        }
 
-        return (float) $clean;
+        $str = (string) $val;
+        $str = preg_replace('/[\s\x{00A0}\x{202F}\x{2009}]+/u', '', $str);
+        $str = str_replace(',', '.', (string) $str);
+        $str = preg_replace('/[^0-9.-]/', '', (string) $str);
+
+        return is_numeric($str) ? (float) $str : 0.0;
     }
 
     protected function isEmptyRow(array $row): bool
     {
-        return empty(array_filter($row, fn ($cell) => filled($cell)));
+        return empty(array_filter($row, fn ($cell) => trim((string) $cell) !== ''));
+    }
+
+    protected function deleteDirectory(string $dir): void
+    {
+        if (! file_exists($dir)) {
+            return;
+        }
+        $files = array_diff(scandir($dir) ?: [], ['.', '..']);
+        foreach ($files as $file) {
+            $path = $dir . DIRECTORY_SEPARATOR . $file;
+            is_dir($path) ? $this->deleteDirectory($path) : @unlink($path);
+        }
+        @rmdir($dir);
     }
 }
