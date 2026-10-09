@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\RequisitionController;
+use App\Models\BudgetLine;
 use App\Models\CashRegister;
 use App\Models\Project;
 use App\Models\Demande;
@@ -62,6 +63,14 @@ it('persists the project manager approval decision in the database', function ()
         'frais_unitaire' => 1500,
         'total_ligne' => 1500,
     ]);
+    BudgetLine::create([
+        'project_id' => $project->id,
+        'code' => 'bud-001',
+        'libelle' => 'Fournitures de bureau',
+        'devise' => 'USD',
+        'budget_initial' => 5000,
+        'solde' => 5000,
+    ]);
 
     $request = Request::create('/requisitions/' . $requisition->id . '/manager-decision', 'PATCH', [
         'decision' => 'approve',
@@ -69,7 +78,7 @@ it('persists the project manager approval decision in the database', function ()
         'password' => 'password',
         'allocations' => [[
             'demande_id' => $demande->id,
-            'code_allocation' => 'BUD-001',
+            'code_allocation' => ' BUD-001 ',
         ]],
     ]);
     $request->setUserResolver(fn () => $manager);
@@ -82,6 +91,133 @@ it('persists the project manager approval decision in the database', function ()
         'status' => 'visa_mp',
         'caisse_decaissement' => 'Caisse principale',
     ]);
+    $this->assertDatabaseHas('demandes', [
+        'id' => $demande->id,
+        'code_allocation' => 'BUD-001',
+        'code_all_budget' => 'BUD-001',
+        'libelle_allocation' => 'Fournitures de bureau',
+    ]);
+});
+
+it('uses the fallback description when the allocation code is unknown', function () {
+    $project = Project::create([
+        'name' => 'USIMAMIZI BORA',
+        'full_name' => 'USIMAMIZI BORA',
+    ]);
+
+    Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
+    Role::firstOrCreate(['name' => 'beneficiary', 'guard_name' => 'web']);
+    Role::firstOrCreate(['name' => 'finance', 'guard_name' => 'web']);
+
+    $manager = User::factory()->create([
+        'project_id' => $project->id,
+        'status' => 'active',
+    ]);
+    $manager->assignRole('project_manager');
+    $staff = User::factory()->create();
+    $staff->assignRole('beneficiary');
+
+    CashRegister::create([
+        'name' => 'Caisse principale',
+        'code' => 'CP',
+        'devise' => 'USD',
+        'solde_actuel' => 0,
+        'is_active' => true,
+    ]);
+    $requisition = Requisition::create([
+        'user_id' => $staff->id,
+        'project_id' => $project->id,
+        'numero_requisition' => 'UB/09/103',
+        'nature_requisition' => 'Achat',
+        'projet' => $project->name,
+        'caisse_decaissement' => 'Caisse principale',
+        'devise' => 'USD',
+        'montant_total' => 100,
+        'status' => 'draft',
+    ]);
+    $demande = Demande::create([
+        'requisition_id' => $requisition->id,
+        'activite' => 'Fournitures',
+        'code_all_budget' => '',
+        'nature' => 'Achat',
+        'quantite' => 1,
+        'frais_unitaire' => 100,
+        'total_ligne' => 100,
+    ]);
+
+    $request = Request::create('/requisitions/' . $requisition->id . '/manager-decision', 'PATCH', [
+        'decision' => 'approve',
+        'caisse_decaissement' => 'Caisse principale',
+        'password' => 'password',
+        'allocations' => [[
+            'demande_id' => $demande->id,
+            'code_allocation' => 'UNKNOWN-CODE',
+        ]],
+    ]);
+    $request->setUserResolver(fn () => $manager);
+
+    app(RequisitionController::class)->managerDecision($request, $requisition);
+
+    $this->assertDatabaseHas('demandes', [
+        'id' => $demande->id,
+        'code_allocation' => 'UNKNOWN-CODE',
+        'libelle_allocation' => 'code non specifie',
+    ]);
+});
+
+it('shows the stored allocation description when the project manager consults a requisition', function () {
+    Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
+    Role::firstOrCreate(['name' => 'beneficiary', 'guard_name' => 'web']);
+    Role::firstOrCreate(['name' => 'finance', 'guard_name' => 'web']);
+
+    $project = Project::create([
+        'name' => 'USIMAMIZI BORA',
+        'full_name' => 'USIMAMIZI BORA',
+    ]);
+    $manager = User::factory()->create([
+        'project_id' => $project->id,
+        'status' => 'active',
+    ]);
+    $manager->assignRole('project_manager');
+    $staff = User::factory()->create();
+    $staff->assignRole('beneficiary');
+    $requisition = Requisition::create([
+        'user_id' => $staff->id,
+        'project_id' => $project->id,
+        'numero_requisition' => 'UB/09/104',
+        'nature_requisition' => 'Achat',
+        'projet' => $project->name,
+        'devise' => 'USD',
+        'montant_total' => 100,
+        'status' => 'visa_mp',
+    ]);
+    BudgetLine::create([
+        'project_id' => $project->id,
+        'code' => 'bud-001',
+        'libelle' => 'Fournitures de bureau',
+        'devise' => 'USD',
+        'budget_initial' => 5000,
+        'solde' => 5000,
+    ]);
+    Demande::create([
+        'requisition_id' => $requisition->id,
+        'activite' => 'Fournitures',
+        'code_all_budget' => 'BUD-001',
+        'code_allocation' => 'BUD-001',
+        'nature' => 'Achat',
+        'quantite' => 1,
+        'frais_unitaire' => 100,
+        'total_ligne' => 100,
+    ]);
+
+    $this->actingAs($manager)
+        ->get(route('dashboard'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('ProjectManager/Dashboard')
+            ->where('requisitions.0.lignes.0.libelleAllocation', 'Fournitures de bureau')
+            ->where('budgetLines.0.normalizedCode', 'bud-001')
+        );
 });
 
 it('forbids a non-manager from deciding a requisition', function () {

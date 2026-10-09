@@ -35,6 +35,7 @@ interface LigneDemande {
     activite: string;
     codeAllBudget: string;
     code_allocation?: string;
+    libelleAllocation: string;
     nature: string;
     quantiteOuDuree: number;
     unite: string;
@@ -73,12 +74,20 @@ interface CashRegisterOption {
     devise: string;
 }
 
+interface BudgetLineOption {
+    code: string;
+    libelle: string;
+    normalizedCode: string;
+}
+
 export default function ProjectManagerDashboard({
     requisitions = [],
     cashRegisters = [],
+    budgetLines = [],
 }: {
     requisitions?: RequisitionMP[];
     cashRegisters?: CashRegisterOption[];
+    budgetLines?: BudgetLineOption[];
 }) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
@@ -110,6 +119,12 @@ export default function ProjectManagerDashboard({
     const showToast = (type: 'success' | 'error', message: string) => {
         setToast({ type, message });
         setTimeout(() => setToast(null), 5000);
+    };
+
+    const getAllocationDescription = (code: string) => {
+        if (!code.trim()) return '';
+        const normalizedCode = code.trim().toLowerCase();
+        return budgetLines.find((line) => line.normalizedCode === normalizedCode)?.libelle ?? 'code non specifie';
     };
 
     const demandesFiltrees = useMemo(() => {
@@ -192,6 +207,22 @@ export default function ProjectManagerDashboard({
                                       statut: 'valide_mp',
                                       statusLabel: 'Validé MP',
                                       canDecide: false,
+                                      lignes: d.lignes.map((ligne) => {
+                                          const allocation = allocationsArray.find(
+                                              (item) => item.demande_id === ligne.id
+                                          );
+
+                                          return allocation
+                                              ? {
+                                                    ...ligne,
+                                                    code_allocation: allocation.code_allocation,
+                                                    codeAllBudget: allocation.code_allocation,
+                                                    libelleAllocation: getAllocationDescription(
+                                                        allocation.code_allocation
+                                                    ) || 'code non specifie',
+                                                }
+                                              : ligne;
+                                      }),
                                   }
                                 : d
                         )
@@ -918,6 +949,7 @@ export default function ProjectManagerDashboard({
                                         <th className="p-2 text-primary">
                                             Code Allocation Budgétaire
                                         </th>
+                                        <th className="p-2">Description</th>
                                         <th className="p-2 text-center">
                                             {selectedReq.nature === 'Achat' ? 'Qté' : 'Durée'}
                                         </th>
@@ -951,6 +983,22 @@ export default function ProjectManagerDashboard({
                                                             ligne.codeAllBudget}
                                                     </span>
                                                 )}
+                                            </td>
+                                            <td className="p-2">
+                                                <input
+                                                    type="text"
+                                                    value={
+                                                        selectedReq.canDecide
+                                                            ? getAllocationDescription(
+                                                                  allocations[ligne.id] || ''
+                                                              )
+                                                            : ligne.libelleAllocation ||
+                                                              'code non specifie'
+                                                    }
+                                                    readOnly
+                                                    className="w-48 max-w-full rounded-md border border-outline-soft bg-surface-muted p-1.5 text-xs text-gray-600"
+                                                    aria-label="Description du code d’allocation"
+                                                />
                                             </td>
                                             <td className="p-2 text-center">
                                                 {ligne.quantiteOuDuree} {ligne.unite}

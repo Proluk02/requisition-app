@@ -46,8 +46,18 @@ class DashboardController extends Controller
                 $requisitionsQuery->whereRaw('1 = 0');
             }
 
+            $budgetLines = BudgetLine::query()
+                ->where('project_id', $user->project_id)
+                ->get(['code', 'libelle'])
+                ->keyBy(fn (BudgetLine $line) => BudgetLine::normalizeCode($line->code));
+
             return Inertia::render('ProjectManager/Dashboard', [
-                'requisitions' => $this->buildProjectManagerRequisitionList($requisitionsQuery->get(), $user->id),
+                'requisitions' => $this->buildProjectManagerRequisitionList($requisitionsQuery->get(), $user->id, $budgetLines),
+                'budgetLines' => $budgetLines->values()->map(fn (BudgetLine $line) => [
+                    'code' => $line->code,
+                    'libelle' => $line->libelle,
+                    'normalizedCode' => BudgetLine::normalizeCode($line->code),
+                ])->all(),
                 'cashRegisters' => CashRegister::query()
                     ->where('is_active', true)
                     ->orderBy('name')
@@ -533,9 +543,9 @@ class DashboardController extends Controller
         })->values()->all();
     }
 
-    private function buildProjectManagerRequisitionList($requisitions, string $managerId): array
+    private function buildProjectManagerRequisitionList($requisitions, string $managerId, $budgetLines): array
     {
-        return $requisitions->map(function ($r) use ($managerId) {
+        return $requisitions->map(function ($r) use ($managerId, $budgetLines) {
             $isFinanceReturned = $r->status === 'returned_to_project_manager';
             $isRejectedForInitiator = in_array($r->status, ['returned_to_beneficiary', 'returned_to_urgent_initiator'], true);
             return [
@@ -579,6 +589,9 @@ class DashboardController extends Controller
                     'activite' => $d->activite,
                     'codeAllBudget' => $d->code_all_budget,
                     'code_allocation' => $d->code_allocation,
+                    'libelleAllocation' => $d->libelle_allocation
+                        ?: $budgetLines->get(BudgetLine::normalizeCode($d->code_allocation ?: $d->code_all_budget))?->libelle
+                        ?: 'code non specifie',
                     'nature' => $d->nature ?? '',
                     'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
                     'unite' => $d->unite ?? '',

@@ -105,6 +105,13 @@ class BudgetController extends Controller
         ]);
     }
 
+    public function importForm(): Response
+    {
+        return Inertia::render('Finance/Budgets/Import', [
+            'projects' => Project::orderBy('name')->get(['id', 'name', 'full_name']),
+        ]);
+    }
+
     /**
      * Traite l'importation du budget de référence depuis un fichier Excel ou CSV.
      */

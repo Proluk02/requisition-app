@@ -11,7 +11,6 @@ import {
     BadgeCheck,
     Database,
     Download,
-    Building2,
 } from 'lucide-react';
 
 interface AdminDashboardStats {
@@ -48,7 +47,7 @@ export default function AdminDashboard({ stats }: { stats?: AdminDashboardStats 
                             Supervision du Système & Administration
                         </h1>
                         <p className="text-xs text-gray-500 mt-1">
-                            Gérez les comptes, les affectations projets, les sites, les caisses et la maintenance de la base de données.
+                            Gérez les comptes, les affectations aux projets et aux sites, ainsi que la maintenance de la base de données.
                         </p>
                     </div>
 
@@ -144,7 +143,7 @@ export default function AdminDashboard({ stats }: { stats?: AdminDashboardStats 
                             </span>
                         </div>
                         <p className="text-xs text-gray-600 leading-relaxed flex-1">
-                            Configurez les affectations aux projets/sites, habilitez le PAM à l'intérim de Direction (P.O.) et affectez les caissiers aux guichets de trésorerie.
+                            Configurez les affectations aux projets/sites et habilitez le PAM à l'intérim de Direction (P.O.).
                         </p>
                         <div className="flex flex-wrap gap-2 pt-2">
                             <Link
@@ -153,13 +152,6 @@ export default function AdminDashboard({ stats }: { stats?: AdminDashboardStats 
                             >
                                 <span>Répertoire Utilisateurs</span>
                                 <ArrowRight className="w-3.5 h-3.5" />
-                            </Link>
-                            <Link
-                                href={route('admin.cash-registers.index')}
-                                className="inline-flex items-center gap-2 px-3 py-1.5 bg-white border border-[#B2BED6] text-[#0B192C] rounded text-xs font-bold hover:bg-gray-50 transition"
-                            >
-                                <Building2 className="w-3.5 h-3.5 text-[#04326D]" />
-                                <span>Caisses & Guichets</span>
                             </Link>
                         </div>
                     </div>

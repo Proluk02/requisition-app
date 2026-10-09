@@ -5,6 +5,7 @@ import { useTranslation } from '@/lib/i18n';
 import {
     LayoutDashboard,
     FileCheck2,
+    FileSpreadsheet,
     FolderKanban,
     Building2,
     AlertOctagon,
@@ -433,6 +434,18 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 </Link>
 
                                 <Link
+                                    href={route('finance.budgets.import-form')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('finance.budgets.import-form')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                                    <span>Importer lignes budgétaires</span>
+                                </Link>
+
+                                <Link
                                     href={route('finance.caisses.index')}
                                     className={`flex items-center gap-3 px-3 py-2 rounded transition ${
                                         isRouteActive('finance.caisses.index')
@@ -459,7 +472,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                         )}
 
                         {/* Guichet Caisse & Banque */}
-                        {(isCashier || isAdmin) && (
+                        {isCashier && (
                             <div className="space-y-1">
                                 <span className="px-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
                                     Guichet Caisse
@@ -558,17 +571,6 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                     <span>Sites Opérationnels</span>
                                 </Link>
 
-                                <Link
-                                    href={route('admin.cash-registers.index')}
-                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('admin.cash-registers.*')
-                                            ? 'bg-white/10 text-white font-bold'
-                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
-                                    }`}
-                                >
-                                    <Building2 className="w-4 h-4 text-amber-300" />
-                                    <span>Caisses & Guichets</span>
-                                </Link>
                             </div>
                         )}
                     </nav>

@@ -80,6 +80,7 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::get('/requisitions', [DashboardController::class, 'finance'])->name('dashboard');
 
         Route::get('/budgets', [BudgetController::class, 'index'])->name('budgets.index');
+        Route::get('/budgets/import', [BudgetController::class, 'importForm'])->name('budgets.import-form');
         Route::post('/budgets/import', [BudgetController::class, 'import'])->name('budgets.import');
         Route::post('/budgets/lines', [BudgetController::class, 'storeBudgetLine'])->name('budgets.lines.store');
         Route::post('/donors', [BudgetController::class, 'storeDonor'])->name('donors.store');
@@ -113,8 +114,6 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::patch('/profile/pin', [ProfileController::class, 'updatePin'])->name('profile.pin.update');
-    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
-
     Route::get('/requisitions', [RequisitionController::class, 'index'])->name('requisitions.index');
     Route::get('/requisitions/create', function () {
         $caisses = CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name', 'devise']);

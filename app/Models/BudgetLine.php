@@ -74,7 +74,15 @@ class BudgetLine extends Model
      */
     public static function buildCode(?string $cat, ?string $subcat, ?string $desc, ?string $split): string
     {
-        $parts = array_filter([$cat, $subcat, $desc, $split], fn ($p) => filled($p));
+        $parts = array_map(
+            fn ($part) => trim((string) $part),
+            array_filter([$cat, $subcat, $desc, $split], fn ($p) => filled($p))
+        );
         return implode('.', $parts);
+    }
+
+    public static function normalizeCode(?string $code): string
+    {
+        return strtolower(trim((string) $code));
     }
 }

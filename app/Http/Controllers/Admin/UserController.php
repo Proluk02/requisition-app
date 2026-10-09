@@ -63,8 +63,11 @@ class UserController extends Controller
 
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
+            'first_name' => ['required', 'string', 'max:255'],
+            'last_name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'string', 'min:8'],
+            'pin' => ['required', 'string', 'digits_between:4,6'],
             'role' => ['required', 'string', 'exists:roles,name'],
             'status' => ['required', 'in:active,inactive'],
             'project_id' => ['nullable', 'exists:projects,id'],
@@ -79,8 +82,12 @@ class UserController extends Controller
         DB::transaction(function () use ($data, $isInterim) {
             $user = User::create([
                 'name' => $data['name'],
+                'first_name' => $data['first_name'],
+                'last_name' => $data['last_name'],
                 'email' => $data['email'],
                 'password' => Hash::make($data['password']),
+                'signature_pin' => Hash::make($data['pin']),
+                'pin_set_at' => now(),
                 'role' => $data['role'],
                 'project_id' => $data['project_id'] ?? null,
                 'site_id' => $data['site_id'] ?? null,

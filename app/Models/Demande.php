@@ -23,6 +23,7 @@ class Demande extends Model
         'activite',
         'code_all_budget',
         'code_allocation',
+        'libelle_allocation',
         'nature',
         'quantite',
         'duree',

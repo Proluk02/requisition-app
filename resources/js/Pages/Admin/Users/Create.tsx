@@ -45,8 +45,11 @@ export default function UsersCreate({
 
     const form = useForm<{
         name: string;
+        first_name: string;
+        last_name: string;
         email: string;
         password: string;
+        pin: string;
         role: string;
         status: 'active' | 'inactive';
         project_id: string;
@@ -55,8 +58,11 @@ export default function UsersCreate({
         cash_register_ids: string[];
     }>({
         name: '',
+        first_name: '',
+        last_name: '',
         email: '',
         password: '',
+        pin: '1234',
         role: initialRole,
         status: 'active',
         project_id: '',
@@ -105,12 +111,39 @@ export default function UsersCreate({
                 </header>
 
                 <form onSubmit={handleSubmit} className="bg-white border border-[#B2BED6] rounded p-6 shadow-sm space-y-5 text-xs">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
-                            <label className="block font-bold text-gray-700 mb-1">Nom Complet *</label>
+                            <label className="block font-bold text-gray-700 mb-1">Prénom *</label>
                             <input
                                 type="text"
-                                placeholder="ex: Jean-Paul Ilunga"
+                                autoComplete="given-name"
+                                value={form.data.first_name}
+                                onChange={(e) => form.setData('first_name', e.target.value)}
+                                className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
+                                required
+                            />
+                            {form.errors.first_name && <p className="text-[10px] text-red-600 mt-1">{form.errors.first_name}</p>}
+                        </div>
+
+                        <div>
+                            <label className="block font-bold text-gray-700 mb-1">Nom *</label>
+                            <input
+                                type="text"
+                                autoComplete="family-name"
+                                value={form.data.last_name}
+                                onChange={(e) => form.setData('last_name', e.target.value)}
+                                className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
+                                required
+                            />
+                            {form.errors.last_name && <p className="text-[10px] text-red-600 mt-1">{form.errors.last_name}</p>}
+                        </div>
+
+                        <div>
+                            <label className="block font-bold text-gray-700 mb-1">Nom affiché *</label>
+                            <input
+                                type="text"
+                                placeholder="Nom visible dans l’application"
+                                autoComplete="name"
                                 value={form.data.name}
                                 onChange={(e) => form.setData('name', e.target.value)}
                                 className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
@@ -133,7 +166,7 @@ export default function UsersCreate({
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
                             <label className="block font-bold text-gray-700 mb-1">Mot de Passe Initial *</label>
                             <div className="relative">
@@ -148,6 +181,25 @@ export default function UsersCreate({
                                 />
                             </div>
                             {form.errors.password && <p className="text-[10px] text-red-600 mt-1">{form.errors.password}</p>}
+                        </div>
+
+                        <div>
+                            <label className="block font-bold text-gray-700 mb-1">PIN par défaut *</label>
+                            <div className="relative">
+                                <Lock className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                <input
+                                    type="password"
+                                    inputMode="numeric"
+                                    autoComplete="new-password"
+                                    maxLength={6}
+                                    value={form.data.pin}
+                                    onChange={(e) => form.setData('pin', e.target.value.replace(/\D/g, ''))}
+                                    className="w-full pl-8 pr-3 py-2 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D]"
+                                    required
+                                />
+                            </div>
+                            <p className="text-[10px] text-gray-500 mt-1">PIN initial : 1234 (modifiable, 4 à 6 chiffres).</p>
+                            {form.errors.pin && <p className="text-[10px] text-red-600 mt-1">{form.errors.pin}</p>}
                         </div>
 
                         <div>

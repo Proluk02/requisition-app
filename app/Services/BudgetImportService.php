@@ -20,12 +20,30 @@ class BudgetImportService
         $extension = strtolower($file->getClientOriginalExtension());
 
         $rows = [];
-        if (in_array($extension, ['xlsx', 'xls'], true) && class_exists(IOFactory::class)) {
+        if (in_array($extension, ['xlsx', 'xls'], true)) {
+            if (! class_exists(IOFactory::class)) {
+                return [
+                    'success' => false,
+                    'message' => 'La lecture Excel n’est pas disponible sur le serveur.',
+                    'imported' => 0,
+                    'updated' => 0,
+                    'errors' => ['PhpSpreadsheet est requis pour lire les fichiers Excel.'],
+                ];
+            }
+
             $spreadsheet = IOFactory::load($file->getRealPath());
             $worksheet = $spreadsheet->getActiveSheet();
             $rows = $worksheet->toArray(null, true, true, false);
-        } else {
+        } elseif ($extension === 'csv' || $extension === 'txt') {
             $rows = $this->parseCsv($file->getRealPath());
+        } else {
+            return [
+                'success' => false,
+                'message' => 'Le format du fichier n’est pas pris en charge.',
+                'imported' => 0,
+                'updated' => 0,
+                'errors' => ['Formats acceptés : .xlsx, .xls, .csv et .txt.'],
+            ];
         }
 
         if (empty($rows) || count($rows) < 2) {
@@ -40,6 +58,41 @@ class BudgetImportService
 
         $headers = array_map(fn ($h) => strtolower(trim((string) $h)), array_shift($rows));
         $headerMap = $this->mapHeaders($headers);
+        $requiredHeaders = [
+            'category_code',
+            'subcategory_code',
+            'descript_code',
+            'split_code',
+            'code',
+            'libelle',
+            'devise',
+            'budget_initial',
+            'donor',
+        ];
+        $missingHeaders = array_values(array_diff($requiredHeaders, array_keys($headerMap)));
+
+        if ($missingHeaders !== []) {
+            $headerNames = [
+                'category_code' => 'CATEGORY',
+                'subcategory_code' => 'SUBCATEGORY',
+                'descript_code' => 'DESCRIPT',
+                'split_code' => 'SPLIT',
+                'code' => 'CODE',
+                'libelle' => 'LIBELLE',
+                'devise' => 'DEVISE',
+                'budget_initial' => 'BUDGET_INITIAL',
+                'donor' => 'DONATEUR',
+            ];
+            $missingNames = array_map(fn ($header) => $headerNames[$header], $missingHeaders);
+
+            return [
+                'success' => false,
+                'message' => 'Les colonnes obligatoires sont absentes : ' . implode(', ', $missingNames) . '.',
+                'imported' => 0,
+                'updated' => 0,
+                'errors' => $missingNames,
+            ];
+        }
 
         $importedCount = 0;
         $updatedCount = 0;
@@ -181,7 +234,7 @@ class BudgetImportService
         $map = [];
 
         foreach ($headers as $index => $header) {
-            $clean = preg_replace('/[^a-z0-9]/', '', strtolower($header));
+            $clean = preg_replace('/[^a-z0-9]/', '', strtolower(ltrim($header, "\xEF\xBB\xBF")));
 
             if (in_array($clean, ['code', 'codebudget', 'codebudgetaire', 'codeligne'], true)) {
                 $map['code'] = $index;

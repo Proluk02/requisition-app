@@ -1,7 +1,6 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { PageProps } from '@/types';
 import { Head } from '@inertiajs/react';
-import DeleteUserForm from './Partials/DeleteUserForm';
 import UpdatePasswordForm from './Partials/UpdatePasswordForm';
 import UpdateProfileInformationForm from './Partials/UpdateProfileInformationForm';
 import UpdateSignaturePinForm from './Partials/UpdateSignaturePinForm';
@@ -67,11 +66,6 @@ export default function Edit({
                     {/* Section 3 : Mot de passe du compte */}
                     <div className="bg-white p-6 sm:p-8 rounded-lg border border-gray-200 shadow-sm">
                         <UpdatePasswordForm />
-                    </div>
-
-                    {/* Section 4 : Suppression du compte */}
-                    <div className="bg-white p-6 sm:p-8 rounded-lg border border-red-200 shadow-sm">
-                        <DeleteUserForm />
                     </div>
                 </div>
             </div>

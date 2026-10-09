@@ -576,7 +576,7 @@ export default function BudgetIndex({
 
                             <div className="p-3 bg-blue-50 border border-blue-200 rounded text-[11px] text-gray-700 leading-relaxed space-y-1">
                                 <strong className="text-[#04326D] block">Format attendu :</strong>
-                                <span>Colonnes : Category, Subcategory, Descript, Split (reconstituant <strong>1.1.3.a</strong>), Libellé, Devise, Budget Initial, Donateur.</span>
+                                <span>Colonnes obligatoires : CATEGORY, SUBCATEGORY, DESCRIPT, SPLIT, CODE, LIBELLE, DEVISE, BUDGET_INITIAL, DONATEUR.</span>
                             </div>
 
                             <div className="flex justify-end gap-2 pt-2 border-t">

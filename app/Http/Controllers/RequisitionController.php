@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\CashRegister;
+use App\Models\BudgetLine;
 use App\Models\Demande;
 use App\Models\DemandeJustificatif;
 use App\Models\Project;
@@ -484,6 +485,12 @@ class RequisitionController extends Controller
                         $demande->update([
                             'code_allocation' => trim($allocation['code_allocation']),
                             'code_all_budget' => trim($allocation['code_allocation']),
+                            'libelle_allocation' => BudgetLine::query()
+                                ->where('project_id', $lockedRequisition->project_id)
+                                ->whereRaw('LOWER(TRIM(code)) = ?', [
+                                    BudgetLine::normalizeCode($allocation['code_allocation']),
+                                ])
+                                ->value('libelle') ?? 'code non specifie',
                         ]);
                     }
                 }
