@@ -11,31 +11,42 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class BudgetImportService
 {
-    /**
-     * Importe ou met à jour les lignes budgétaires à partir d'un fichier Excel ou CSV.
-     */
     public function import(UploadedFile $file, string $projectId): array
     {
         $project = Project::findOrFail($projectId);
         $extension = strtolower($file->getClientOriginalExtension());
+        $path = $file->getRealPath();
 
         $rows = [];
+
         if (in_array($extension, ['xlsx', 'xls'], true)) {
-            if (! class_exists(IOFactory::class)) {
+            if (class_exists(IOFactory::class)) {
+                $spreadsheet = IOFactory::load($path);
+                $worksheet = $spreadsheet->getActiveSheet();
+                $rows = $worksheet->toArray(null, true, true, false);
+            } 
+            elseif ($extension === 'xlsx') {
+                $rows = $this->parseXlsxNative($path);
+                if (empty($rows)) {
+                    return [
+                        'success' => false,
+                        'message' => 'Impossible de lire le fichier .xlsx. convertissez le fichier en .csv.',
+                        'imported' => 0,
+                        'updated' => 0,
+                        'errors' => ['Lecture du fichier .xlsx impossible.'],
+                    ];
+                }
+            } else {
                 return [
                     'success' => false,
-                    'message' => 'La lecture Excel n’est pas disponible sur le serveur.',
+                    'message' => 'Pour le format ancien .xls, veuillez enregistrer votre fichier au format .xlsx ou .csv avant de l’importer.',
                     'imported' => 0,
                     'updated' => 0,
-                    'errors' => ['PhpSpreadsheet est requis pour lire les fichiers Excel.'],
+                    'errors' => ['Format .xls binaire non pris en charge'],
                 ];
             }
-
-            $spreadsheet = IOFactory::load($file->getRealPath());
-            $worksheet = $spreadsheet->getActiveSheet();
-            $rows = $worksheet->toArray(null, true, true, false);
         } elseif ($extension === 'csv' || $extension === 'txt') {
-            $rows = $this->parseCsv($file->getRealPath());
+            $rows = $this->parseCsv($path);
         } else {
             return [
                 'success' => false,
@@ -87,7 +98,7 @@ class BudgetImportService
 
             return [
                 'success' => false,
-                'message' => 'Les colonnes obligatoires sont absentes : ' . implode(', ', $missingNames) . '.',
+                'message' => 'Les colonnes obligatoires suivantes sont absentes : ' . implode(', ', $missingNames) . '.',
                 'imported' => 0,
                 'updated' => 0,
                 'errors' => $missingNames,
@@ -154,7 +165,7 @@ class BudgetImportService
                         'libelle' => $libelle,
                         'devise' => $devise,
                         'budget_initial' => $budgetInitial,
-                        'solde' => round($budgetInitial - $existingLine->montant_engage - $existingLine->montant_decaisse, 2),
+                        'solde' => round($budgetInitial - (float) $existingLine->montant_engage, 2),
                     ]);
                     $updatedCount++;
                 } else {
@@ -199,9 +210,107 @@ class BudgetImportService
         }
     }
 
-    /**
-     * Lit un fichier CSV avec détection automatique du délimiteur.
-     */
+    protected function parseXlsxNative(string $path): array
+    {
+        if (! class_exists(\ZipArchive::class)) {
+            return [];
+        }
+
+        $zip = new \ZipArchive();
+        if ($zip->open($path) !== true) {
+            return [];
+        }
+
+        $sharedStrings = [];
+        $sharedStringsXml = $zip->getFromName('xl/sharedStrings.xml');
+        if ($sharedStringsXml !== false) {
+            $xml = simplexml_load_string($sharedStringsXml);
+            if ($xml) {
+                foreach ($xml->si as $si) {
+                    if (isset($si->t)) {
+                        $sharedStrings[] = (string) $si->t;
+                    } elseif (isset($si->r)) {
+                        $text = '';
+                        foreach ($si->r as $r) {
+                            $text .= (string) $r->t;
+                        }
+                        $sharedStrings[] = $text;
+                    } else {
+                        $sharedStrings[] = '';
+                    }
+                }
+            }
+        }
+
+        $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
+        if ($sheetXml === false) {
+            for ($i = 0; $i < $zip->numFiles; $i++) {
+                $name = $zip->getNameIndex($i);
+                if (str_starts_with($name, 'xl/worksheets/sheet') && str_ends_with($name, '.xml')) {
+                    $sheetXml = $zip->getFromName($name);
+                    break;
+                }
+            }
+        }
+
+        $zip->close();
+
+        if (! $sheetXml) {
+            return [];
+        }
+
+        $xml = simplexml_load_string($sheetXml);
+        if (! $xml || ! isset($xml->sheetData->row)) {
+            return [];
+        }
+
+        $rows = [];
+        foreach ($xml->sheetData->row as $row) {
+            $rowData = [];
+            $lastColIndex = -1;
+
+            foreach ($row->c as $c) {
+                $ref = (string) $c['r'];
+                preg_match('/^([A-Z]+)/', $ref, $matches);
+                $colLetter = $matches[1] ?? 'A';
+                $colIndex = $this->columnLetterToIndex($colLetter);
+
+                while ($lastColIndex + 1 < $colIndex) {
+                    $rowData[] = null;
+                    $lastColIndex++;
+                }
+
+                $type = (string) $c['t'];
+                $val = isset($c->v) ? (string) $c->v : '';
+
+                if ($type === 's' && isset($sharedStrings[(int) $val])) {
+                    $cellValue = $sharedStrings[(int) $val];
+                } elseif ($type === 'inlineStr' && isset($c->is->t)) {
+                    $cellValue = (string) $c->is->t;
+                } else {
+                    $cellValue = $val;
+                }
+
+                $rowData[] = $cellValue;
+                $lastColIndex = $colIndex;
+            }
+
+            $rows[] = $rowData;
+        }
+
+        return $rows;
+    }
+
+    protected function columnLetterToIndex(string $col): int
+    {
+        $index = 0;
+        $length = strlen($col);
+        for ($i = 0; $i < $length; $i++) {
+            $index = $index * 26 + (ord($col[$i]) - 64);
+        }
+        return $index - 1;
+    }
+
     protected function parseCsv(string $path): array
     {
         $rows = [];
@@ -226,9 +335,6 @@ class BudgetImportService
         return $rows;
     }
 
-    /**
-     * Associe les colonnes du tableau aux attributs RMS.
-     */
     protected function mapHeaders(array $headers): array
     {
         $map = [];
@@ -276,7 +382,7 @@ class BudgetImportService
             return 0.0;
         }
 
-        $clean = str_replace([' ', "\xc2\xa0", '$', 'FC', 'CDF'], '', $val);
+        $clean = str_replace([' ', "\xc2\xa0", '$', 'FC', 'CDF', 'EUR', '€'], '', $val);
         $clean = str_replace(',', '.', $clean);
 
         return (float) $clean;

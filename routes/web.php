@@ -66,6 +66,7 @@ Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admi
     Route::get('/backup/download', [BackupController::class, 'download'])->name('backup.download');
 });
 
+
 Route::middleware(['auth', 'active'])->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
@@ -82,8 +83,14 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::get('/budgets', [BudgetController::class, 'index'])->name('budgets.index');
         Route::get('/budgets/import', [BudgetController::class, 'importForm'])->name('budgets.import-form');
         Route::post('/budgets/import', [BudgetController::class, 'import'])->name('budgets.import');
+
         Route::post('/budgets/lines', [BudgetController::class, 'storeBudgetLine'])->name('budgets.lines.store');
+        Route::put('/budgets/lines/{budgetLine}', [BudgetController::class, 'updateBudgetLine'])->name('budgets.lines.update');
+        Route::delete('/budgets/lines/{budgetLine}', [BudgetController::class, 'destroyBudgetLine'])->name('budgets.lines.destroy');
+
         Route::post('/donors', [BudgetController::class, 'storeDonor'])->name('donors.store');
+        Route::put('/donors/{donor}', [BudgetController::class, 'updateDonor'])->name('donors.update');
+        Route::delete('/donors/{donor}', [BudgetController::class, 'destroyDonor'])->name('donors.destroy');
 
         Route::get('/caisses', [CaisseManagementController::class, 'index'])->name('caisses.index');
         Route::post('/caisses', [CaisseManagementController::class, 'store'])->name('caisses.store');
@@ -114,6 +121,7 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::patch('/profile/pin', [ProfileController::class, 'updatePin'])->name('profile.pin.update');
+
     Route::get('/requisitions', [RequisitionController::class, 'index'])->name('requisitions.index');
     Route::get('/requisitions/create', function () {
         $caisses = CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name', 'devise']);

@@ -566,6 +566,15 @@ class RequisitionController extends Controller
             'decision' => ['required', 'in:approve,reject'],
             'pin' => ['nullable', 'string'],
             'password' => ['nullable', 'string'],
+            'caisse_decaissement' => [
+                'nullable',
+                'string',
+                'max:255',
+                Rule::exists('cash_registers', 'name')->where('is_active', true),
+            ],
+            'allocations' => ['nullable', 'array'],
+            'allocations.*.demande_id' => ['required_with:allocations', 'string'],
+            'allocations.*.code_allocation' => ['required_with:allocations', 'string', 'max:255'],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
         ]);
 
@@ -585,14 +594,41 @@ class RequisitionController extends Controller
             abort_unless($lockedRequisition->status === 'visa_mp', 403, 'Cette réquisition n’est plus en attente de visa financier.');
 
             if ($validated['decision'] === 'approve') {
-                $lockedRequisition->update(['status' => 'controle_finance']);
+                // 1. Mise à jour de la caisse si modifiée par le Manager Finance
+                if (! empty($validated['caisse_decaissement'])) {
+                    $lockedRequisition->caisse_decaissement = $validated['caisse_decaissement'];
+                }
+
+                // 2. Mise à jour ou correction des lignes budgétaires par le Manager Finance
+                if (! empty($validated['allocations'])) {
+                    $demandes = $lockedRequisition->demandes()->lockForUpdate()->get()->keyBy('id');
+                    foreach ($validated['allocations'] as $allocation) {
+                        $demande = $demandes->get($allocation['demande_id']);
+                        if ($demande) {
+                            $code = trim($allocation['code_allocation']);
+                            $libelle = BudgetLine::query()
+                                ->where('project_id', $lockedRequisition->project_id)
+                                ->whereRaw('LOWER(TRIM(code)) = ?', [BudgetLine::normalizeCode($code)])
+                                ->value('libelle') ?? 'code non specifie';
+
+                            $demande->update([
+                                'code_allocation' => $code,
+                                'code_all_budget' => $code,
+                                'libelle_allocation' => $libelle,
+                            ]);
+                        }
+                    }
+                }
+
+                $lockedRequisition->status = 'controle_finance';
+                $lockedRequisition->save();
 
                 $this->enregistrerSignature(
                     $lockedRequisition,
                     $user,
                     'finance',
                     'approved',
-                    'Visa de contrôle financier et budgétaire accordé.'
+                    "Visa de contrôle financier et budgétaire accordé. Caisse : {$lockedRequisition->caisse_decaissement}"
                 );
 
                 $this->notifierUtilisateur(
@@ -643,7 +679,7 @@ class RequisitionController extends Controller
         return Redirect::back()->with(
             $validated['decision'] === 'approve' ? 'success' : 'error',
             $validated['decision'] === 'approve'
-                ? 'Visa financier apposé avec succès.'
+                ? 'Visa financier certifié et corrections budgétaires enregistrées.'
                 : 'Dossier renvoyé pour correction budgétaire.'
         );
     }

@@ -13,11 +13,6 @@ class RoleAndDataSeeder extends Seeder
 {
     public function run(): void
     {
-        /*
-        |--------------------------------------------------------------------------
-        | 1. Création des rôles
-        |--------------------------------------------------------------------------
-        */
 
         $roles = [
             'admin',
@@ -38,11 +33,6 @@ class RoleAndDataSeeder extends Seeder
             ]);
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | 2. Création des projets
-        |--------------------------------------------------------------------------
-        */
 
         $projects = [
             [
@@ -59,15 +49,15 @@ class RoleAndDataSeeder extends Seeder
             ],
             [
                 'name' => 'HABIMA',
-                'full_name' => 'Habita et Maraichage',
+                'full_name' => '',
             ],
             [
                 'name' => 'MAHUWA',
-                'full_name' => 'Maison des femmes',
+                'full_name' => '',
             ],
             [
                 'name' => 'USUMADA',
-                'full_name' => 'Usimamizi wa Maendeleo',
+                'full_name' => '',
             ],
         ];
 
@@ -77,12 +67,6 @@ class RoleAndDataSeeder extends Seeder
                 $project
             );
         }
-
-        /*
-        |--------------------------------------------------------------------------
-        | 3. Création des sites
-        |--------------------------------------------------------------------------
-        */
 
         $sites = [
             'Kanina',
@@ -99,12 +83,6 @@ class RoleAndDataSeeder extends Seeder
             ]);
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | 4. Liaison du projet CHAKUISHI avec ses sites
-        |--------------------------------------------------------------------------
-        */
-
         $chakuishi = Project::where('name', 'CHAKUISHI')->first();
 
         $kanina = Site::where('name', 'Kanina')->first();
@@ -117,21 +95,17 @@ class RoleAndDataSeeder extends Seeder
             ]);
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | 5. Création du compte Administrateur
-        |--------------------------------------------------------------------------
-        */
+  
 
         $admin = User::updateOrCreate(
             [
-                'email' => 'admin@jibulab.com',
+                'email' => 'prolukeka@gmail.com',
             ],
             [
                 'name' => 'Administrateur',
                 'first_name' => 'Prosper',
                 'last_name' => 'Lukeka',
-                'password' => Hash::make('admin020304'),
+                'password' => Hash::make('password123'),
                 'role' => 'admin',
                 'status' => 'active',
                 'email_verified_at' => now(),
@@ -140,21 +114,16 @@ class RoleAndDataSeeder extends Seeder
 
         $admin->syncRoles(['admin']);
 
-        /*
-        |--------------------------------------------------------------------------
-        | 6. Création du compte Staff / Beneficiary
-        |--------------------------------------------------------------------------
-        */
 
         $staff = User::updateOrCreate(
             [
-                'email' => 'eunice@jibulab.com',
+                'email' => 'prolukdev@gmail.com',
             ],
             [
                 'name' => 'Miss Eunice',
                 'first_name' => 'Eunice',
                 'last_name' => 'Kenyan',
-                'password' => Hash::make('eunice020304'),
+                'password' => Hash::make('password123'),
                 'role' => 'beneficiary',
                 'status' => 'active',
                 'email_verified_at' => now(),

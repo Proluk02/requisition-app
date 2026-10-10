@@ -48,15 +48,19 @@ class DashboardController extends Controller
 
             $budgetLines = BudgetLine::query()
                 ->where('project_id', $user->project_id)
-                ->get(['code', 'libelle'])
+                ->get(['id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
                 ->keyBy(fn (BudgetLine $line) => BudgetLine::normalizeCode($line->code));
 
             return Inertia::render('ProjectManager/Dashboard', [
                 'requisitions' => $this->buildProjectManagerRequisitionList($requisitionsQuery->get(), $user->id, $budgetLines),
                 'budgetLines' => $budgetLines->values()->map(fn (BudgetLine $line) => [
+                    'id' => $line->id,
                     'code' => $line->code,
                     'libelle' => $line->libelle,
                     'normalizedCode' => BudgetLine::normalizeCode($line->code),
+                    'solde' => (float) $line->solde,
+                    'devise' => $line->devise,
+                    'budget_initial' => (float) $line->budget_initial,
                 ])->all(),
                 'cashRegisters' => CashRegister::query()
                     ->where('is_active', true)
@@ -279,7 +283,7 @@ class DashboardController extends Controller
     }
 
     /**
-     * Dashboard Manager Finance enrichi : centre financier avec suivi budgétaire en direct et autorisations caisse.
+     * Dashboard Manager Finance enrichi : contrôle budgétaire absolu et gestion des attributions.
      */
     private function renderFinanceDashboard(User $user)
     {
@@ -288,6 +292,22 @@ class DashboardController extends Controller
             ->get();
 
         $budgetLines = BudgetLine::all()->keyBy(fn ($b) => $b->project_id . '_' . $b->code);
+
+        // Transmission intégrale de toutes les lignes budgétaires avec soldes réels pour le Front-End
+        $allBudgetLines = BudgetLine::query()
+            ->orderBy('code')
+            ->get(['id', 'project_id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
+            ->map(fn (BudgetLine $b) => [
+                'id' => $b->id,
+                'project_id' => $b->project_id,
+                'code' => $b->code,
+                'libelle' => $b->libelle,
+                'normalizedCode' => BudgetLine::normalizeCode($b->code),
+                'solde' => (float) $b->solde,
+                'devise' => $b->devise,
+                'budget_initial' => (float) $b->budget_initial,
+            ])
+            ->all();
 
         $pendingSessions = CashRegisterSession::with(['cashRegister', 'cashier'])
             ->where('status', 'en_attente_autorisation')
@@ -314,6 +334,7 @@ class DashboardController extends Controller
             'cashiers_names' => $c->cashiers->pluck('name')->join(', '),
         ]);
 
+        $cashRegisters = CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name', 'devise']);
         $projects = Project::orderBy('name')->get(['id', 'name', 'full_name']);
         $users = User::orderBy('name')->get(['id', 'name', 'email']);
 
@@ -323,6 +344,8 @@ class DashboardController extends Controller
             'projects' => $projects,
             'usersList' => $users,
             'caisses' => $caisses,
+            'cashRegisters' => $cashRegisters,
+            'allBudgetLines' => $allBudgetLines,
             'pendingSessions' => $pendingSessions,
             'requisitions' => $requisitions->map(function (Requisition $r) use ($budgetLines, $user) {
                 return [
@@ -365,6 +388,7 @@ class DashboardController extends Controller
                             'activite' => $d->activite,
                             'codeBudget' => $d->code_all_budget,
                             'codeAllocation' => $d->code_allocation,
+                            'libelleAllocation' => $d->libelle_allocation ?: $lineModel?->libelle,
                             'nature' => $d->nature ?? '',
                             'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
                             'unite' => $d->unite ?? '',
@@ -584,37 +608,43 @@ class DashboardController extends Controller
                 'financeReturned' => $isFinanceReturned,
                 'needsCorrection' => $isFinanceReturned || $isRejectedForInitiator || $r->status === 'returned_to_urgent_initiator',
                 'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
-                'lignes' => $r->demandes->map(fn ($d) => [
-                    'id' => (string) $d->id,
-                    'activite' => $d->activite,
-                    'codeAllBudget' => $d->code_all_budget,
-                    'code_allocation' => $d->code_allocation,
-                    'libelleAllocation' => $d->libelle_allocation
-                        ?: $budgetLines->get(BudgetLine::normalizeCode($d->code_allocation ?: $d->code_all_budget))?->libelle
-                        ?: 'code non specifie',
-                    'nature' => $d->nature ?? '',
-                    'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
-                    'unite' => $d->unite ?? '',
-                    'frais' => (float) $d->frais_unitaire,
-                    'prixUnitaire' => (float) $d->frais_unitaire,
-                    'devise' => $r->devise,
-                    'total' => (float) $d->total_ligne,
-                    'justif' => $d->justificatifs->map(function ($j) {
-                        $dateFormatted = '';
-                        if (! empty($j->date)) {
-                            $dateFormatted = is_string($j->date) ? $j->date : $j->date->format('Y-m-d');
-                        }
+                'lignes' => $r->demandes->map(function ($d) use ($budgetLines, $r) {
+                    $codeNorm = BudgetLine::normalizeCode($d->code_allocation ?: $d->code_all_budget);
+                    $lineObj = $budgetLines->get($codeNorm);
 
-                        return [
-                            'id' => (string) $j->id,
-                            'date' => $dateFormatted,
-                            'description' => $j->description ?? $j->original_name,
-                            'montant' => (float) $j->montant,
-                            'scan' => $j->original_name ?? basename($j->file_path ?? 'piece.pdf'),
-                            'fileUrl' => $j->file_path ? route('requisitions.justificatif.show', ['justificatif' => $j->id]) : null,
-                        ];
-                    })->values()->all(),
-                ])->values()->all(),
+                    return [
+                        'id' => (string) $d->id,
+                        'activite' => $d->activite,
+                        'codeAllBudget' => $d->code_all_budget,
+                        'code_allocation' => $d->code_allocation,
+                        'libelleAllocation' => $d->libelle_allocation
+                            ?: $lineObj?->libelle
+                            ?: 'code non specifie',
+                        'budget_solde_actuel' => $lineObj ? (float) $lineObj->solde : null,
+                        'nature' => $d->nature ?? '',
+                        'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
+                        'unite' => $d->unite ?? '',
+                        'frais' => (float) $d->frais_unitaire,
+                        'prixUnitaire' => (float) $d->frais_unitaire,
+                        'devise' => $r->devise,
+                        'total' => (float) $d->total_ligne,
+                        'justif' => $d->justificatifs->map(function ($j) {
+                            $dateFormatted = '';
+                            if (! empty($j->date)) {
+                                $dateFormatted = is_string($j->date) ? $j->date : $j->date->format('Y-m-d');
+                            }
+
+                            return [
+                                'id' => (string) $j->id,
+                                'date' => $dateFormatted,
+                                'description' => $j->description ?? $j->original_name,
+                                'montant' => (float) $j->montant,
+                                'scan' => $j->original_name ?? basename($j->file_path ?? 'piece.pdf'),
+                                'fileUrl' => $j->file_path ? route('requisitions.justificatif.show', ['justificatif' => $j->id]) : null,
+                            ];
+                        })->values()->all(),
+                    ];
+                })->values()->all(),
             ];
         })->values()->all();
     }

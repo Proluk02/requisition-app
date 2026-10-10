@@ -48,6 +48,10 @@ class BudgetController extends Controller
             return [
                 'id' => $line->id,
                 'code' => $line->code,
+                'category_code' => $line->category_code,
+                'subcategory_code' => $line->subcategory_code,
+                'descript_code' => $line->descript_code,
+                'split_code' => $line->split_code,
                 'libelle' => $line->libelle,
                 'devise' => $line->devise,
                 'project_id' => $line->project_id,
@@ -75,6 +79,7 @@ class BudgetController extends Controller
                 'id' => $donor->id,
                 'name' => $donor->name,
                 'code' => $donor->code,
+                'description' => $donor->description,
                 'lines_count' => $lines->count(),
                 'total_budget_usd' => $initialUSD,
                 'montant_engage_usd' => $engageUSD,
@@ -85,7 +90,7 @@ class BudgetController extends Controller
         });
 
         $projects = Project::orderBy('name')->get(['id', 'name', 'full_name']);
-        $donors = Donor::orderBy('name')->get(['id', 'name', 'code']);
+        $donors = Donor::orderBy('name')->get(['id', 'name', 'code', 'description']);
 
         return Inertia::render('Finance/Budgets/Index', [
             'selectedProject' => $selectedProject,
@@ -138,27 +143,12 @@ class BudgetController extends Controller
         return Redirect::back()->with('success', $result['message']);
     }
 
-    /**
-     * Enregistre un nouveau bailleur de fonds / Donateur.
-     */
-    public function storeDonor(Request $request): RedirectResponse
-    {
-        $user = $request->user();
-        abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
-
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255', 'unique:donors,name'],
-            'code' => ['required', 'string', 'max:50', 'unique:donors,code'],
-            'description' => ['nullable', 'string'],
-        ]);
-
-        Donor::create($validated);
-
-        return Redirect::back()->with('success', "Donateur {$validated['name']} enregistré avec succès.");
-    }
+    /* =========================================================================
+     *  CRUD LIGNES BUDGÉTAIRES (BUDGET LINES)
+     * ========================================================================= */
 
     /**
-     * Enregistre manuellement une ligne budgétaire unitaire.
+     * Création d'une ligne budgétaire unitaire.
      */
     public function storeBudgetLine(Request $request): RedirectResponse
     {
@@ -190,12 +180,13 @@ class BudgetController extends Controller
 
         $budgetInitial = (float) $validated['budget_initial'];
 
-        BudgetLine::updateOrCreate(
-            [
-                'project_id' => $validated['project_id'],
-                'code' => $code,
-            ],
-            [
+        $existing = BudgetLine::where('project_id', $validated['project_id'])
+            ->where('code', $code)
+            ->first();
+
+        if ($existing) {
+            $solde = max(0, $budgetInitial - (float) $existing->montant_engage);
+            $existing->update([
                 'donor_id' => $validated['donor_id'] ?? null,
                 'category_code' => $validated['category_code'] ?? null,
                 'subcategory_code' => $validated['subcategory_code'] ?? null,
@@ -204,10 +195,202 @@ class BudgetController extends Controller
                 'libelle' => $validated['libelle'],
                 'devise' => $validated['devise'],
                 'budget_initial' => $budgetInitial,
-                'solde' => $budgetInitial,
-            ]
-        );
+                'solde' => $solde,
+            ]);
 
-        return Redirect::back()->with('success', "Ligne budgétaire {$code} enregistrée.");
+            return Redirect::back()->with('success', "Ligne budgétaire {$code} mise à jour.");
+        }
+
+        BudgetLine::create([
+            'project_id' => $validated['project_id'],
+            'donor_id' => $validated['donor_id'] ?? null,
+            'code' => $code,
+            'category_code' => $validated['category_code'] ?? null,
+            'subcategory_code' => $validated['subcategory_code'] ?? null,
+            'descript_code' => $validated['descript_code'] ?? null,
+            'split_code' => $validated['split_code'] ?? null,
+            'libelle' => $validated['libelle'],
+            'devise' => $validated['devise'],
+            'budget_initial' => $budgetInitial,
+            'montant_engage' => 0,
+            'montant_decaisse' => 0,
+            'solde' => $budgetInitial,
+        ]);
+
+        return Redirect::back()->with('success', "Ligne budgétaire {$code} enregistrée avec succès.");
+    }
+
+    /**
+     * Modification d'une ligne budgétaire existante.
+     */
+    public function updateBudgetLine(Request $request, BudgetLine $budgetLine): RedirectResponse
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
+
+        $validated = $request->validate([
+            'project_id' => ['required', 'exists:projects,id'],
+            'donor_id' => ['nullable', 'exists:donors,id'],
+            'code' => ['nullable', 'string', 'max:100'],
+            'category_code' => ['nullable', 'string', 'max:50'],
+            'subcategory_code' => ['nullable', 'string', 'max:50'],
+            'descript_code' => ['nullable', 'string', 'max:50'],
+            'split_code' => ['nullable', 'string', 'max:50'],
+            'libelle' => ['required', 'string', 'max:255'],
+            'devise' => ['required', 'in:USD,FC,EUR'],
+            'budget_initial' => ['required', 'numeric', 'min:0'],
+        ]);
+
+        $code = trim((string) ($validated['code'] ?? ''));
+        if (empty($code)) {
+            $code = BudgetLine::buildCode(
+                $validated['category_code'] ?? null,
+                $validated['subcategory_code'] ?? null,
+                $validated['descript_code'] ?? null,
+                $validated['split_code'] ?? null
+            );
+        }
+
+        // Vérifier l'unicité du code dans le projet sélectionné (hormis la ligne elle-même)
+        $duplicate = BudgetLine::where('project_id', $validated['project_id'])
+            ->where('code', $code)
+            ->where('id', '!=', $budgetLine->id)
+            ->exists();
+
+        if ($duplicate) {
+            return Redirect::back()->with('error', "Une autre ligne avec le code {$code} existe déjà pour ce projet.");
+        }
+
+        $budgetInitial = (float) $validated['budget_initial'];
+        // Recalcul strict du solde restant selon les engagements existants
+        $solde = max(0, $budgetInitial - (float) $budgetLine->montant_engage);
+
+        $budgetLine->update([
+            'project_id' => $validated['project_id'],
+            'donor_id' => $validated['donor_id'] ?? null,
+            'code' => $code,
+            'category_code' => $validated['category_code'] ?? null,
+            'subcategory_code' => $validated['subcategory_code'] ?? null,
+            'descript_code' => $validated['descript_code'] ?? null,
+            'split_code' => $validated['split_code'] ?? null,
+            'libelle' => $validated['libelle'],
+            'devise' => $validated['devise'],
+            'budget_initial' => $budgetInitial,
+            'solde' => $solde,
+        ]);
+
+        return Redirect::back()->with('success', "Ligne budgétaire {$code} modifiée avec succès.");
+    }
+
+    /**
+     * Suppression d'une ligne budgétaire unitaire.
+     */
+    public function destroyBudgetLine(Request $request, BudgetLine $budgetLine): RedirectResponse
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
+
+        // Blocage de sécurité : si des fonds sont déjà engagés ou décaissés
+        if ((float) $budgetLine->montant_engage > 0 || (float) $budgetLine->montant_decaisse > 0) {
+            return Redirect::back()->with(
+                'error',
+                "Suppression impossible : des montants sont déjà engagés (" . number_format($budgetLine->montant_engage, 2) . " {$budgetLine->devise}) ou décaissés sur cette ligne."
+            );
+        }
+
+        if ($budgetLine->cashMovements()->exists()) {
+            return Redirect::back()->with(
+                'error',
+                "Suppression impossible : des mouvements de trésorerie sont directement liés à cette ligne budgétaire."
+            );
+        }
+
+        $code = $budgetLine->code;
+        $budgetLine->delete();
+
+        return Redirect::back()->with('success', "Ligne budgétaire {$code} supprimée.");
+    }
+
+    /* =========================================================================
+     *  CRUD BAILLEURS DE FONDS / DONATEURS (DONORS)
+     * ========================================================================= */
+
+    /**
+     * Enregistre un nouveau bailleur de fonds / Donateur.
+     */
+    public function storeDonor(Request $request): RedirectResponse
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255', 'unique:donors,name'],
+            'code' => ['required', 'string', 'max:50', 'unique:donors,code'],
+            'description' => ['nullable', 'string'],
+        ]);
+
+        Donor::create($validated);
+
+        return Redirect::back()->with('success', "Donateur {$validated['name']} enregistré avec succès.");
+    }
+
+    /**
+     * Met à jour les informations d'un bailleur de fonds existant.
+     */
+    public function updateDonor(Request $request, Donor $donor): RedirectResponse
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255', 'unique:donors,name,' . $donor->id],
+            'code' => ['required', 'string', 'max:50', 'unique:donors,code,' . $donor->id],
+            'description' => ['nullable', 'string'],
+        ]);
+
+        $donor->update($validated);
+
+        return Redirect::back()->with('success', "Donateur {$donor->name} mis à jour avec succès.");
+    }
+
+    /**
+     * Supprime un bailleur de fonds.
+     */
+    public function destroyDonor(Request $request, Donor $donor): RedirectResponse
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
+
+        $linesCount = $donor->budgetLines()->count();
+        if ($linesCount > 0) {
+            return Redirect::back()->with(
+                'error',
+                "Suppression impossible : ce bailleur finance actuellement {$linesCount} ligne(s) budgétaire(s). Réaffectez d'abord ces lignes."
+            );
+        }
+
+        $name = $donor->name;
+        $donor->delete();
+
+        return Redirect::back()->with('success', "Donateur {$name} supprimé avec succès.");
+    }
+
+    /* =========================================================================
+     *  ALIASES REST COMPATIBLES
+     * ========================================================================= */
+
+    public function store(Request $request): RedirectResponse
+    {
+        return $this->storeBudgetLine($request);
+    }
+
+    public function update(Request $request, BudgetLine $budgetLine): RedirectResponse
+    {
+        return $this->updateBudgetLine($request, $budgetLine);
+    }
+
+    public function destroy(Request $request, BudgetLine $budgetLine): RedirectResponse
+    {
+        return $this->destroyBudgetLine($request, $budgetLine);
     }
 }

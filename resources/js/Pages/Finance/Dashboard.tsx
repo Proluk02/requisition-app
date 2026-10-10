@@ -8,16 +8,10 @@ import {
     ShieldCheck,
     AlertCircle,
     CheckCircle2,
-    Clock,
-    FileText,
     X,
-    Paperclip,
-    Download,
     Ban,
     Lock,
     KeyRound,
-    Loader2,
-    FolderKanban,
     Building2,
     PieChart,
     AlertTriangle,
@@ -36,6 +30,7 @@ interface FinanceLine {
     activite: string;
     codeBudget: string;
     codeAllocation: string | null;
+    libelleAllocation?: string | null;
     nature: 'Achat' | 'Service';
     quantiteOuDuree: number;
     unite: string;
@@ -90,6 +85,23 @@ interface CaisseSummaryItem {
     cashiers_names: string;
 }
 
+interface CashRegisterOption {
+    id: string;
+    name: string;
+    devise: string;
+}
+
+interface BudgetLineClientItem {
+    id: string;
+    project_id: string;
+    code: string;
+    libelle: string;
+    normalizedCode: string;
+    solde: number;
+    devise: string;
+    budget_initial: number;
+}
+
 interface PendingSessionItem {
     id: string;
     caisse_name: string;
@@ -106,6 +118,8 @@ interface Props extends PageProps {
     projects?: ProjectItem[];
     usersList?: UserItem[];
     caisses?: CaisseSummaryItem[];
+    cashRegisters?: CashRegisterOption[];
+    allBudgetLines?: BudgetLineClientItem[];
     pendingSessions?: PendingSessionItem[];
 }
 
@@ -116,6 +130,8 @@ export default function FinanceDashboard({
     requisitions: initialRequisitions = [],
     projects = [],
     caisses = [],
+    cashRegisters = [],
+    allBudgetLines = [],
     pendingSessions = [],
 }: Props) {
     const { auth } = usePage<PageProps>().props;
@@ -132,6 +148,11 @@ export default function FinanceDashboard({
     const [correcting, setCorrecting] = useState<RequisitionCorrectionData | null>(null);
     const [rejecting, setRejecting] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
+
+    // Édition directe du MF pendant l'examen de la réquisition
+    const [financeCaisse, setFinanceCaisse] = useState<string>('');
+    const [financeAllocations, setFinanceAllocations] = useState<Record<string, string>>({});
+    const [activeInputId, setActiveInputId] = useState<string | null>(null);
 
     const [pinModalOpen, setPinModalOpen] = useState(false);
     const [pinSaisi, setPinSaisi] = useState('');
@@ -151,6 +172,14 @@ export default function FinanceDashboard({
     const showToast = (type: 'success' | 'error', message: string) => {
         setToast({ type, message });
         setTimeout(() => setToast(null), 5000);
+    };
+
+    const getBudgetLineObject = (code: string, projectId?: string) => {
+        if (!code.trim()) return null;
+        const normalized = code.trim().toLowerCase();
+        return allBudgetLines.find(
+            (l) => l.normalizedCode === normalized && (!projectId || l.project_id === projectId)
+        ) || null;
     };
 
     const filteredRequisitions = useMemo(() => {
@@ -177,6 +206,19 @@ export default function FinanceDashboard({
         });
     }, [requisitions, statusFilter, selectedProject, selectedCaisse, selectedNature]);
 
+    const handleOpenExamen = (item: FinanceRequisition) => {
+        setSelected(item);
+        setRejecting(false);
+        setRejectionReason('');
+        setFinanceCaisse(item.caisseAttribuee || 'Caisse principale');
+
+        const initialAllocations: Record<string, string> = {};
+        item.lignes.forEach((ligne) => {
+            initialAllocations[ligne.id] = ligne.codeAllocation || ligne.codeBudget || '';
+        });
+        setFinanceAllocations(initialAllocations);
+    };
+
     const handleTriggerApprove = () => {
         if (!selected) return;
         setPinSaisi('');
@@ -191,11 +233,18 @@ export default function FinanceDashboard({
         setProcessing(true);
         setPinError(null);
 
+        const allocationsArray = Object.entries(financeAllocations).map(([demande_id, code_allocation]) => ({
+            demande_id,
+            code_allocation: code_allocation.trim(),
+        }));
+
         router.patch(
             route('requisitions.finance-decision', selected.id),
             {
                 decision: 'approve',
                 pin: pinSaisi.trim(),
+                caisse_decaissement: financeCaisse,
+                allocations: allocationsArray,
             },
             {
                 preserveScroll: true,
@@ -211,24 +260,38 @@ export default function FinanceDashboard({
                             if (item.id === updatedId) {
                                 return {
                                     ...item,
+                                    caisseAttribuee: financeCaisse,
                                     statusCode: 'controle_finance',
                                     statusLabel: 'Validée par Finance',
                                     canDecide: false,
+                                    lignes: item.lignes.map((l) => {
+                                        const alloc = allocationsArray.find((a) => a.demande_id === l.id);
+                                        const matched = alloc ? getBudgetLineObject(alloc.code_allocation, item.project_id) : null;
+                                        return alloc
+                                            ? {
+                                                  ...l,
+                                                  codeAllocation: alloc.code_allocation,
+                                                  codeBudget: alloc.code_allocation,
+                                                  libelleAllocation: matched?.libelle || l.libelleAllocation,
+                                                  budget_solde_actuel: matched ? matched.solde : l.budget_solde_actuel,
+                                              }
+                                            : l;
+                                    }),
                                 };
                             }
                             return item;
-                        }),
+                        })
                     );
 
                     showToast(
                         'success',
-                        `Visa Financier certifié apposé sur ${selected.numero}. Transmis à l'Administration.`
+                        `Visa Financier certifié apposé sur ${selected.numero}. Transmis au Manager Administratif.`
                     );
                 },
                 onError: (errors) => {
                     setPinError((errors as any).pin || 'Code PIN financier incorrect ou non configuré.');
                 },
-            },
+            }
         );
     };
 
@@ -269,7 +332,7 @@ export default function FinanceDashboard({
                                 };
                             }
                             return item;
-                        }),
+                        })
                     );
 
                     showToast('error', `Réquisition ${selected.numero} renvoyée pour correction budgétaire.`);
@@ -277,7 +340,7 @@ export default function FinanceDashboard({
                 onError: (errors) => {
                     showToast('error', (errors as any).motif_rejet || 'Erreur lors du renvoi.');
                 },
-            },
+            }
         );
     };
 
@@ -327,7 +390,7 @@ export default function FinanceDashboard({
                             Contrôle Budgétaire, Caisses & Visas
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
-                            Financier : <strong className="text-[#0B192C]">{user.name}</strong> • Vérification des soubassements, autorisations de caisses et contrôle d'imputation en temps réel.
+                            Financier : <strong className="text-[#0B192C]">{user.name}</strong> • Vérification et ajustement des lignes budgétaires, contrôle de trésorerie et autorisations en direct.
                         </p>
                     </div>
 
@@ -595,38 +658,9 @@ export default function FinanceDashboard({
                                                 </span>
                                             </td>
                                             <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                                                {item.canCorrect && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setCorrecting({
-                                                            id: item.id,
-                                                            numero: item.numero,
-                                                            nature: item.nature,
-                                                            devise: item.devise,
-                                                            caisse: item.caisseAttribuee || 'Caisse principale',
-                                                            observation: item.observation,
-                                                            lignes: item.lignes.map((line) => ({
-                                                                id: line.id,
-                                                                activite: line.activite,
-                                                                codeBudget: line.codeBudget,
-                                                                nature: line.nature,
-                                                                quantiteOuDuree: line.quantiteOuDuree,
-                                                                unite: line.unite,
-                                                                prixUnitaire: line.prixUnitaire,
-                                                            })),
-                                                        })}
-                                                        className="mr-2 rounded border border-amber-600 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-50"
-                                                    >
-                                                        Corriger
-                                                    </button>
-                                                )}
                                                 <button
                                                     type="button"
-                                                    onClick={() => {
-                                                        setSelected(item);
-                                                        setRejecting(false);
-                                                        setRejectionReason('');
-                                                    }}
+                                                    onClick={() => handleOpenExamen(item)}
                                                     className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow-sm transition"
                                                 >
                                                     <ShieldCheck className="w-3.5 h-3.5" />
@@ -642,9 +676,10 @@ export default function FinanceDashboard({
                 </div>
             </div>
 
+            {/* MODALE D'EXAMEN ET D'ÉDITION POUR LE MANAGER FINANCIER */}
             {selected && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
-                    <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-5 animate-slide-down">
+                    <div className="w-full max-w-4xl max-h-[92vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-4 animate-slide-down">
                         <header className="flex items-start justify-between border-b pb-3">
                             <div>
                                 <span className="text-[10px] uppercase font-bold text-[#F58F20] tracking-wider">
@@ -654,17 +689,43 @@ export default function FinanceDashboard({
                                     Réquisition N° {selected.numero} ({selected.nature})
                                 </h2>
                                 <p className="text-xs text-gray-500 mt-0.5">
-                                    Demandeur : <strong>{selected.initiateurNom}</strong> • Projet : {selected.projet} • Caisse : {selected.caisseAttribuee}
+                                    Demandeur : <strong>{selected.initiateurNom}</strong> • Projet : {selected.projet}
                                 </p>
                             </div>
                             <button
                                 type="button"
-                                onClick={() => setSelected(null)}
+                                onClick={() => {
+                                    setSelected(null);
+                                    setActiveInputId(null);
+                                }}
                                 className="text-gray-400 hover:text-gray-600 text-lg font-bold"
                             >
                                 <X className="w-5 h-5" />
                             </button>
                         </header>
+
+                        {/* Choix et Modification de la Caisse par le MF */}
+                        {selected.canDecide && (
+                            <div className="p-3 bg-blue-50 border border-blue-200 rounded flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                                <div>
+                                    <strong className="text-[#04326D] block">Caisse d'imputation et de décaissement</strong>
+                                    <span className="text-gray-600 text-[11px]">
+                                        En tant que Manager Finance, vous pouvez réaffecter la caisse si nécessaire avant validation.
+                                    </span>
+                                </div>
+                                <select
+                                    value={financeCaisse}
+                                    onChange={(e) => setFinanceCaisse(e.target.value)}
+                                    className="border border-[#04326D] rounded px-3 py-1.5 text-xs font-bold text-[#0B192C] bg-white min-w-[200px]"
+                                >
+                                    {cashRegisters.map((c) => (
+                                        <option key={c.id} value={c.name}>
+                                            {c.name} ({c.devise})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
 
                         {selected.observation && (
                             <div className="p-3 bg-amber-50 border-l-4 border-[#F58F20] text-xs text-gray-800 rounded-r">
@@ -672,82 +733,170 @@ export default function FinanceDashboard({
                             </div>
                         )}
 
+                        {/* Tableau des lignes avec modification & autocomplétion des codes budgétaires */}
                         <div>
-                            <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
-                                Contrôle de l'Impact Budgétaire Ligne par Ligne
-                            </h3>
-                            <table className="w-full text-left text-xs border border-gray-200 rounded overflow-hidden">
-                                <thead className="bg-gray-100 font-bold text-gray-600">
-                                    <tr>
-                                        <th className="p-2">Désignation</th>
-                                        <th className="p-2">Code Budget (MP)</th>
-                                        <th className="p-2 text-right">Solde Dispo</th>
-                                        <th className="p-2 text-right">Montant Ligne</th>
-                                        <th className="p-2 text-center">Impact Budgétaire</th>
-                                        <th className="p-2">Pièces Jointes</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y text-gray-700">
-                                    {selected.lignes.map((line) => {
-                                        const code = line.codeAllocation || line.codeBudget || 'Non attribué';
-                                        const solde = line.budget_solde_actuel;
-                                        const depassement = solde !== null && solde !== undefined && line.total > solde;
+                            <div className="flex items-center justify-between mb-2">
+                                <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                    Contrôle et Ajustement des Imputations Budgétaires
+                                </h3>
+                                {selected.canDecide && (
+                                    <span className="text-[10px] text-gray-500 italic">
+                                        Tapez un code (ex: 2.2) pour afficher les suggestions et soldes disponibles
+                                    </span>
+                                )}
+                            </div>
 
-                                        return (
-                                            <tr key={line.id} className={depassement ? 'bg-red-50/60' : ''}>
-                                                <td className="p-2 font-medium">{line.activite}</td>
-                                                <td className="p-2 font-mono font-bold text-[#04326D]">{code}</td>
-                                                <td className="p-2 text-right font-mono font-bold">
-                                                    {solde !== null && solde !== undefined ? money(solde, selected.devise) : 'Non défini'}
-                                                </td>
-                                                <td className="p-2 text-right font-mono font-bold">
-                                                    {money(line.total, selected.devise)}
-                                                </td>
-                                                <td className="p-2 text-center">
-                                                    {solde === null || solde === undefined ? (
-                                                        <span className="text-[10px] text-gray-400">Non budgété</span>
-                                                    ) : depassement ? (
-                                                        <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-[10px] font-bold">
-                                                            Dépassement de crédit
-                                                        </span>
-                                                    ) : (
-                                                        <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                                                            Crédit suffisant
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="p-2">
-                                                    {line.justificatifs.length > 0 ? (
-                                                        <div className="space-y-1">
-                                                            {line.justificatifs.map((f) => (
-                                                                <div key={f.id} className="flex items-center justify-between text-[10px] bg-blue-50 text-[#04326D] px-2 py-0.5 rounded">
-                                                                    <span className="truncate max-w-[120px]">{f.nom}</span>
-                                                                    {f.fileUrl && (
-                                                                        <a href={f.fileUrl} target="_blank" rel="noreferrer" className="underline font-bold ml-1">
-                                                                            Voir
-                                                                        </a>
-                                                                    )}
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    ) : (
-                                                        <span className="text-gray-400 italic text-[10px]">Aucun justificatif</span>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                                <tfoot className="bg-gray-50 font-bold border-t">
-                                    <tr>
-                                        <td colSpan={3} className="p-2 text-right">Total Dossier :</td>
-                                        <td className="p-2 text-right font-mono text-sm text-[#0B192C]">
-                                            {money(selected.montantTotal, selected.devise)}
-                                        </td>
-                                        <td colSpan={2} />
-                                    </tr>
-                                </tfoot>
-                            </table>
+                            <div className="overflow-x-auto border border-gray-200 rounded">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-[#0B192C] text-white font-bold">
+                                        <tr>
+                                            <th className="p-2.5">Désignation</th>
+                                            <th className="p-2.5 w-72">Code Imputé & Recherche</th>
+                                            <th className="p-2.5 text-right">Solde Disponible</th>
+                                            <th className="p-2.5 text-right">Total Ligne</th>
+                                            <th className="p-2.5 text-center">Faisabilité</th>
+                                            <th className="p-2.5">Justificatifs</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y text-gray-700">
+                                        {selected.lignes.map((line) => {
+                                            const currentCode = financeAllocations[line.id] ?? line.codeAllocation ?? line.codeBudget ?? '';
+                                            const matchedLine = getBudgetLineObject(currentCode, selected.project_id);
+                                            const soldeDispo = matchedLine ? matchedLine.solde : line.budget_solde_actuel;
+                                            const depassement = soldeDispo !== null && soldeDispo !== undefined && line.total > soldeDispo;
+
+                                            const filteredSuggestions = allBudgetLines.filter((b) => {
+                                                if (selected.project_id && b.project_id !== selected.project_id) return false;
+                                                const q = currentCode.trim().toLowerCase();
+                                                if (!q) return false;
+                                                return b.code.toLowerCase().includes(q) || b.libelle.toLowerCase().includes(q);
+                                            });
+
+                                            return (
+                                                <tr key={line.id} className={depassement ? 'bg-red-50/60' : ''}>
+                                                    <td className="p-2.5 font-medium max-w-xs">{line.activite}</td>
+                                                    <td className="p-2.5 relative">
+                                                        {selected.canDecide ? (
+                                                            <div className="relative">
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="Recherche (ex: 2.2)..."
+                                                                    value={currentCode}
+                                                                    onFocus={() => setActiveInputId(line.id)}
+                                                                    onChange={(e) => {
+                                                                        setFinanceAllocations({
+                                                                            ...financeAllocations,
+                                                                            [line.id]: e.target.value,
+                                                                        });
+                                                                        setActiveInputId(line.id);
+                                                                    }}
+                                                                    className="w-full border border-[#04326D] rounded p-1.5 text-xs font-mono font-bold text-[#04326D] bg-white focus:outline-none"
+                                                                    required
+                                                                />
+
+                                                                {/* Menu d'autocomplétion Front-End instantané */}
+                                                                {activeInputId === line.id && filteredSuggestions.length > 0 && (
+                                                                    <div className="absolute left-0 top-full mt-1 w-80 bg-white border border-[#04326D] rounded shadow-2xl z-30 max-h-48 overflow-y-auto divide-y text-xs">
+                                                                        {filteredSuggestions.map((sug) => (
+                                                                            <button
+                                                                                key={sug.id}
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    setFinanceAllocations({
+                                                                                        ...financeAllocations,
+                                                                                        [line.id]: sug.code,
+                                                                                    });
+                                                                                    setActiveInputId(null);
+                                                                                }}
+                                                                                className="w-full p-2 text-left hover:bg-blue-50 flex flex-col justify-between"
+                                                                            >
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <span className="font-mono font-black text-[#04326D]">
+                                                                                        {sug.code}
+                                                                                    </span>
+                                                                                    <span className="font-mono text-[10px] font-bold text-emerald-700">
+                                                                                        Solde: {sug.solde.toLocaleString()} {sug.devise}
+                                                                                    </span>
+                                                                                </div>
+                                                                                <span className="text-[10px] text-gray-600 truncate mt-0.5">
+                                                                                    {sug.libelle}
+                                                                                </span>
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+
+                                                                <span className="text-[10px] text-gray-500 block truncate mt-1">
+                                                                    {matchedLine ? matchedLine.libelle : (line.libelleAllocation || 'Non assigné')}
+                                                                </span>
+                                                            </div>
+                                                        ) : (
+                                                            <div>
+                                                                <span className="font-mono font-bold text-[#04326D] block">
+                                                                    {line.codeAllocation || line.codeBudget || 'Non attribué'}
+                                                                </span>
+                                                                <span className="text-[10px] text-gray-500 block truncate">
+                                                                    {line.libelleAllocation || 'Non assigné'}
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                    <td className="p-2.5 text-right font-mono font-bold whitespace-nowrap">
+                                                        {soldeDispo !== null && soldeDispo !== undefined ? (
+                                                            money(soldeDispo, selected.devise)
+                                                        ) : (
+                                                            <span className="text-gray-400 font-normal">Non défini</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="p-2.5 text-right font-mono font-bold whitespace-nowrap">
+                                                        {money(line.total, selected.devise)}
+                                                    </td>
+                                                    <td className="p-2.5 text-center whitespace-nowrap">
+                                                        {soldeDispo === null || soldeDispo === undefined ? (
+                                                            <span className="text-[10px] text-gray-400">À vérifier</span>
+                                                        ) : depassement ? (
+                                                            <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-[10px] font-bold">
+                                                                Dépassement crédit
+                                                            </span>
+                                                        ) : (
+                                                            <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                                                                Crédit suffisant
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="p-2.5">
+                                                        {line.justificatifs.length > 0 ? (
+                                                            <div className="space-y-1">
+                                                                {line.justificatifs.map((f) => (
+                                                                    <div key={f.id} className="flex items-center justify-between text-[10px] bg-blue-50 text-[#04326D] px-2 py-0.5 rounded">
+                                                                        <span className="truncate max-w-[110px]">{f.nom}</span>
+                                                                        {f.fileUrl && (
+                                                                            <a href={f.fileUrl} target="_blank" rel="noreferrer" className="underline font-bold ml-1">
+                                                                                Voir
+                                                                            </a>
+                                                                        )}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-gray-400 italic text-[10px]">Aucun justificatif</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                    <tfoot className="bg-gray-50 font-bold border-t">
+                                        <tr>
+                                            <td colSpan={3} className="p-2.5 text-right">Total Dossier :</td>
+                                            <td className="p-2.5 text-right font-mono text-sm text-[#0B192C]">
+                                                {money(selected.montantTotal, selected.devise)}
+                                            </td>
+                                            <td colSpan={2} />
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
                         </div>
 
                         {selected.canDecide && (
@@ -766,7 +915,10 @@ export default function FinanceDashboard({
                                         <div className="flex gap-2">
                                             <button
                                                 type="button"
-                                                onClick={() => setSelected(null)}
+                                                onClick={() => {
+                                                    setSelected(null);
+                                                    setActiveInputId(null);
+                                                }}
                                                 className="px-3.5 py-2 border rounded text-xs font-semibold text-gray-600 hover:bg-gray-50"
                                             >
                                                 Fermer
@@ -774,9 +926,9 @@ export default function FinanceDashboard({
                                             <button
                                                 type="button"
                                                 onClick={handleTriggerApprove}
-                                                className="px-4 py-2 bg-[#10B981] hover:bg-[#059669] text-white rounded text-xs font-bold shadow transition"
+                                                className="px-4 py-2 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition"
                                             >
-                                                Accorder Visa Financier (PIN)
+                                                Enregistrer Corrections & Viser (PIN)
                                             </button>
                                         </div>
                                     </div>
@@ -798,7 +950,7 @@ export default function FinanceDashboard({
                                             rows={3}
                                             value={rejectionReason}
                                             onChange={(e) => setRejectionReason(e.target.value)}
-                                            placeholder="Précisez le motif comptable : dépassement de crédit, absence de proforma..."
+                                            placeholder="Précisez le motif comptable : dépassement de crédit, ligne erronée..."
                                             className="w-full border border-red-300 rounded p-2 text-xs bg-white focus:outline-none"
                                             required
                                         />
@@ -827,6 +979,7 @@ export default function FinanceDashboard({
                 </div>
             )}
 
+            {/* MODALE DU PIN FINANCIER */}
             {pinModalOpen && selected && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in">
                     <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
@@ -869,7 +1022,7 @@ export default function FinanceDashboard({
                             </div>
 
                             <p className="text-[10px] text-gray-400 leading-tight">
-                                Cette signature infalsifiable atteste de la disponibilité des crédits budgétaires et autorise le passage au contrôle administratif.
+                                Cette signature infalsifiable atteste de la disponibilité des crédits budgétaires et enregistre vos imputations.
                             </p>
 
                             <div className="flex justify-end gap-2 pt-2 border-t">
@@ -883,7 +1036,7 @@ export default function FinanceDashboard({
                                 <button
                                     type="submit"
                                     disabled={processing}
-                                    className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white rounded text-xs font-bold shadow transition"
+                                    className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition"
                                 >
                                     {processing ? 'Signature...' : 'Signer & Valider'}
                                 </button>

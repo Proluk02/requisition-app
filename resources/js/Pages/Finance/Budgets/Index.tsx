@@ -7,15 +7,19 @@ import {
     FileSpreadsheet,
     Plus,
     Search,
-    Building2,
     Users,
     CheckCircle2,
     AlertCircle,
+    AlertTriangle,
     X,
     Upload,
-    ArrowUpRight,
-    FolderKanban,
     Layers,
+    Pencil,
+    Trash2,
+    CheckSquare,
+    Square,
+    MinusSquare,
+    Loader2,
 } from 'lucide-react';
 
 interface ProjectOption {
@@ -28,12 +32,14 @@ interface DonorOption {
     id: string;
     name: string;
     code: string;
+    description?: string | null;
 }
 
 interface DonorSummary {
     id: string;
     name: string;
     code: string;
+    description?: string | null;
     lines_count: number;
     total_budget_usd: number;
     montant_engage_usd: number;
@@ -45,6 +51,10 @@ interface DonorSummary {
 interface BudgetLineItem {
     id: string;
     code: string;
+    category_code?: string | null;
+    subcategory_code?: string | null;
+    descript_code?: string | null;
+    split_code?: string | null;
     libelle: string;
     devise: string;
     project_id: string;
@@ -77,6 +87,11 @@ interface Props extends PageProps {
     stats: StatsBudgets;
 }
 
+type DeleteTarget =
+    | { type: 'single_line'; line: BudgetLineItem }
+    | { type: 'bulk_lines'; lines: BudgetLineItem[] }
+    | { type: 'donor'; donor: DonorSummary };
+
 const money = (n: number, currency = '$') =>
     `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${currency}`;
 
@@ -97,10 +112,24 @@ export default function BudgetIndex({
     const [donorFilter, setDonorFilter] = useState(selectedDonor);
     const [search, setSearch] = useState(initialSearch);
 
+    // Sélection multiple de lignes
+    const [selectedLineIds, setSelectedLineIds] = useState<string[]>([]);
+
+    // États des Modales
     const [importModalOpen, setImportModalOpen] = useState(false);
     const [donorModalOpen, setDonorModalOpen] = useState(false);
     const [lineModalOpen, setLineModalOpen] = useState(false);
 
+    // Modale moderne de confirmation de suppression
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    // États d'édition
+    const [editingLine, setEditingLine] = useState<BudgetLineItem | null>(null);
+    const [editingDonor, setEditingDonor] = useState<DonorSummary | DonorOption | null>(null);
+
+    // Formulaire Import
     const importForm = useForm<{
         project_id: string;
         file: File | null;
@@ -109,12 +138,14 @@ export default function BudgetIndex({
         file: null,
     });
 
+    // Formulaire Donateur
     const donorForm = useForm({
         name: '',
         code: '',
         description: '',
     });
 
+    // Formulaire Ligne Budgétaire
     const lineForm = useForm({
         project_id: projects[0]?.id ?? '',
         donor_id: '',
@@ -128,6 +159,9 @@ export default function BudgetIndex({
         budget_initial: '',
     });
 
+    /* =========================================================================
+     *  FILTRES
+     * ========================================================================= */
     const handleApplyFilters = (p = projectFilter, d = donorFilter, s = search) => {
         router.get(
             route('finance.budgets.index'),
@@ -136,6 +170,120 @@ export default function BudgetIndex({
         );
     };
 
+    /* =========================================================================
+     *  SÉLECTION MULTIPLE
+     * ========================================================================= */
+    const isAllSelected =
+        budgetLines.length > 0 && selectedLineIds.length === budgetLines.length;
+    const isSomeSelected =
+        selectedLineIds.length > 0 && selectedLineIds.length < budgetLines.length;
+
+    const handleToggleSelectAll = () => {
+        if (isAllSelected) {
+            setSelectedLineIds([]);
+        } else {
+            setSelectedLineIds(budgetLines.map((l) => l.id));
+        }
+    };
+
+    const handleToggleSelectLine = (id: string) => {
+        setSelectedLineIds((prev) =>
+            prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+        );
+    };
+
+    const selectedLinesObjects = useMemo(() => {
+        return budgetLines.filter((l) => selectedLineIds.includes(l.id));
+    }, [budgetLines, selectedLineIds]);
+
+    /* =========================================================================
+     *  OUVERTURE MODALE DE SUPPRESSION (MODERNE)
+     * ========================================================================= */
+    const triggerDeleteSingleLine = (line: BudgetLineItem) => {
+        setDeleteTarget({ type: 'single_line', line });
+        setDeleteModalOpen(true);
+    };
+
+    const triggerDeleteBulkLines = () => {
+        if (selectedLinesObjects.length === 0) return;
+        setDeleteTarget({ type: 'bulk_lines', lines: selectedLinesObjects });
+        setDeleteModalOpen(true);
+    };
+
+    const triggerDeleteDonor = (donor: DonorSummary) => {
+        setDeleteTarget({ type: 'donor', donor });
+        setDeleteModalOpen(true);
+    };
+
+    const handleConfirmDelete = () => {
+        if (!deleteTarget) return;
+
+        setIsDeleting(true);
+
+        if (deleteTarget.type === 'single_line') {
+            router.delete(
+                route('finance.budgets.lines.destroy', { budgetLine: deleteTarget.line.id }),
+                {
+                    preserveScroll: true,
+                    onFinish: () => {
+                        setIsDeleting(false);
+                        setDeleteModalOpen(false);
+                        setDeleteTarget(null);
+                        setSelectedLineIds((prev) =>
+                            prev.filter((id) => id !== deleteTarget.line.id)
+                        );
+                    },
+                }
+            );
+        } else if (deleteTarget.type === 'bulk_lines') {
+            // Suppression groupée : boucle sécurisée sur les lignes supprimables
+            const deletableLines = deleteTarget.lines.filter(
+                (l) => l.montant_engage === 0 && l.montant_decaisse === 0
+            );
+
+            if (deletableLines.length === 0) {
+                setIsDeleting(false);
+                setDeleteModalOpen(false);
+                return;
+            }
+
+            // Envoi des suppressions
+            let completed = 0;
+            deletableLines.forEach((l) => {
+                router.delete(
+                    route('finance.budgets.lines.destroy', { budgetLine: l.id }),
+                    {
+                        preserveScroll: true,
+                        onFinish: () => {
+                            completed++;
+                            if (completed === deletableLines.length) {
+                                setIsDeleting(false);
+                                setDeleteModalOpen(false);
+                                setDeleteTarget(null);
+                                setSelectedLineIds([]);
+                            }
+                        },
+                    }
+                );
+            });
+        } else if (deleteTarget.type === 'donor') {
+            router.delete(
+                route('finance.donors.destroy', { donor: deleteTarget.donor.id }),
+                {
+                    preserveScroll: true,
+                    onFinish: () => {
+                        setIsDeleting(false);
+                        setDeleteModalOpen(false);
+                        setDeleteTarget(null);
+                    },
+                }
+            );
+        }
+    };
+
+    /* =========================================================================
+     *  SOUMISSIONS FORMULAIRES
+     * ========================================================================= */
     const handleImportSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         importForm.post(route('finance.budgets.import'), {
@@ -148,26 +296,103 @@ export default function BudgetIndex({
         });
     };
 
+    const openCreateDonorModal = () => {
+        setEditingDonor(null);
+        donorForm.reset();
+        donorForm.clearErrors();
+        setDonorModalOpen(true);
+    };
+
+    const openEditDonorModal = (donor: DonorSummary | DonorOption) => {
+        setEditingDonor(donor);
+        donorForm.clearErrors();
+        donorForm.setData({
+            name: donor.name,
+            code: donor.code,
+            description: donor.description ?? '',
+        });
+        setDonorModalOpen(true);
+    };
+
     const handleDonorSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        donorForm.post(route('finance.donors.store'), {
-            preserveScroll: true,
-            onSuccess: () => {
-                setDonorModalOpen(false);
-                donorForm.reset();
-            },
+        if (editingDonor) {
+            donorForm.put(route('finance.donors.update', { donor: editingDonor.id }), {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setDonorModalOpen(false);
+                    donorForm.reset();
+                    setEditingDonor(null);
+                },
+            });
+        } else {
+            donorForm.post(route('finance.donors.store'), {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setDonorModalOpen(false);
+                    donorForm.reset();
+                },
+            });
+        }
+    };
+
+    const openCreateLineModal = () => {
+        setEditingLine(null);
+        lineForm.reset();
+        lineForm.clearErrors();
+        lineForm.setData({
+            project_id: projects[0]?.id ?? '',
+            donor_id: '',
+            category_code: '',
+            subcategory_code: '',
+            descript_code: '',
+            split_code: '',
+            code: '',
+            libelle: '',
+            devise: 'USD',
+            budget_initial: '',
         });
+        setLineModalOpen(true);
+    };
+
+    const openEditLineModal = (line: BudgetLineItem) => {
+        setEditingLine(line);
+        lineForm.clearErrors();
+        lineForm.setData({
+            project_id: line.project_id,
+            donor_id: line.donor_id ?? '',
+            category_code: line.category_code ?? '',
+            subcategory_code: line.subcategory_code ?? '',
+            descript_code: line.descript_code ?? '',
+            split_code: line.split_code ?? '',
+            code: line.code,
+            libelle: line.libelle,
+            devise: line.devise,
+            budget_initial: line.budget_initial.toString(),
+        });
+        setLineModalOpen(true);
     };
 
     const handleLineSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        lineForm.post(route('finance.budgets.lines.store'), {
-            preserveScroll: true,
-            onSuccess: () => {
-                setLineModalOpen(false);
-                lineForm.reset();
-            },
-        });
+        if (editingLine) {
+            lineForm.put(route('finance.budgets.lines.update', { budgetLine: editingLine.id }), {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setLineModalOpen(false);
+                    lineForm.reset();
+                    setEditingLine(null);
+                },
+            });
+        } else {
+            lineForm.post(route('finance.budgets.lines.store'), {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setLineModalOpen(false);
+                    lineForm.reset();
+                },
+            });
+        }
     };
 
     const calculatedCodePreview = useMemo(() => {
@@ -192,6 +417,7 @@ export default function BudgetIndex({
             <Head title="Centre Budgétaire & Suivi Donateurs" />
 
             <div className="space-y-6">
+                {/* Header */}
                 <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
                     <div>
                         <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1.5 flex items-center gap-1.5">
@@ -211,7 +437,7 @@ export default function BudgetIndex({
                     <div className="flex flex-wrap items-center gap-2">
                         <button
                             type="button"
-                            onClick={() => setDonorModalOpen(true)}
+                            onClick={openCreateDonorModal}
                             className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-[#B2BED6] hover:bg-gray-50 text-[#0B192C] rounded font-bold text-xs shadow-sm transition"
                         >
                             <Users className="w-4 h-4 text-[#04326D]" />
@@ -220,7 +446,7 @@ export default function BudgetIndex({
 
                         <button
                             type="button"
-                            onClick={() => setLineModalOpen(true)}
+                            onClick={openCreateLineModal}
                             className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-[#B2BED6] hover:bg-gray-50 text-[#0B192C] rounded font-bold text-xs shadow-sm transition"
                         >
                             <Plus className="w-4 h-4 text-[#04326D]" />
@@ -238,6 +464,7 @@ export default function BudgetIndex({
                     </div>
                 </header>
 
+                {/* Messages Flash */}
                 {flash?.success && (
                     <div className="p-3.5 rounded bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
@@ -251,6 +478,7 @@ export default function BudgetIndex({
                     </div>
                 )}
 
+                {/* KPI Cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between">
                         <span className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">
@@ -301,6 +529,36 @@ export default function BudgetIndex({
                     </div>
                 </div>
 
+                {/* Barre d'action contextuelle pour sélection multiple */}
+                {selectedLineIds.length > 0 && activeTab === 'lignes' && (
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between shadow-sm animate-fade-in">
+                        <div className="flex items-center gap-2">
+                            <CheckSquare className="w-4 h-4 text-[#04326D]" />
+                            <span className="text-xs font-bold text-[#0B192C]">
+                                {selectedLineIds.length} ligne{selectedLineIds.length > 1 ? 's' : ''} sélectionnée{selectedLineIds.length > 1 ? 's' : ''}
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setSelectedLineIds([])}
+                                className="px-2.5 py-1 text-xs text-gray-600 hover:text-gray-900 font-semibold"
+                            >
+                                Désélectionner
+                            </button>
+                            <button
+                                type="button"
+                                onClick={triggerDeleteBulkLines}
+                                className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-bold shadow-sm transition"
+                            >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Supprimer la sélection</span>
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Section Table & Onglets */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="border-b border-[#E2E8F0] px-4 pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white">
                         <div className="flex gap-2">
@@ -391,6 +649,22 @@ export default function BudgetIndex({
                             <table className="w-full text-left text-xs border-collapse">
                                 <thead>
                                     <tr className="bg-[#0B192C] text-white uppercase text-[10px] font-bold tracking-wider">
+                                        <th className="py-3 px-3 text-center w-10">
+                                            <button
+                                                type="button"
+                                                onClick={handleToggleSelectAll}
+                                                className="text-white hover:text-blue-300 transition"
+                                                title={isAllSelected ? 'Tout désélectionner' : 'Tout sélectionner'}
+                                            >
+                                                {isAllSelected ? (
+                                                    <CheckSquare className="w-4 h-4" />
+                                                ) : isSomeSelected ? (
+                                                    <MinusSquare className="w-4 h-4 text-blue-300" />
+                                                ) : (
+                                                    <Square className="w-4 h-4 opacity-60" />
+                                                )}
+                                            </button>
+                                        </th>
                                         <th className="py-3 px-4">Code Ligne</th>
                                         <th className="py-3 px-4">Libellé / Activité</th>
                                         <th className="py-3 px-4">Projet & Donateur</th>
@@ -399,63 +673,107 @@ export default function BudgetIndex({
                                         <th className="py-3 px-4 text-right">Décaissé</th>
                                         <th className="py-3 px-4 text-right">Solde Dispo</th>
                                         <th className="py-3 px-4 text-center">Taux Consommation</th>
+                                        <th className="py-3 px-4 text-center w-20">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
                                     {budgetLines.length === 0 ? (
                                         <tr>
-                                            <td colSpan={8} className="py-12 text-center text-gray-400 italic">
+                                            <td colSpan={10} className="py-12 text-center text-gray-400 italic">
                                                 Aucune ligne budgétaire trouvée. Cliquez sur « Importer Budget Excel » pour charger la maquette de référence.
                                             </td>
                                         </tr>
                                     ) : (
-                                        budgetLines.map((line) => (
-                                            <tr key={line.id} className="hover:bg-[#F9F9FF] transition">
-                                                <td className="py-3 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
-                                                    {line.code}
-                                                </td>
-                                                <td className="py-3 px-4 font-medium text-gray-800 max-w-xs truncate" title={line.libelle}>
-                                                    {line.libelle}
-                                                </td>
-                                                <td className="py-3 px-4">
-                                                    <p className="font-bold text-[#0B192C] truncate">{line.project_name}</p>
-                                                    <p className="text-[10px] text-gray-500 font-semibold">{line.donor_name}</p>
-                                                </td>
-                                                <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-[#0B192C] whitespace-nowrap">
-                                                    {money(line.budget_initial, line.devise)}
-                                                </td>
-                                                <td className="py-3 px-4 text-right font-mono tabular-nums text-[#F58F20] font-bold whitespace-nowrap">
-                                                    {money(line.montant_engage, line.devise)}
-                                                </td>
-                                                <td className="py-3 px-4 text-right font-mono tabular-nums text-emerald-700 font-bold whitespace-nowrap">
-                                                    {money(line.montant_decaisse, line.devise)}
-                                                </td>
-                                                <td className="py-3 px-4 text-right font-mono tabular-nums font-bold whitespace-nowrap">
-                                                    <span className={line.solde < 0 ? 'text-red-700 font-black' : 'text-[#0B192C]'}>
-                                                        {money(line.solde, line.devise)}
-                                                    </span>
-                                                </td>
-                                                <td className="py-3 px-4 text-center whitespace-nowrap">
-                                                    <div className="flex items-center justify-center gap-2">
-                                                        <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                                                            <div
-                                                                className={`h-full ${
-                                                                    line.taux_consommation > 90
-                                                                        ? 'bg-red-600'
-                                                                        : line.taux_consommation > 60
-                                                                        ? 'bg-[#F58F20]'
-                                                                        : 'bg-emerald-600'
-                                                                }`}
-                                                                style={{ width: `${Math.min(line.taux_consommation, 100)}%` }}
-                                                            />
-                                                        </div>
-                                                        <span className="font-mono text-[10.5px] font-bold tabular-nums">
-                                                            {line.taux_consommation}%
+                                        budgetLines.map((line) => {
+                                            const isSelected = selectedLineIds.includes(line.id);
+                                            return (
+                                                <tr
+                                                    key={line.id}
+                                                    className={`transition ${
+                                                        isSelected
+                                                            ? 'bg-blue-50/70 hover:bg-blue-50'
+                                                            : 'hover:bg-[#F9F9FF]'
+                                                    }`}
+                                                >
+                                                    <td className="py-3 px-3 text-center">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleToggleSelectLine(line.id)}
+                                                            className="text-gray-500 hover:text-[#04326D] transition"
+                                                        >
+                                                            {isSelected ? (
+                                                                <CheckSquare className="w-4 h-4 text-[#04326D]" />
+                                                            ) : (
+                                                                <Square className="w-4 h-4 text-gray-300" />
+                                                            )}
+                                                        </button>
+                                                    </td>
+                                                    <td className="py-3 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
+                                                        {line.code}
+                                                    </td>
+                                                    <td className="py-3 px-4 font-medium text-gray-800 max-w-xs truncate" title={line.libelle}>
+                                                        {line.libelle}
+                                                    </td>
+                                                    <td className="py-3 px-4">
+                                                        <p className="font-bold text-[#0B192C] truncate">{line.project_name}</p>
+                                                        <p className="text-[10px] text-gray-500 font-semibold">{line.donor_name}</p>
+                                                    </td>
+                                                    <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-[#0B192C] whitespace-nowrap">
+                                                        {money(line.budget_initial, line.devise)}
+                                                    </td>
+                                                    <td className="py-3 px-4 text-right font-mono tabular-nums text-[#F58F20] font-bold whitespace-nowrap">
+                                                        {money(line.montant_engage, line.devise)}
+                                                    </td>
+                                                    <td className="py-3 px-4 text-right font-mono tabular-nums text-emerald-700 font-bold whitespace-nowrap">
+                                                        {money(line.montant_decaisse, line.devise)}
+                                                    </td>
+                                                    <td className="py-3 px-4 text-right font-mono tabular-nums font-bold whitespace-nowrap">
+                                                        <span className={line.solde < 0 ? 'text-red-700 font-black' : 'text-[#0B192C]'}>
+                                                            {money(line.solde, line.devise)}
                                                         </span>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ))
+                                                    </td>
+                                                    <td className="py-3 px-4 text-center whitespace-nowrap">
+                                                        <div className="flex items-center justify-center gap-2">
+                                                            <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                                                <div
+                                                                    className={`h-full ${
+                                                                        line.taux_consommation > 90
+                                                                            ? 'bg-red-600'
+                                                                            : line.taux_consommation > 60
+                                                                            ? 'bg-[#F58F20]'
+                                                                            : 'bg-emerald-600'
+                                                                    }`}
+                                                                    style={{ width: `${Math.min(line.taux_consommation, 100)}%` }}
+                                                                />
+                                                            </div>
+                                                            <span className="font-mono text-[10.5px] font-bold tabular-nums">
+                                                                {line.taux_consommation}%
+                                                            </span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="py-3 px-4 text-center whitespace-nowrap">
+                                                        <div className="flex items-center justify-center gap-1.5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openEditLineModal(line)}
+                                                                className="p-1 text-[#04326D] hover:bg-blue-100/60 rounded transition"
+                                                                title="Modifier la ligne"
+                                                            >
+                                                                <Pencil className="w-3.5 h-3.5" />
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => triggerDeleteSingleLine(line)}
+                                                                className="p-1 text-red-600 hover:bg-red-100/60 rounded transition"
+                                                                title="Supprimer la ligne"
+                                                            >
+                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })
                                     )}
                                 </tbody>
                             </table>
@@ -480,11 +798,37 @@ export default function BudgetIndex({
                                                     {donor.code}
                                                 </span>
                                                 <h3 className="text-sm font-bold text-[#0B192C] mt-1">{donor.name}</h3>
-                                                <p className="text-[10.5px] text-gray-500">{donor.lines_count} ligne(s) financée(s)</p>
+                                                {donor.description && (
+                                                    <p className="text-[11px] text-gray-500 italic mt-0.5 line-clamp-1">
+                                                        {donor.description}
+                                                    </p>
+                                                )}
+                                                <p className="text-[10.5px] text-gray-500 mt-1">{donor.lines_count} ligne(s) financée(s)</p>
                                             </div>
-                                            <span className="text-xs font-mono font-bold text-gray-700">
-                                                {donor.taux_consommation}%
-                                            </span>
+
+                                            <div className="flex flex-col items-end gap-1.5">
+                                                <span className="text-xs font-mono font-bold text-gray-700">
+                                                    {donor.taux_consommation}%
+                                                </span>
+                                                <div className="flex items-center gap-1">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openEditDonorModal(donor)}
+                                                        className="p-1 text-[#04326D] hover:bg-blue-100 rounded transition"
+                                                        title="Modifier le donateur"
+                                                    >
+                                                        <Pencil className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => triggerDeleteDonor(donor)}
+                                                        className="p-1 text-red-600 hover:bg-red-100 rounded transition"
+                                                        title="Supprimer le donateur"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            </div>
                                         </div>
 
                                         <div className="space-y-1.5 text-xs">
@@ -520,6 +864,126 @@ export default function BudgetIndex({
                 </div>
             </div>
 
+            {/* =========================================================================
+             *  MODALE MODERNE DE SUPPRESSION (SINGLE & BULK)
+             * ========================================================================= */}
+            {deleteModalOpen && deleteTarget && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
+                    <div className="bg-white rounded-xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-4 animate-scale-in">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                                <AlertTriangle className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-bold text-[#0B192C]">
+                                    {deleteTarget.type === 'bulk_lines'
+                                        ? 'Supprimer les lignes sélectionnées'
+                                        : deleteTarget.type === 'donor'
+                                        ? 'Supprimer le donateur'
+                                        : 'Supprimer la ligne budgétaire'}
+                                </h3>
+                                <p className="text-xs text-gray-500 mt-0.5">
+                                    Cette opération est irréversible.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Corps informatif */}
+                        {deleteTarget.type === 'single_line' && (
+                            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1">
+                                <div className="flex justify-between">
+                                    <span className="text-gray-500 font-semibold">Code :</span>
+                                    <strong className="font-mono text-[#04326D]">{deleteTarget.line.code}</strong>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-gray-500 font-semibold">Désignation :</span>
+                                    <span className="text-gray-800 truncate max-w-[220px]">{deleteTarget.line.libelle}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-gray-500 font-semibold">Budget Initial :</span>
+                                    <strong className="font-mono">{money(deleteTarget.line.budget_initial, deleteTarget.line.devise)}</strong>
+                                </div>
+                            </div>
+                        )}
+
+                        {deleteTarget.type === 'bulk_lines' && (
+                            <div className="space-y-2 text-xs">
+                                <p className="text-gray-700">
+                                    Vous vous apprêtez à supprimer <strong>{deleteTarget.lines.length}</strong> ligne(s) budgétaire(s).
+                                </p>
+                                <div className="max-h-32 overflow-y-auto p-2 bg-slate-50 border border-slate-200 rounded-lg space-y-1 font-mono text-[11px]">
+                                    {deleteTarget.lines.map((l) => {
+                                        const isLocked = l.montant_engage > 0 || l.montant_decaisse > 0;
+                                        return (
+                                            <div key={l.id} className="flex items-center justify-between">
+                                                <span className={isLocked ? 'text-red-600 line-through' : 'text-[#04326D] font-bold'}>
+                                                    {l.code}
+                                                </span>
+                                                {isLocked && (
+                                                    <span className="text-[10px] text-red-600 font-sans italic">
+                                                        (Engagé/décaissé - ignoré)
+                                                    </span>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {deleteTarget.type === 'donor' && (
+                            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1">
+                                <div className="flex justify-between">
+                                    <span className="text-gray-500 font-semibold">Bailleur :</span>
+                                    <strong className="text-[#0B192C]">{deleteTarget.donor.name}</strong>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-gray-500 font-semibold">Code :</span>
+                                    <strong className="font-mono text-emerald-700">{deleteTarget.donor.code}</strong>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-gray-500 font-semibold">Lignes associées :</span>
+                                    <span>{deleteTarget.donor.lines_count}</span>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                            <button
+                                type="button"
+                                disabled={isDeleting}
+                                onClick={() => {
+                                    setDeleteModalOpen(false);
+                                    setDeleteTarget(null);
+                                }}
+                                className="px-3.5 py-1.5 border border-slate-300 rounded text-xs font-semibold text-gray-700 hover:bg-slate-50 transition"
+                            >
+                                Annuler
+                            </button>
+                            <button
+                                type="button"
+                                disabled={isDeleting}
+                                onClick={handleConfirmDelete}
+                                className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded text-xs font-bold shadow-sm transition"
+                            >
+                                {isDeleting ? (
+                                    <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        <span>Suppression...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                        <span>Confirmer la suppression</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL IMPORT EXCEL */}
             {importModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-md w-full p-6 space-y-4 animate-slide-down">
@@ -601,6 +1065,7 @@ export default function BudgetIndex({
                 </div>
             )}
 
+            {/* MODAL CRÉATION / MODIFICATION DONATEUR */}
             {donorModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
@@ -608,12 +1073,15 @@ export default function BudgetIndex({
                             <div className="flex items-center gap-2">
                                 <Users className="w-5 h-5 text-[#04326D]" />
                                 <h3 className="text-sm font-bold text-[#0B192C] uppercase tracking-wide">
-                                    Nouveau Donateur
+                                    {editingDonor ? 'Modifier le Donateur' : 'Nouveau Donateur'}
                                 </h3>
                             </div>
                             <button
                                 type="button"
-                                onClick={() => setDonorModalOpen(false)}
+                                onClick={() => {
+                                    setDonorModalOpen(false);
+                                    setEditingDonor(null);
+                                }}
                                 className="text-gray-400 hover:text-gray-600 text-lg font-bold"
                             >
                                 <X className="w-5 h-5" />
@@ -631,6 +1099,9 @@ export default function BudgetIndex({
                                     className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
                                     required
                                 />
+                                {donorForm.errors.name && (
+                                    <p className="text-[11px] text-red-600 mt-1">{donorForm.errors.name}</p>
+                                )}
                             </div>
 
                             <div>
@@ -643,6 +1114,9 @@ export default function BudgetIndex({
                                     className="w-full border border-[#B2BED6] rounded p-2 text-xs font-mono uppercase focus:outline-none focus:border-[#04326D]"
                                     required
                                 />
+                                {donorForm.errors.code && (
+                                    <p className="text-[11px] text-red-600 mt-1">{donorForm.errors.code}</p>
+                                )}
                             </div>
 
                             <div>
@@ -654,12 +1128,18 @@ export default function BudgetIndex({
                                     onChange={(e) => donorForm.setData('description', e.target.value)}
                                     className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
                                 />
+                                {donorForm.errors.description && (
+                                    <p className="text-[11px] text-red-600 mt-1">{donorForm.errors.description}</p>
+                                )}
                             </div>
 
                             <div className="flex justify-end gap-2 pt-2 border-t">
                                 <button
                                     type="button"
-                                    onClick={() => setDonorModalOpen(false)}
+                                    onClick={() => {
+                                        setDonorModalOpen(false);
+                                        setEditingDonor(null);
+                                    }}
                                     className="px-3 py-1.5 border border-[#B2BED6] rounded text-xs font-semibold text-gray-600 hover:bg-gray-50"
                                 >
                                     Annuler
@@ -669,7 +1149,7 @@ export default function BudgetIndex({
                                     disabled={donorForm.processing}
                                     className="px-4 py-1.5 bg-[#04326D] text-white rounded text-xs font-bold shadow hover:bg-[#06428f]"
                                 >
-                                    Enregistrer
+                                    {editingDonor ? 'Mettre à jour' : 'Enregistrer'}
                                 </button>
                             </div>
                         </form>
@@ -677,6 +1157,7 @@ export default function BudgetIndex({
                 </div>
             )}
 
+            {/* MODAL CRÉATION / MODIFICATION LIGNE BUDGÉTAIRE */}
             {lineModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-lg w-full p-6 space-y-4 animate-slide-down">
@@ -684,12 +1165,15 @@ export default function BudgetIndex({
                             <div className="flex items-center gap-2">
                                 <Plus className="w-5 h-5 text-[#04326D]" />
                                 <h3 className="text-sm font-bold text-[#0B192C] uppercase tracking-wide">
-                                    Ajouter une Ligne Budgétaire
+                                    {editingLine ? 'Modifier la Ligne Budgétaire' : 'Ajouter une Ligne Budgétaire'}
                                 </h3>
                             </div>
                             <button
                                 type="button"
-                                onClick={() => setLineModalOpen(false)}
+                                onClick={() => {
+                                    setLineModalOpen(false);
+                                    setEditingLine(null);
+                                }}
                                 className="text-gray-400 hover:text-gray-600 text-lg font-bold"
                             >
                                 <X className="w-5 h-5" />
@@ -712,6 +1196,9 @@ export default function BudgetIndex({
                                             </option>
                                         ))}
                                     </select>
+                                    {lineForm.errors.project_id && (
+                                        <p className="text-[11px] text-red-600 mt-1">{lineForm.errors.project_id}</p>
+                                    )}
                                 </div>
 
                                 <div>
@@ -728,6 +1215,9 @@ export default function BudgetIndex({
                                             </option>
                                         ))}
                                     </select>
+                                    {lineForm.errors.donor_id && (
+                                        <p className="text-[11px] text-red-600 mt-1">{lineForm.errors.donor_id}</p>
+                                    )}
                                 </div>
                             </div>
 
@@ -795,6 +1285,9 @@ export default function BudgetIndex({
                                     className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
                                     required
                                 />
+                                {lineForm.errors.libelle && (
+                                    <p className="text-[11px] text-red-600 mt-1">{lineForm.errors.libelle}</p>
+                                )}
                             </div>
 
                             <div className="grid grid-cols-2 gap-3">
@@ -809,6 +1302,9 @@ export default function BudgetIndex({
                                         <option value="FC">FC (CDF)</option>
                                         <option value="EUR">EUR (€)</option>
                                     </select>
+                                    {lineForm.errors.devise && (
+                                        <p className="text-[11px] text-red-600 mt-1">{lineForm.errors.devise}</p>
+                                    )}
                                 </div>
 
                                 <div>
@@ -823,13 +1319,19 @@ export default function BudgetIndex({
                                         className="w-full border border-[#B2BED6] rounded p-2 text-xs font-mono font-bold text-[#0B192C] focus:outline-none focus:border-[#04326D]"
                                         required
                                     />
+                                    {lineForm.errors.budget_initial && (
+                                        <p className="text-[11px] text-red-600 mt-1">{lineForm.errors.budget_initial}</p>
+                                    )}
                                 </div>
                             </div>
 
                             <div className="flex justify-end gap-2 pt-2 border-t">
                                 <button
                                     type="button"
-                                    onClick={() => setLineModalOpen(false)}
+                                    onClick={() => {
+                                        setLineModalOpen(false);
+                                        setEditingLine(null);
+                                    }}
                                     className="px-3.5 py-1.5 border border-[#B2BED6] rounded text-xs font-semibold text-gray-600 hover:bg-gray-50"
                                 >
                                     Annuler
@@ -839,7 +1341,7 @@ export default function BudgetIndex({
                                     disabled={lineForm.processing}
                                     className="px-4 py-1.5 bg-[#04326D] text-white rounded text-xs font-bold shadow hover:bg-[#06428f]"
                                 >
-                                    Créer la Ligne
+                                    {editingLine ? 'Mettre à jour la Ligne' : 'Créer la Ligne'}
                                 </button>
                             </div>
                         </form>
