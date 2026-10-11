@@ -31,9 +31,7 @@ export default function Login({
             <Head title="Connexion — Bon Pasteur Kolwezi" />
 
             <div className="flex min-h-screen bg-white antialiased dark:bg-sidebar">
-                {/* ============================================================
-                    PANNEAU GAUCHE — IMAGE DE FOND
-                   ============================================================ */}
+
                 <aside className="relative hidden lg:block lg:w-1/2">
                     <img
                         src="/assets/images/login-bg.jpg"

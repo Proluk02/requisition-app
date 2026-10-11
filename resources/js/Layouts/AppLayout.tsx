@@ -196,9 +196,11 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                     {/* Logo Institutionnel */}
                     <div className="h-16 flex items-center justify-between px-6 border-b border-white/10 shrink-0">
                         <Link href={route('dashboard')} className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center font-black text-[#0B192C] text-sm shadow">
-                                BP
-                            </div>
+                            <img
+                                src="/assets/images/logo.png"
+                                alt="Logo Bon Pasteur"
+                                className="w-9 h-9 rounded-full object-contain bg-white p-0.5 shadow shrink-0"
+                            />
                             <div className="flex flex-col">
                                 <span className="font-bold text-sm leading-tight tracking-wide">
                                     Bon Pasteur
@@ -446,7 +448,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </div>
                         )}
 
-                        {/* Direction Financière (SANS Journal du Jour) */}
+                        {/* Direction Financière */}
                         {isFinance && (
                             <div className="space-y-1">
                                 <span className="px-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
@@ -515,7 +517,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </div>
                         )}
 
-                        {/* Guichet Caisse (AVEC Journal du Jour) */}
+                        {/* Guichet Caisse */}
                         {isCashier && (
                             <div className="space-y-1">
                                 <span className="px-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
@@ -534,7 +536,6 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                     <span>Guichet & Sessions</span>
                                 </Link>
 
-                                {/* Uniquement présent pour le Caissier */}
                                 <Link
                                     href={route('cashier.journal.du-jour')}
                                     className={`flex items-center gap-3 px-3 py-2 rounded transition ${
