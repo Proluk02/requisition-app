@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Head, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
@@ -7,8 +7,13 @@ import {
     CheckCircle2,
     Lock,
     KeyRound,
-    Building2,
     X,
+    Search,
+    RotateCcw,
+    SlidersHorizontal,
+    CheckCheck,
+    Building2,
+    AlertTriangle,
 } from 'lucide-react';
 
 interface SessionItem {
@@ -43,8 +48,8 @@ interface Props extends PageProps {
         links: any[];
     };
     caissesList: CaisseOption[];
-    statusFilter: string;
-    caisseFilter: string;
+    statusFilter?: string;
+    caisseFilter?: string;
 }
 
 const money = (n: number, dev: string) =>
@@ -53,27 +58,80 @@ const money = (n: number, dev: string) =>
 export default function SessionsIndex({
     sessions,
     caissesList = [],
-    statusFilter = 'all',
-    caisseFilter = 'all',
 }: Props) {
-    const { flash } = usePage<PageProps>().props;
+    const { flash, auth } = usePage<PageProps>().props;
+    const currentUser = auth.user;
 
-    const [statusState, setStatusState] = useState(statusFilter);
-    const [caisseState, setCaisseState] = useState(caisseFilter);
+    // Données des sessions dans le state local pour mise à jour immédiate
+    const initialSessionsData = useMemo(() => {
+        return Array.isArray(sessions) ? sessions : (sessions?.data ?? []);
+    }, [sessions]);
 
+    const [sessionsList, setSessionsList] = useState<SessionItem[]>(initialSessionsData);
+
+    // Filtres 100% Front-End React
+    const [statusState, setStatusState] = useState<string>('all');
+    const [caisseState, setCaisseState] = useState<string>('all');
+    const [searchQuery, setSearchQuery] = useState('');
+
+    // Modale Code PIN
     const [sessionToAuthorize, setSessionToAuthorize] = useState<SessionItem | null>(null);
     const [pin, setPin] = useState('');
     const [pinError, setPinError] = useState<string | null>(null);
     const [processing, setProcessing] = useState(false);
 
-    const handleApplyFilters = (st = statusState, c = caisseState) => {
-        router.get(
-            route('finance.caisses.sessions'),
-            { status: st, caisse_id: c },
-            { preserveState: true, preserveScroll: true }
-        );
+    /* =========================================================================
+     *  FILTRAGE DIRECT CÔTÉ FRONT-END (REACT USEMEMO)
+     * ========================================================================= */
+    const filteredSessions = useMemo(() => {
+        const query = searchQuery.trim().toLowerCase();
+
+        return sessionsList.filter((s) => {
+            // Filtre statut
+            if (statusState !== 'all' && s.status !== statusState) {
+                return false;
+            }
+
+            // Filtre caisse
+            if (caisseState !== 'all' && s.caisse_id !== caisseState) {
+                return false;
+            }
+
+            // Recherche en direct
+            if (query) {
+                const matchCaisse = s.caisse_name.toLowerCase().includes(query);
+                const matchCashier = s.cashier_name.toLowerCase().includes(query);
+                const matchDate = s.date_session.toLowerCase().includes(query);
+                if (!matchCaisse && !matchCashier && !matchDate) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+    }, [sessionsList, statusState, caisseState, searchQuery]);
+
+    // Métriques dynamiques
+    const counts = useMemo(() => {
+        return {
+            total: sessionsList.length,
+            enAttente: sessionsList.filter((s) => s.status === 'en_attente_autorisation').length,
+            ouvertes: sessionsList.filter((s) => s.status === 'ouverte').length,
+            fermees: sessionsList.filter((s) => s.status === 'fermee').length,
+        };
+    }, [sessionsList]);
+
+    const hasActiveFilters = statusState !== 'all' || caisseState !== 'all' || searchQuery !== '';
+
+    const handleResetFilters = () => {
+        setStatusState('all');
+        setCaisseState('all');
+        setSearchQuery('');
     };
 
+    /* =========================================================================
+     *  VALIDATION PAR CODE PIN AVEC MISE À JOUR OPTIMISTE
+     * ========================================================================= */
     const handleAuthorize = (e: React.FormEvent) => {
         e.preventDefault();
         if (!sessionToAuthorize || !pin.trim()) return;
@@ -81,13 +139,31 @@ export default function SessionsIndex({
         setProcessing(true);
         setPinError(null);
 
+        const targetId = sessionToAuthorize.id;
+
         router.patch(
-            route('cashier.session.authorize-opening', sessionToAuthorize.id),
+            route('cashier.session.authorize-opening', targetId),
             { pin: pin.trim() },
             {
                 preserveScroll: true,
                 onFinish: () => setProcessing(false),
                 onSuccess: () => {
+                    // Mise à jour immédiate dans la liste locale sans attendre de refresh
+                    setSessionsList((prev) =>
+                        prev.map((s) =>
+                            s.id === targetId
+                                ? {
+                                      ...s,
+                                      status: 'ouverte',
+                                      opened_at: new Date().toLocaleTimeString('fr-FR', {
+                                          hour: '2-digit',
+                                          minute: '2-digit',
+                                      }),
+                                      authorized_by_name: currentUser.name,
+                                  }
+                                : s
+                        )
+                    );
                     setSessionToAuthorize(null);
                     setPin('');
                 },
@@ -103,6 +179,7 @@ export default function SessionsIndex({
             <Head title="Approbations d'Ouvertures de Guichet" />
 
             <div className="space-y-6">
+                {/* Header Institutionnel */}
                 <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
                     <div>
                         <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1.5 flex items-center gap-1.5">
@@ -119,36 +196,17 @@ export default function SessionsIndex({
                         </p>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                        <select
-                            value={statusState}
-                            onChange={(e) => {
-                                setStatusState(e.target.value);
-                                handleApplyFilters(e.target.value, caisseState);
-                            }}
-                            className="border border-[#B2BED6] rounded px-3 py-1.5 text-xs bg-white text-[#0B192C] font-semibold"
-                        >
-                            <option value="all">Tous les statuts</option>
-                            <option value="en_attente_autorisation">En attente d'autorisation</option>
-                            <option value="ouverte">Guichets ouverts</option>
-                            <option value="fermee">Sessions clôturées</option>
-                        </select>
-
-                        <select
-                            value={caisseState}
-                            onChange={(e) => {
-                                setCaisseState(e.target.value);
-                                handleApplyFilters(statusState, e.target.value);
-                            }}
-                            className="border border-[#B2BED6] rounded px-3 py-1.5 text-xs bg-white text-[#0B192C] font-semibold"
-                        >
-                            <option value="all">Toutes les caisses</option>
-                            {caissesList.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                    {c.name}
-                                </option>
-                            ))}
-                        </select>
+                    <div className="flex items-center gap-2">
+                        {counts.enAttente > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => setStatusState('en_attente_autorisation')}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-bold shadow-sm transition"
+                            >
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                <span>{counts.enAttente} ouverture(s) en attente</span>
+                            </button>
+                        )}
                     </div>
                 </header>
 
@@ -159,7 +217,142 @@ export default function SessionsIndex({
                     </div>
                 )}
 
+                {/* KPI cliquables en direct pour filtrer */}
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <button
+                        type="button"
+                        onClick={() => setStatusState('all')}
+                        className={`p-3.5 rounded border text-left transition shadow-sm ${
+                            statusState === 'all'
+                                ? 'bg-[#04326D] text-white border-[#04326D]'
+                                : 'bg-white border-[#B2BED6] text-gray-700 hover:bg-gray-50'
+                        }`}
+                    >
+                        <span className="text-[10px] uppercase font-bold tracking-wider block opacity-80">
+                            Toutes les Sessions
+                        </span>
+                        <p className="text-2xl font-black font-mono mt-1">{counts.total}</p>
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => setStatusState('en_attente_autorisation')}
+                        className={`p-3.5 rounded border text-left transition shadow-sm ${
+                            statusState === 'en_attente_autorisation'
+                                ? 'bg-[#F58F20] text-white border-[#F58F20]'
+                                : 'bg-white border-[#B2BED6] text-amber-900 hover:bg-amber-50/50'
+                        }`}
+                    >
+                        <span className="text-[10px] uppercase font-bold tracking-wider block opacity-80">
+                            En Attente d'Accord
+                        </span>
+                        <p className="text-2xl font-black font-mono mt-1">{counts.enAttente}</p>
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => setStatusState('ouverte')}
+                        className={`p-3.5 rounded border text-left transition shadow-sm ${
+                            statusState === 'ouverte'
+                                ? 'bg-emerald-700 text-white border-emerald-700'
+                                : 'bg-white border-[#B2BED6] text-emerald-900 hover:bg-emerald-50/50'
+                        }`}
+                    >
+                        <span className="text-[10px] uppercase font-bold tracking-wider block opacity-80">
+                            Guichets Ouverts
+                        </span>
+                        <p className="text-2xl font-black font-mono mt-1">{counts.ouvertes}</p>
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => setStatusState('fermee')}
+                        className={`p-3.5 rounded border text-left transition shadow-sm ${
+                            statusState === 'fermee'
+                                ? 'bg-[#0B192C] text-white border-[#0B192C]'
+                                : 'bg-white border-[#B2BED6] text-gray-700 hover:bg-gray-50'
+                        }`}
+                    >
+                        <span className="text-[10px] uppercase font-bold tracking-wider block opacity-80">
+                            Clôturées
+                        </span>
+                        <p className="text-2xl font-black font-mono mt-1">{counts.fermees}</p>
+                    </button>
+                </div>
+
+                {/* Tableau filtré en direct */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
+                    <div className="p-3.5 border-b bg-gray-50 flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex items-center gap-1.5 font-bold text-[#0B192C] uppercase text-xs mr-2">
+                                <SlidersHorizontal className="w-4 h-4 text-[#04326D]" />
+                                <span>Filtres</span>
+                            </div>
+
+                            {/* Recherche textuelle directe */}
+                            <div className="relative">
+                                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                <input
+                                    type="text"
+                                    placeholder="Rechercher caissier, caisse, date..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="pl-8 pr-7 py-1 bg-white border border-[#B2BED6] rounded text-xs text-[#0B192C] w-60 focus:outline-none focus:border-[#04326D]"
+                                />
+                                {searchQuery && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setSearchQuery('')}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                    >
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Sélecteur Caisse */}
+                            <select
+                                value={caisseState}
+                                onChange={(e) => setCaisseState(e.target.value)}
+                                className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold focus:outline-none focus:border-[#04326D]"
+                            >
+                                <option value="all">Toutes les caisses</option>
+                                {caissesList.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.name}
+                                    </option>
+                                ))}
+                            </select>
+
+                            {/* Sélecteur Statut */}
+                            <select
+                                value={statusState}
+                                onChange={(e) => setStatusState(e.target.value)}
+                                className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold focus:outline-none focus:border-[#04326D]"
+                            >
+                                <option value="all">Tous les statuts</option>
+                                <option value="en_attente_autorisation">En attente d'autorisation</option>
+                                <option value="ouverte">Guichets ouverts</option>
+                                <option value="fermee">Sessions clôturées</option>
+                            </select>
+
+                            {hasActiveFilters && (
+                                <button
+                                    type="button"
+                                    onClick={handleResetFilters}
+                                    className="p-1 text-gray-500 hover:text-[#04326D] transition"
+                                    title="Réinitialiser les filtres"
+                                >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                </button>
+                            )}
+                        </div>
+
+                        <span className="text-[11px] text-gray-500 font-mono font-bold">
+                            {filteredSessions.length} session(s) affichée(s)
+                        </span>
+                    </div>
+
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs border-collapse">
                             <thead>
@@ -170,20 +363,20 @@ export default function SessionsIndex({
                                     <th className="py-3 px-4 text-right">Fond d'Ouverture</th>
                                     <th className="py-3 px-4 text-right">Entrées (+)</th>
                                     <th className="py-3 px-4 text-right">Sorties (-)</th>
-                                    <th className="py-3 px-4 text-right">Solde Fermeture</th>
+                                    <th className="py-3 px-4 text-right">Solde Clôture</th>
                                     <th className="py-3 px-4 text-center">État</th>
                                     <th className="py-3 px-4 text-right">Action</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
-                                {sessions.data.length === 0 ? (
+                                {filteredSessions.length === 0 ? (
                                     <tr>
                                         <td colSpan={9} className="py-12 text-center text-gray-400 italic">
-                                            Aucune session de caisse trouvée pour ces critères.
+                                            Aucune session de caisse ne correspond à vos critères.
                                         </td>
                                     </tr>
                                 ) : (
-                                    sessions.data.map((s) => (
+                                    filteredSessions.map((s) => (
                                         <tr key={s.id} className="hover:bg-[#F9F9FF] transition">
                                             <td className="py-3.5 px-4 whitespace-nowrap font-medium text-gray-800">
                                                 {s.date_session}
@@ -213,11 +406,11 @@ export default function SessionsIndex({
                                                     </span>
                                                 ) : s.status === 'ouverte' ? (
                                                     <span className="px-2 py-0.5 rounded text-[9.5px] font-bold bg-emerald-100 text-emerald-800 uppercase">
-                                                        Ouverte ({s.opened_at})
+                                                        Ouverte ({s.opened_at || 'En cours'})
                                                     </span>
                                                 ) : (
                                                     <span className="px-2 py-0.5 rounded text-[9.5px] font-bold bg-gray-100 text-gray-600 uppercase">
-                                                        Clôturée ({s.closed_at})
+                                                        Clôturée ({s.closed_at || 'Fin'})
                                                     </span>
                                                 )}
                                             </td>
@@ -303,7 +496,7 @@ export default function SessionsIndex({
                                     <input
                                         type="password"
                                         maxLength={6}
-                                        placeholder="Code PIN (4 à 6 chiffres)"
+                                        placeholder="Code PIN"
                                         value={pin}
                                         onChange={(e) => setPin(e.target.value)}
                                         className="w-full pl-8 pr-3 py-2 border border-[#B2BED6] rounded text-xs font-mono tracking-widest text-[#0B192C] focus:outline-none focus:border-[#04326D]"

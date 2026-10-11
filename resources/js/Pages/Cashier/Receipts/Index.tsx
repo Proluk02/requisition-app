@@ -14,6 +14,9 @@ import {
     KeyRound,
     AlertCircle,
     X,
+    FileSpreadsheet,
+    Upload,
+    Coins,
 } from 'lucide-react';
 
 interface CaisseOption {
@@ -22,6 +25,7 @@ interface CaisseOption {
     devise: string;
     solde_actuel: number;
     is_ouverte: boolean;
+    is_approvisionnee?: boolean;
 }
 
 interface MovementBEC {
@@ -36,6 +40,11 @@ interface MovementBEC {
     imputation: string;
     mode_paiement: string;
     reference_externe: string | null;
+    bordereau_banque_ref?: string | null;
+    bordereau_file_path?: string | null;
+    is_approvisionnement?: boolean;
+    is_approvisionnement_initial?: boolean;
+    status_validation?: string;
     caisse_nom?: string;
     cashier_nom?: string;
 }
@@ -60,7 +69,21 @@ export default function ReceiptsIndex({
     const [search, setSearch] = useState('');
     const [printBEC, setPrintBEC] = useState<MovementBEC | null>(null);
 
-    const form = useForm({
+    const form = useForm<{
+        tiers_nom: string;
+        montant: string;
+        devise: string;
+        montant_en_lettres: string;
+        motif: string;
+        imputation: string;
+        mode_paiement: string;
+        reference_externe: string;
+        is_approvisionnement: boolean;
+        is_approvisionnement_initial: boolean;
+        bordereau_banque_ref: string;
+        bordereau_file: File | null;
+        pin: string;
+    }>({
         tiers_nom: '',
         montant: '',
         devise: selectedCaisse?.devise ?? 'FC',
@@ -69,6 +92,10 @@ export default function ReceiptsIndex({
         imputation: '6.112.a',
         mode_paiement: 'Espèces',
         reference_externe: '',
+        is_approvisionnement: false,
+        is_approvisionnement_initial: !selectedCaisse?.is_approvisionnee,
+        bordereau_banque_ref: '',
+        bordereau_file: null,
         pin: '',
     });
 
@@ -94,6 +121,7 @@ export default function ReceiptsIndex({
         if (!selectedCaisse) return;
 
         form.post(route('cashier.movement.entree', selectedCaisse.id), {
+            forceFormData: true,
             preserveScroll: true,
             onSuccess: () => {
                 setModalOpen(false);
@@ -110,7 +138,8 @@ export default function ReceiptsIndex({
     const filteredReceipts = receipts.filter((r) =>
         r.numero_piece.toLowerCase().includes(search.toLowerCase()) ||
         r.tiers_nom.toLowerCase().includes(search.toLowerCase()) ||
-        r.motif.toLowerCase().includes(search.toLowerCase())
+        r.motif.toLowerCase().includes(search.toLowerCase()) ||
+        (r.bordereau_banque_ref && r.bordereau_banque_ref.toLowerCase().includes(search.toLowerCase()))
     );
 
     return (
@@ -151,7 +180,7 @@ export default function ReceiptsIndex({
                             Entrées de Caisse & Approvisionnements (BEC)
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
-                            Enregistrement des versements de fonds, réapprovisionnements de guichet et retours de décharge.
+                            Alimentations de fonds de caisse avec preuve bancaire, réapprovisionnements et retours de décharge.
                         </p>
                     </div>
 
@@ -175,7 +204,12 @@ export default function ReceiptsIndex({
 
                         <button
                             type="button"
-                            onClick={() => setModalOpen(true)}
+                            onClick={() => {
+                                form.reset();
+                                form.setData('is_approvisionnement_initial', !selectedCaisse?.is_approvisionnee);
+                                form.setData('is_approvisionnement', !selectedCaisse?.is_approvisionnee);
+                                setModalOpen(true);
+                            }}
                             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow-sm transition"
                         >
                             <Plus className="w-4 h-4 text-emerald-400" />
@@ -190,17 +224,23 @@ export default function ReceiptsIndex({
                         <span>{flash.success}</span>
                     </div>
                 )}
+                {flash?.error && (
+                    <div className="p-3.5 rounded bg-red-50 border border-red-300 text-red-900 text-xs font-semibold flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-red-700 shrink-0" />
+                        <span>{flash.error}</span>
+                    </div>
+                )}
 
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="p-4 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <span className="text-xs font-bold uppercase tracking-wider text-[#0B192C]">
-                            Historique des Bons d'Entrée Caisse ({receipts.length})
+                            Historique des Entrées de Caisse ({receipts.length})
                         </span>
-                        <div className="relative w-full sm:w-64">
+                        <div className="relative w-full sm:w-72">
                             <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                             <input
                                 type="text"
-                                placeholder="Rechercher pièce, déposant, motif..."
+                                placeholder="Rechercher pièce, bordereau, déposant..."
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
                                 className="w-full pl-8 pr-3 py-1.5 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D]"
@@ -214,9 +254,10 @@ export default function ReceiptsIndex({
                                 <tr className="bg-[#0B192C] text-white uppercase text-[10px] font-bold tracking-wider">
                                     <th className="py-3 px-4">N° Pièce</th>
                                     <th className="py-3 px-4">Date</th>
+                                    <th className="py-3 px-4">Type d'Entrée</th>
                                     <th className="py-3 px-4">Reçu de (Déposant)</th>
                                     <th className="py-3 px-4">Motif</th>
-                                    <th className="py-3 px-4">Imputation</th>
+                                    <th className="py-3 px-4">Bordereau / Réf</th>
                                     <th className="py-3 px-4 text-right">Montant Encaissé</th>
                                     <th className="py-3 px-4 text-right">Imprimer</th>
                                 </tr>
@@ -224,7 +265,7 @@ export default function ReceiptsIndex({
                             <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
                                 {filteredReceipts.length === 0 ? (
                                     <tr>
-                                        <td colSpan={7} className="py-12 text-center text-gray-400 italic">
+                                        <td colSpan={8} className="py-12 text-center text-gray-400 italic">
                                             Aucun Bon d'Entrée Caisse enregistré pour ce guichet.
                                         </td>
                                     </tr>
@@ -237,14 +278,35 @@ export default function ReceiptsIndex({
                                             <td className="py-3.5 px-4 whitespace-nowrap text-gray-600">
                                                 {bec.date_mouvement}
                                             </td>
+                                            <td className="py-3.5 px-4 whitespace-nowrap">
+                                                {bec.is_approvisionnement_initial ? (
+                                                    <span className="px-2 py-0.5 rounded text-[9.5px] font-bold bg-purple-100 text-purple-900 uppercase">
+                                                        Dotation Initiale
+                                                    </span>
+                                                ) : bec.is_approvisionnement ? (
+                                                    <span className="px-2 py-0.5 rounded text-[9.5px] font-bold bg-blue-100 text-[#04326D] uppercase">
+                                                        Approvisionnement
+                                                    </span>
+                                                ) : (
+                                                    <span className="px-2 py-0.5 rounded text-[9.5px] font-bold bg-gray-100 text-gray-700 uppercase">
+                                                        Recette / Décharge
+                                                    </span>
+                                                )}
+                                            </td>
                                             <td className="py-3.5 px-4 font-bold text-gray-800">
                                                 {bec.tiers_nom}
                                             </td>
                                             <td className="py-3.5 px-4 max-w-xs truncate" title={bec.motif}>
                                                 {bec.motif}
                                             </td>
-                                            <td className="py-3.5 px-4 font-mono font-bold text-gray-600">
-                                                {bec.imputation}
+                                            <td className="py-3.5 px-4 font-mono text-gray-600">
+                                                {bec.bordereau_banque_ref ? (
+                                                    <span className="font-bold text-[#04326D]">
+                                                        Bord. {bec.bordereau_banque_ref}
+                                                    </span>
+                                                ) : (
+                                                    '—'
+                                                )}
                                             </td>
                                             <td className="py-3.5 px-4 text-right font-mono font-bold whitespace-nowrap text-emerald-700">
                                                 + {money(bec.montant, bec.devise)}
@@ -256,7 +318,7 @@ export default function ReceiptsIndex({
                                                     className="inline-flex items-center gap-1 px-2.5 py-1 border border-[#04326D] text-[#04326D] hover:bg-blue-50 rounded text-[11px] font-bold transition"
                                                 >
                                                     <Printer className="w-3.5 h-3.5" />
-                                                    <span>Imprimer BEC</span>
+                                                    <span>Imprimer</span>
                                                 </button>
                                             </td>
                                         </tr>
@@ -268,14 +330,19 @@ export default function ReceiptsIndex({
                 </div>
             </div>
 
-            {/* MODALE : Enregistrement Bon d'Entrée Caisse */}
+            {/* MODALE : Enregistrement Bon d'Entrée Caisse avec Bordereau Bancaire */}
             {modalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
-                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-lg w-full p-6 space-y-4 animate-slide-down">
+                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-lg w-full p-6 space-y-4 max-h-[92vh] overflow-y-auto animate-slide-down">
                         <header className="flex items-start justify-between border-b pb-3">
-                            <h3 className="text-sm font-bold text-[#0B192C] uppercase tracking-wide">
-                                Nouveau Bon d'Entrée Caisse (BEC)
-                            </h3>
+                            <div>
+                                <h3 className="text-sm font-bold text-[#0B192C] uppercase tracking-wide">
+                                    Nouveau Bon d'Entrée Caisse (BEC)
+                                </h3>
+                                <p className="text-[11px] text-gray-500">
+                                    Guichet : <strong>{selectedCaisse?.name}</strong> ({selectedCaisse?.devise})
+                                </p>
+                            </div>
                             <button
                                 type="button"
                                 onClick={() => setModalOpen(false)}
@@ -286,12 +353,40 @@ export default function ReceiptsIndex({
                         </header>
 
                         <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
+                            {/* Type d'approvisionnement */}
+                            <div className="p-3 bg-blue-50/60 border border-blue-200 rounded space-y-2">
+                                <label className="flex items-center gap-2 cursor-pointer font-bold text-[#04326D]">
+                                    <input
+                                        type="checkbox"
+                                        checked={form.data.is_approvisionnement}
+                                        onChange={(e) => {
+                                            form.setData({
+                                                ...form.data,
+                                                is_approvisionnement: e.target.checked,
+                                                motif: e.target.checked
+                                                    ? 'Approvisionnement fond de caisse via retrait banque'
+                                                    : '',
+                                            });
+                                        }}
+                                        className="rounded border-gray-300 text-[#04326D] focus:ring-[#04326D]"
+                                    />
+                                    <span>Il s'agit d'un Approvisionnement / Dotation Bancaire</span>
+                                </label>
+                                {form.data.is_approvisionnement && (
+                                    <p className="text-[10.5px] text-gray-600 leading-tight">
+                                        Exige la saisie du numéro de bordereau bancaire et le téléversement du justificatif (bordereau de retrait ou versement).
+                                    </p>
+                                )}
+                            </div>
+
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label className="block font-bold text-gray-700 mb-1">Reçu de (Déposant) *</label>
+                                    <label className="block font-bold text-gray-700 mb-1">
+                                        {form.data.is_approvisionnement ? 'Banque / Déposant *' : 'Reçu de (Déposant) *'}
+                                    </label>
                                     <input
                                         type="text"
-                                        placeholder="ex: Mr. JUMBA"
+                                        placeholder="ex: Rawbank / Mr. Jumba"
                                         value={form.data.tiers_nom}
                                         onChange={(e) => form.setData('tiers_nom', e.target.value)}
                                         className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
@@ -304,7 +399,7 @@ export default function ReceiptsIndex({
                                         type="number"
                                         step="0.01"
                                         min="0.01"
-                                        placeholder="19000"
+                                        placeholder="0.00"
                                         value={form.data.montant}
                                         onChange={(e) => handleMontantChange(e.target.value)}
                                         className="w-full border border-[#B2BED6] rounded p-2 text-xs font-mono font-bold focus:outline-none focus:border-[#04326D]"
@@ -314,10 +409,9 @@ export default function ReceiptsIndex({
                             </div>
 
                             <div>
-                                <label className="block font-bold text-gray-700 mb-1">La somme de (en lettre) *</label>
+                                <label className="block font-bold text-gray-700 mb-1">Montant en Toutes Lettres *</label>
                                 <input
                                     type="text"
-                                    placeholder="ex: Dix neuf mille francs congolais"
                                     value={form.data.montant_en_lettres}
                                     onChange={(e) => form.setData('montant_en_lettres', e.target.value)}
                                     className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
@@ -325,12 +419,45 @@ export default function ReceiptsIndex({
                                 />
                             </div>
 
+                            {/* Section bordereau bancaire si approvisionnement */}
+                            {form.data.is_approvisionnement && (
+                                <div className="p-3 bg-amber-50/50 border border-amber-300 rounded space-y-2.5">
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block font-bold text-amber-950 mb-1">
+                                                N° Bordereau Banque *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                placeholder="ex: BORD-RAW-00458"
+                                                value={form.data.bordereau_banque_ref}
+                                                onChange={(e) => form.setData('bordereau_banque_ref', e.target.value)}
+                                                className="w-full border border-amber-300 rounded p-1.5 text-xs font-mono font-bold bg-white focus:outline-none"
+                                                required={form.data.is_approvisionnement}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block font-bold text-amber-950 mb-1">
+                                                Scan Bordereau (PDF/Image) *
+                                            </label>
+                                            <input
+                                                type="file"
+                                                accept=".pdf,.jpg,.jpeg,.png"
+                                                onChange={(e) => form.setData('bordereau_file', e.target.files?.[0] ?? null)}
+                                                className="w-full text-[11px] file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-bold file:bg-[#04326D] file:text-white"
+                                                required={form.data.is_approvisionnement}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="block font-bold text-gray-700 mb-1">Motif du Versement *</label>
                                     <input
                                         type="text"
-                                        placeholder="ex: Retour en caisse Cfr B.S.C. N° 484"
+                                        placeholder="ex: Approvisionnement banque / Retour décharge"
                                         value={form.data.motif}
                                         onChange={(e) => form.setData('motif', e.target.value)}
                                         className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
@@ -350,24 +477,22 @@ export default function ReceiptsIndex({
                                 </div>
                             </div>
 
-                            <div className="p-3 bg-amber-50 border border-amber-300 rounded space-y-2">
+                            {/* PIN de confirmation */}
+                            <div className="p-3 bg-amber-50 border border-amber-300 rounded space-y-1.5">
                                 <label className="block text-[11px] font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
-                                    <Lock className="w-3.5 h-3.5 text-amber-800" />
+                                    <KeyRound className="w-3.5 h-3.5 text-amber-800" />
                                     <span>Code PIN du Caissier (Obligatoire) *</span>
                                 </label>
-                                <div className="relative">
-                                    <KeyRound className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                                    <input
-                                        type="password"
-                                        maxLength={6}
-                                        placeholder="Code PIN personnel (4 à 6 chiffres)"
-                                        value={form.data.pin}
-                                        onChange={(e) => form.setData('pin', e.target.value)}
-                                        className="w-full pl-8 pr-3 py-2 border border-amber-300 bg-white rounded text-xs font-mono tracking-widest text-[#0B192C] focus:outline-none focus:ring-1 focus:ring-amber-500"
-                                        autoFocus
-                                        required
-                                    />
-                                </div>
+                                <input
+                                    type="password"
+                                    maxLength={6}
+                                    placeholder="Code PIN personnel"
+                                    value={form.data.pin}
+                                    onChange={(e) => form.setData('pin', e.target.value)}
+                                    className="w-full pl-3 pr-3 py-1.5 border border-amber-300 bg-white rounded text-xs font-mono tracking-widest text-[#0B192C] focus:outline-none"
+                                    autoFocus
+                                    required
+                                />
                             </div>
 
                             <div className="flex justify-end gap-2 pt-2 border-t">
@@ -383,7 +508,7 @@ export default function ReceiptsIndex({
                                     disabled={form.processing}
                                     className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition"
                                 >
-                                    Enregistrer l'Entrée
+                                    {form.processing ? 'Enregistrement...' : 'Enregistrer le Bon d’Entrée'}
                                 </button>
                             </div>
                         </form>
@@ -450,7 +575,7 @@ export default function ReceiptsIndex({
 
                     <div className="grid grid-cols-2 gap-4 pt-8 text-center text-xs">
                         <div className="space-y-12">
-                            <strong className="block underline uppercase">Le Client / Déposant</strong>
+                            <strong className="block underline uppercase">Le Déposant / Bénéficiaire</strong>
                             <p className="font-bold">{printBEC.tiers_nom}</p>
                         </div>
                         <div className="space-y-12">

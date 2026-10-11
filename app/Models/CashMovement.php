@@ -22,7 +22,13 @@ class CashMovement extends Model
         'cashier_id',
         'requisition_id',
         'budget_line_id',
-        'type',
+        'type', // entree | sortie
+        'is_approvisionnement_initial',
+        'is_approvisionnement',
+        'status_validation', // en_attente_finance | valide | rejete
+        'validated_by',
+        'validated_at',
+        'pin_validated',
         'numero_piece',
         'date_mouvement',
         'tiers_nom',
@@ -33,6 +39,9 @@ class CashMovement extends Model
         'imputation',
         'mode_paiement',
         'reference_externe',
+        'bordereau_banque_ref',
+        'bordereau_file_path',
+        'billetage',
         'signature_tiers',
         'signature_caissier',
         'signature_responsable',
@@ -43,6 +52,11 @@ class CashMovement extends Model
         return [
             'date_mouvement' => 'date',
             'montant' => 'float',
+            'is_approvisionnement_initial' => 'boolean',
+            'is_approvisionnement' => 'boolean',
+            'pin_validated' => 'boolean',
+            'validated_at' => 'datetime',
+            'billetage' => 'array',
         ];
     }
 
@@ -59,6 +73,11 @@ class CashMovement extends Model
     public function cashier(): BelongsTo
     {
         return $this->belongsTo(User::class, 'cashier_id');
+    }
+
+    public function validator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'validated_by');
     }
 
     public function requisition(): BelongsTo
@@ -84,5 +103,15 @@ class CashMovement extends Model
     public function isSortie(): bool
     {
         return $this->type === 'sortie';
+    }
+
+    public function isApprovisionnement(): bool
+    {
+        return (bool) ($this->is_approvisionnement || $this->is_approvisionnement_initial);
+    }
+
+    public function isValidatedByFinance(): bool
+    {
+        return $this->status_validation === 'valide' && (bool) $this->pin_validated;
     }
 }

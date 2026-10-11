@@ -14,14 +14,15 @@ class CashRegister extends Model
     use HasFactory, HasUuids;
 
     public $incrementing = false;
-
     protected $keyType = 'string';
 
     protected $fillable = [
         'name',
         'code',
-        'devise',
+        'devise', // 'USD' ou 'FC'/'CDF'
         'solde_actuel',
+        'solde_initial_dotation',
+        'is_approvisionnee',
         'is_active',
     ];
 
@@ -29,6 +30,8 @@ class CashRegister extends Model
     {
         return [
             'solde_actuel' => 'float',
+            'solde_initial_dotation' => 'float',
+            'is_approvisionnee' => 'boolean',
             'is_active' => 'boolean',
         ];
     }
@@ -50,11 +53,31 @@ class CashRegister extends Model
 
     public function activeSession(): HasOne
     {
-        return $this->hasOne(CashRegisterSession::class)->where('status', 'ouverte')->latestOfMany();
+        return $this->hasOne(CashRegisterSession::class)
+            ->whereIn('status', ['ouverte', 'en_attente_autorisation'])
+            ->latestOfMany();
+    }
+
+    public function lastClosedSession(): HasOne
+    {
+        return $this->hasOne(CashRegisterSession::class)
+            ->where('status', 'fermee')
+            ->latestOfMany('date_session');
+    }
+
+    public function initialDotationMovement(): HasOne
+    {
+        return $this->hasOne(CashMovement::class)
+            ->where('is_approvisionnement_initial', true)
+            ->where('status_validation', 'valide')
+            ->latestOfMany();
     }
 
     public function isOuverte(): bool
     {
-        return $this->sessions()->where('status', 'ouverte')->whereDate('date_session', now()->toDateString())->exists();
+        return $this->sessions()
+            ->where('status', 'ouverte')
+            ->whereDate('date_session', now()->toDateString())
+            ->exists();
     }
 }

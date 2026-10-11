@@ -14,6 +14,7 @@ import {
     KeyRound,
     AlertCircle,
     X,
+    AlertTriangle,
 } from 'lucide-react';
 
 interface CaisseOption {
@@ -74,7 +75,7 @@ interface Props extends PageProps {
 }
 
 const money = (n: number, dev: string) =>
-    `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${dev}`;
+    `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${dev}`;
 
 export default function DisbursementsIndex({
     userCaisses = [],
@@ -116,9 +117,13 @@ export default function DisbursementsIndex({
         setPinError(null);
     };
 
+    const soldeDisponible = selectedCaisse?.solde_actuel ?? 0;
+    const isFondsInsuffisants = disburseReq ? soldeDisponible < disburseReq.montantTotal : false;
+    const isCaisseAZero = soldeDisponible <= 0;
+
     const handleSubmitDisburse = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!disburseReq) return;
+        if (!disburseReq || isFondsInsuffisants || isCaisseAZero) return;
 
         setSubmitting(true);
         setPinError(null);
@@ -194,30 +199,45 @@ export default function DisbursementsIndex({
                             Décaissements & Bons de Sortie Caisse (BSC)
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
-                            Traitement des réquisitions visées par la Direction et délivrance du Bon de Sortie Caisse officiel.
+                            Traitement des réquisitions validées et délivrance officielle du Bon de Sortie Caisse.
                         </p>
                     </div>
 
-                    {userCaisses.length > 1 && (
-                        <div className="flex items-center gap-2 bg-white border border-[#B2BED6] rounded px-3 py-1.5">
-                            <Building2 className="w-4 h-4 text-[#04326D]" />
-                            <label className="text-[11px] font-bold uppercase tracking-widest text-gray-600">
-                                Guichet :
-                            </label>
-                            <select
-                                value={selectedCaisse?.id ?? ''}
-                                onChange={(e) => handleSelectCaisse(e.target.value)}
-                                className="border-none bg-transparent text-[12px] font-bold text-[#04326D] focus:outline-none cursor-pointer"
-                            >
-                                {userCaisses.map((c) => (
-                                    <option key={c.id} value={c.id}>
-                                        {c.name} ({c.devise})
-                                    </option>
-                                ))}
-                            </select>
+                    <div className="flex items-center gap-3">
+                        <div className={`p-2 px-3 bg-white border rounded text-right ${isCaisseAZero ? 'border-red-400 bg-red-50' : 'border-[#B2BED6]'}`}>
+                            <span className="text-[10px] font-bold text-gray-500 uppercase block">Solde en caisse :</span>
+                            <strong className={`text-sm font-mono ${isCaisseAZero ? 'text-red-700' : 'text-[#04326D]'}`}>
+                                {money(soldeDisponible, selectedCaisse?.devise ?? '')}
+                            </strong>
                         </div>
-                    )}
+
+                        {userCaisses.length > 1 && (
+                            <div className="flex items-center gap-2 bg-white border border-[#B2BED6] rounded px-3 py-1.5">
+                                <Building2 className="w-4 h-4 text-[#04326D]" />
+                                <select
+                                    value={selectedCaisse?.id ?? ''}
+                                    onChange={(e) => handleSelectCaisse(e.target.value)}
+                                    className="border-none bg-transparent text-[12px] font-bold text-[#04326D] focus:outline-none cursor-pointer"
+                                >
+                                    {userCaisses.map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                            {c.name} ({c.devise})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+                    </div>
                 </header>
+
+                {isCaisseAZero && (
+                    <div className="p-3.5 rounded bg-red-50 border border-red-300 text-red-900 text-xs font-semibold flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+                        <span>
+                            <strong>Caisse à zéro ({money(0, selectedCaisse?.devise ?? '')}) :</strong> Aucun décaissement n'est permis. Veuillez effectuer un approvisionnement (BEC) pour continuer les sorties.
+                        </span>
+                    </div>
+                )}
 
                 {flash?.success && (
                     <div className="p-3.5 rounded bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold flex items-center gap-2">
@@ -246,7 +266,7 @@ export default function DisbursementsIndex({
                             >
                                 <Clock className="w-3.5 h-3.5" />
                                 <span>Bons à Payer en attente</span>
-                                <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-[#F58F20] text-white">
+                                <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-[#F58F20] text-white font-mono font-bold">
                                     {aDecaisser.length}
                                 </span>
                             </button>
@@ -262,7 +282,7 @@ export default function DisbursementsIndex({
                             >
                                 <ArrowUpRight className="w-3.5 h-3.5" />
                                 <span>Bons de Sortie Récents (BSC)</span>
-                                <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 font-bold">
+                                <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 font-bold font-mono">
                                     {recentDisbursements.length}
                                 </span>
                             </button>
@@ -301,42 +321,49 @@ export default function DisbursementsIndex({
                                             </td>
                                         </tr>
                                     ) : (
-                                        filteredADecaisser.map((req) => (
-                                            <tr key={req.id} className="hover:bg-[#F9F9FF] transition">
-                                                <td className="py-3.5 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
-                                                    {req.numero}
-                                                </td>
-                                                <td className="py-3.5 px-4">
-                                                    <p className="font-bold text-[#0B192C]">{req.projet}</p>
-                                                    <p className="text-[10px] text-gray-500">{req.caisseAttribuee}</p>
-                                                </td>
-                                                <td className="py-3.5 px-4 whitespace-nowrap font-bold text-gray-800">
-                                                    {req.initiateurNom}
-                                                </td>
-                                                <td className="py-3.5 px-4 text-right font-mono font-bold whitespace-nowrap text-sm text-[#0B192C]">
-                                                    {money(req.montantTotal, req.devise)}
-                                                </td>
-                                                <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                                                    {req.is_urgent ? (
-                                                        <span className="px-2 py-0.5 rounded bg-red-100 text-red-800 font-black text-[9px] uppercase">
-                                                            Urgent
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-gray-400 text-[10px]">Normal</span>
-                                                    )}
-                                                </td>
-                                                <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleOpenDisburse(req)}
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white rounded font-bold text-xs shadow-sm transition active:scale-[0.98]"
-                                                    >
-                                                        <ArrowUpRight className="w-3.5 h-3.5" />
-                                                        <span>Décaisser & Émettre BSC</span>
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))
+                                        filteredADecaisser.map((req) => {
+                                            const isManqueFonds = soldeDisponible < req.montantTotal;
+                                            return (
+                                                <tr key={req.id} className="hover:bg-[#F9F9FF] transition">
+                                                    <td className="py-3.5 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
+                                                        {req.numero}
+                                                    </td>
+                                                    <td className="py-3.5 px-4">
+                                                        <p className="font-bold text-[#0B192C]">{req.projet}</p>
+                                                        <p className="text-[10px] text-gray-500">{req.caisseAttribuee}</p>
+                                                    </td>
+                                                    <td className="py-3.5 px-4 whitespace-nowrap font-bold text-gray-800">
+                                                        {req.initiateurNom}
+                                                    </td>
+                                                    <td className="py-3.5 px-4 text-right font-mono font-bold whitespace-nowrap text-sm text-[#0B192C]">
+                                                        {money(req.montantTotal, req.devise)}
+                                                    </td>
+                                                    <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                                                        {req.is_urgent ? (
+                                                            <span className="px-2 py-0.5 rounded bg-red-100 text-red-800 font-black text-[9px] uppercase">
+                                                                Urgent
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-gray-400 text-[10px]">Normal</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleOpenDisburse(req)}
+                                                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded font-bold text-xs shadow-sm transition active:scale-[0.98] ${
+                                                                isManqueFonds
+                                                                    ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                                                                    : 'bg-[#10B981] hover:bg-[#059669] text-white'
+                                                            }`}
+                                                        >
+                                                            <ArrowUpRight className="w-3.5 h-3.5" />
+                                                            <span>{isManqueFonds ? 'Bloqué (Fonds insuffisants)' : 'Décaisser & Émettre BSC'}</span>
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })
                                     )}
                                 </tbody>
                             </table>
@@ -401,7 +428,7 @@ export default function DisbursementsIndex({
                 </div>
             </div>
 
-            {/* MODALE : Décaissement et émission du Bon de Sortie Caisse */}
+            {/* MODALE : Décaissement */}
             {disburseReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-lg w-full p-6 space-y-4 animate-slide-down">
@@ -423,17 +450,31 @@ export default function DisbursementsIndex({
                             </button>
                         </header>
 
+                        {/* Bloc alerte si solde insuffisant */}
+                        {isFondsInsuffisants && (
+                            <div className="p-3.5 bg-red-50 border-2 border-red-300 rounded text-red-900 text-xs space-y-1">
+                                <div className="flex items-center gap-1.5 font-bold text-red-800">
+                                    <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+                                    <span>Solde Insuffisant en Caisse</span>
+                                </div>
+                                <p className="leading-snug text-[11px]">
+                                    Le solde actuel du guichet (<strong>{money(soldeDisponible, selectedCaisse?.devise ?? '')}</strong>) ne permet pas de décaisser le montant de <strong>{money(disburseReq.montantTotal, disburseReq.devise)}</strong>.
+                                    Le décaissement est bloqué jusqu'à approvisionnement de la caisse via un Bon d'Entrée (BEC).
+                                </p>
+                            </div>
+                        )}
+
                         <div className="p-3 bg-blue-50/60 border border-blue-200 rounded flex justify-between items-center text-xs">
                             <div>
                                 <span className="text-[10px] font-bold uppercase text-gray-500 block">
-                                    Payer à (Bénéficiaire)
+                                    Bénéficiaire
                                 </span>
                                 <strong className="text-[#0B192C]">{disburseReq.initiateurNom}</strong>
                                 <span className="text-[11px] text-gray-500 block">{disburseReq.projet}</span>
                             </div>
                             <div className="text-right">
                                 <span className="text-[10px] font-bold uppercase text-gray-500 block">
-                                    Montant à sortir
+                                    Montant à décaisser
                                 </span>
                                 <span className="text-base font-black font-mono text-red-700">
                                     {money(disburseReq.montantTotal, disburseReq.devise)}
@@ -455,7 +496,8 @@ export default function DisbursementsIndex({
                                     <select
                                         value={modePaiement}
                                         onChange={(e) => setModePaiement(e.target.value)}
-                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs font-bold text-[#0B192C] bg-white focus:outline-none focus:border-[#04326D]"
+                                        disabled={isFondsInsuffisants}
+                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs font-bold text-[#0B192C] bg-white focus:outline-none focus:border-[#04326D] disabled:bg-gray-100"
                                     >
                                         <option value="Espèces">Espèces (Cash)</option>
                                         <option value="Chèque">Chèque Bancaire</option>
@@ -472,7 +514,8 @@ export default function DisbursementsIndex({
                                         placeholder="ex: CHQ-002158"
                                         value={refPaiement}
                                         onChange={(e) => setRefPaiement(e.target.value)}
-                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs font-mono focus:outline-none focus:border-[#04326D]"
+                                        disabled={isFondsInsuffisants}
+                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs font-mono focus:outline-none focus:border-[#04326D] disabled:bg-gray-100"
                                     />
                                 </div>
                             </div>
@@ -483,7 +526,8 @@ export default function DisbursementsIndex({
                                     type="text"
                                     value={montantLettres}
                                     onChange={(e) => setMontantLettres(e.target.value)}
-                                    className="w-full border border-[#B2BED6] rounded p-2 text-xs font-semibold focus:outline-none focus:border-[#04326D]"
+                                    disabled={isFondsInsuffisants}
+                                    className="w-full border border-[#B2BED6] rounded p-2 text-xs font-semibold focus:outline-none focus:border-[#04326D] disabled:bg-gray-100"
                                     required
                                 />
                             </div>
@@ -501,9 +545,10 @@ export default function DisbursementsIndex({
                                         placeholder="Code PIN personnel (4 à 6 chiffres)"
                                         value={pin}
                                         onChange={(e) => setPin(e.target.value)}
-                                        className="w-full pl-8 pr-3 py-2 border border-amber-300 bg-white rounded text-xs font-mono tracking-widest text-[#0B192C] focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                        className="w-full pl-8 pr-3 py-2 border border-amber-300 bg-white rounded text-xs font-mono tracking-widest text-[#0B192C] focus:outline-none focus:ring-1 focus:ring-amber-500 disabled:bg-gray-100"
                                         autoFocus
                                         required
+                                        disabled={isFondsInsuffisants}
                                     />
                                 </div>
                             </div>
@@ -514,14 +559,14 @@ export default function DisbursementsIndex({
                                     onClick={() => setDisburseReq(null)}
                                     className="px-3.5 py-1.5 border border-[#B2BED6] rounded text-xs font-semibold text-gray-600 hover:bg-gray-50"
                                 >
-                                    Annuler
+                                    Fermer
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={submitting}
-                                    className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white rounded text-xs font-bold shadow transition"
+                                    disabled={submitting || isFondsInsuffisants}
+                                    className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] disabled:opacity-40 disabled:cursor-not-allowed text-white rounded text-xs font-bold shadow transition"
                                 >
-                                    {submitting ? 'Validation...' : 'Valider & Décaisser'}
+                                    {submitting ? 'Validation...' : isFondsInsuffisants ? 'Fonds Insuffisants (Rejet)' : 'Valider & Décaisser'}
                                 </button>
                             </div>
                         </form>
@@ -529,7 +574,7 @@ export default function DisbursementsIndex({
                 </div>
             )}
 
-            {/* FORMAT D'IMPRESSION OFFICIEL DU BON DE SORTIE CAISSE (Photos 3 & 4) */}
+            {/* FORMAT D'IMPRESSION OFFICIEL BSC */}
             {printBSC && (
                 <div id="bon-sortie-caisse-print" className="p-6 border-2 border-black font-serif text-black space-y-4">
                     <div className="flex items-start justify-between border-b-2 border-black pb-2">
@@ -541,7 +586,7 @@ export default function DisbursementsIndex({
                             <p className="italic">Référence : Concession Domaine Mariale</p>
                         </div>
                         <div className="text-right">
-                            <span className="text-sm font-bold block border-2 border-black px-3 py-1">
+                            <span className="text-sm font-bold block border-2 border-black px-3 py-1 font-mono">
                                 {printBSC.montant.toLocaleString('fr-FR')} {printBSC.devise}
                             </span>
                         </div>

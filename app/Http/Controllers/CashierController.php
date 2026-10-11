@@ -22,7 +22,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class CashierController extends Controller
 {
     /**
-     * Module 1 : Vue d'ensemble du guichet et gestion de la session journalière.
+     * Module 1 : Vue d'ensemble du guichet.
      */
     public function index(Request $request): Response
     {
@@ -30,18 +30,16 @@ class CashierController extends Controller
         abort_unless($user->hasRole('cashier') || $user->hasRole('admin'), 403, 'Accès réservé au guichet caisse.');
 
         $userCaisses = $this->getUserCaisses($user);
-        $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
-        $selectedCaisse = CashRegister::with('activeSession')->find($selectedCaisseId) ?? $userCaisses->first();
 
-        $activeSession = null;
-        $sessionMouvements = [];
-
-        if ($selectedCaisse) {
-            $activeSession = CashRegisterSession::where('cash_register_id', $selectedCaisse->id)
-                ->whereDate('date_session', now()->toDateString())
+        // NOUVEAU : On charge TOUTES les données de TOUTES les caisses pour React
+        // Ainsi, la bascule en Frontend sera instantanée, sans aucune requête serveur !
+        $caissesData = $userCaisses->map(function ($caisse) {
+            $activeSession = CashRegisterSession::where('cash_register_id', $caisse->id)
+                ->whereIn('status', ['ouverte', 'en_attente_autorisation'])
                 ->latest()
                 ->first();
 
+            $sessionMouvements = [];
             if ($activeSession && $activeSession->status === 'ouverte') {
                 $sessionMouvements = CashMovement::where('session_id', $activeSession->id)
                     ->orderByDesc('created_at')
@@ -49,41 +47,59 @@ class CashierController extends Controller
                     ->get()
                     ->map(fn (CashMovement $m) => $this->transformMovement($m));
             }
-        }
+
+            $lastClosed = CashRegisterSession::where('cash_register_id', $caisse->id)
+                ->where('status', 'fermee')
+                ->latest('date_session')
+                ->first();
+
+            $openingPreview = null;
+            if ($lastClosed && $lastClosed->solde_fermeture !== null) {
+                $openingPreview = [
+                    'type' => 'report_veille',
+                    'solde' => (float) $lastClosed->solde_fermeture,
+                    'date_source' => $lastClosed->date_session ? $lastClosed->date_session->format('d/m/Y') : null,
+                    'is_blocked' => false,
+                ];
+            } else {
+                $soldeInitial = (float) ($caisse->solde_actuel ?? 0.0);
+                $openingPreview = [
+                    'type' => 'solde_initial',
+                    'solde' => $soldeInitial,
+                    'date_source' => null,
+                    'is_blocked' => false,
+                ];
+            }
+
+            return [
+                'id' => $caisse->id,
+                'name' => $caisse->name,
+                'code' => $caisse->code,
+                'devise' => $caisse->devise,
+                'solde_actuel' => (float) ($caisse->solde_actuel ?? 0.0),
+                'is_active' => (bool) $caisse->is_active,
+                'is_ouverte' => $caisse->isOuverte(),
+                'is_approvisionnee' => (bool) $caisse->is_approvisionnee,
+                'activeSession' => $activeSession ? [
+                    'id' => $activeSession->id,
+                    'status' => $activeSession->status,
+                    'date_session' => $activeSession->date_session ? $activeSession->date_session->format('d/m/Y') : '',
+                    'solde_ouverture' => (float) ($activeSession->solde_ouverture ?? 0.0),
+                    'total_entrees' => (float) ($activeSession->total_entrees ?? 0.0),
+                    'total_sorties' => (float) ($activeSession->total_sorties ?? 0.0),
+                    'opened_at' => $activeSession->opened_at ? $activeSession->opened_at->format('H:i') : null,
+                    'observation_ouverture' => $activeSession->observation_ouverture,
+                ] : null,
+                'openingPreview' => $openingPreview,
+                'sessionMouvements' => $sessionMouvements,
+            ];
+        });
 
         $totalAttenteUSD = (float) Requisition::where('status', 'decaissement_caisse')->where('devise', 'USD')->sum('montant_total');
-        $totalAttenteFC = (float) Requisition::where('status', 'decaissement_caisse')->where('devise', 'FC')->sum('montant_total');
+        $totalAttenteFC = (float) Requisition::where('status', 'decaissement_caisse')->whereIn('devise', ['FC', 'CDF'])->sum('montant_total');
 
         return Inertia::render('Cashier/Dashboard', [
-            'userCaisses' => $userCaisses->map(fn ($c) => [
-                'id' => $c->id,
-                'name' => $c->name,
-                'code' => $c->code,
-                'devise' => $c->devise,
-                'solde_actuel' => (float) $c->solde_actuel,
-                'is_active' => (bool) $c->is_active,
-                'is_ouverte' => $c->isOuverte(),
-            ]),
-            'selectedCaisse' => $selectedCaisse ? [
-                'id' => $selectedCaisse->id,
-                'name' => $selectedCaisse->name,
-                'code' => $selectedCaisse->code,
-                'devise' => $selectedCaisse->devise,
-                'solde_actuel' => (float) $selectedCaisse->solde_actuel,
-                'is_ouverte' => $selectedCaisse->isOuverte(),
-            ] : null,
-            'activeSession' => $activeSession ? [
-                'id' => $activeSession->id,
-                'status' => $activeSession->status,
-                'date_session' => $activeSession->date_session->format('d/m/Y'),
-                'solde_ouverture' => (float) $activeSession->solde_ouverture,
-                'solde_fermeture' => $activeSession->solde_fermeture ? (float) $activeSession->solde_fermeture : null,
-                'total_entrees' => (float) $activeSession->total_entrees,
-                'total_sorties' => (float) $activeSession->total_sorties,
-                'opened_at' => $activeSession->opened_at?->format('H:i'),
-                'observation_ouverture' => $activeSession->observation_ouverture,
-            ] : null,
-            'sessionMouvements' => $sessionMouvements,
+            'caisses' => $caissesData,
             'stats' => [
                 'totalAttenteUSD' => $totalAttenteUSD,
                 'totalAttenteFC' => $totalAttenteFC,
@@ -92,7 +108,7 @@ class CashierController extends Controller
     }
 
     /**
-     * Module 2 : Bons à Décaisser (Réquisitions au statut decaissement_caisse et émission des BSC).
+     * Module 2 : Bons à Décaisser.
      */
     public function disbursements(Request $request): Response
     {
@@ -103,7 +119,7 @@ class CashierController extends Controller
         $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
         $selectedCaisse = CashRegister::with('activeSession')->find($selectedCaisseId) ?? $userCaisses->first();
 
-        $queryADecaisser = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
+        $queryADecaisser = Requisition::with(['user', 'demandes.justificatifs', 'project'])
             ->where('status', 'decaissement_caisse')
             ->orderByDesc('updated_at');
 
@@ -111,7 +127,29 @@ class CashierController extends Controller
             $queryADecaisser->where('caisse_decaissement', $selectedCaisse->name);
         }
 
-        $aDecaisser = $queryADecaisser->get()->map(fn (Requisition $r) => $this->transformRequisition($r));
+        $aDecaisser = $queryADecaisser->get()->map(fn (Requisition $r) => [
+            'id' => (string) $r->id,
+            'numero' => $r->numero_requisition,
+            'projet' => $r->projet,
+            'initiateurNom' => $r->user?->name ?? 'Agent',
+            'initiateurRole' => $r->user?->role ?? 'Staff',
+            'nature' => $r->nature_requisition,
+            'devise' => $r->devise,
+            'montantTotal' => (float) $r->montant_total,
+            'caisseAttribuee' => $r->caisse_decaissement ?? 'Caisse principale',
+            'observation' => $r->observation,
+            'is_urgent' => (bool) $r->is_urgent,
+            'dateSoumission' => $r->created_at ? $r->created_at->format('d/m/Y') : '',
+            'lignes' => $r->demandes->map(fn ($d) => [
+                'id' => (string) $d->id,
+                'activite' => $d->activite,
+                'codeAllocation' => $d->code_allocation ?? $d->code_all_budget,
+                'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
+                'unite' => $d->unite ?? '',
+                'prixUnitaire' => (float) $d->frais_unitaire,
+                'total' => (float) $d->total_ligne,
+            ])->values()->all(),
+        ]);
 
         $recentDisbursementsQuery = CashMovement::with(['cashRegister', 'cashier'])
             ->where('type', 'sortie')
@@ -129,14 +167,14 @@ class CashierController extends Controller
                 'id' => $c->id,
                 'name' => $c->name,
                 'devise' => $c->devise,
-                'solde_actuel' => (float) $c->solde_actuel,
+                'solde_actuel' => (float) ($c->solde_actuel ?? 0.0),
                 'is_ouverte' => $c->isOuverte(),
             ]),
             'selectedCaisse' => $selectedCaisse ? [
                 'id' => $selectedCaisse->id,
                 'name' => $selectedCaisse->name,
                 'devise' => $selectedCaisse->devise,
-                'solde_actuel' => (float) $selectedCaisse->solde_actuel,
+                'solde_actuel' => (float) ($selectedCaisse->solde_actuel ?? 0.0),
                 'is_ouverte' => $selectedCaisse->isOuverte(),
             ] : null,
             'aDecaisser' => $aDecaisser,
@@ -145,231 +183,7 @@ class CashierController extends Controller
     }
 
     /**
-     * Module 3 : Entrées & Approvisionnements (Bons d'Entrée Caisse BEC et retours de fonds).
-     */
-    public function receipts(Request $request): Response
-    {
-        $user = $request->user();
-        abort_unless($user->hasRole('cashier') || $user->hasRole('admin'), 403);
-
-        $userCaisses = $this->getUserCaisses($user);
-        $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
-        $selectedCaisse = CashRegister::with('activeSession')->find($selectedCaisseId) ?? $userCaisses->first();
-
-        $receiptsQuery = CashMovement::with(['cashRegister', 'cashier'])
-            ->where('type', 'entree')
-            ->orderByDesc('created_at')
-            ->limit(30);
-
-        if ($selectedCaisse) {
-            $receiptsQuery->where('cash_register_id', $selectedCaisse->id);
-        }
-
-        $receipts = $receiptsQuery->get()->map(fn (CashMovement $m) => $this->transformMovement($m));
-
-        return Inertia::render('Cashier/Receipts/Index', [
-            'userCaisses' => $userCaisses->map(fn ($c) => [
-                'id' => $c->id,
-                'name' => $c->name,
-                'devise' => $c->devise,
-                'solde_actuel' => (float) $c->solde_actuel,
-                'is_ouverte' => $c->isOuverte(),
-            ]),
-            'selectedCaisse' => $selectedCaisse ? [
-                'id' => $selectedCaisse->id,
-                'name' => $selectedCaisse->name,
-                'devise' => $selectedCaisse->devise,
-                'solde_actuel' => (float) $selectedCaisse->solde_actuel,
-                'is_ouverte' => $selectedCaisse->isOuverte(),
-            ] : null,
-            'receipts' => $receipts,
-        ]);
-    }
-
-    /**
-     * Module 4 : Grand Livre de Caisse mensuel (Visualisation chronologique avec solde progressif).
-     */
-    public function ledger(Request $request): Response
-    {
-        $user = $request->user();
-        abort_unless($user->hasRole('cashier') || $user->hasRole('admin') || $user->hasRole('finance'), 403);
-
-        $userCaisses = $user->hasRole('finance') || $user->hasRole('admin')
-            ? CashRegister::all()
-            : $user->cashRegisters;
-
-        $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
-        $selectedCaisse = CashRegister::find($selectedCaisseId) ?? $userCaisses->first();
-
-        $selectedPeriod = $request->input('period', now()->format('Y-m'));
-        [$year, $month] = explode('-', $selectedPeriod);
-
-        $mouvements = collect();
-        $totalEntreesMois = 0.0;
-        $totalSortiesMois = 0.0;
-        $soldeInitialMois = 0.0;
-
-        if ($selectedCaisse) {
-            $dateDebutMois = "{$year}-{$month}-01";
-
-            $entreesPassees = (float) CashMovement::where('cash_register_id', $selectedCaisse->id)
-                ->where('type', 'entree')
-                ->whereDate('date_mouvement', '<', $dateDebutMois)
-                ->sum('montant');
-
-            $sortiesPassees = (float) CashMovement::where('cash_register_id', $selectedCaisse->id)
-                ->where('type', 'sortie')
-                ->whereDate('date_mouvement', '<', $dateDebutMois)
-                ->sum('montant');
-
-            $soldeInitialMois = $entreesPassees - $sortiesPassees;
-
-            $moisMouvements = CashMovement::with('cashier')
-                ->where('cash_register_id', $selectedCaisse->id)
-                ->whereYear('date_mouvement', (int) $year)
-                ->whereMonth('date_mouvement', (int) $month)
-                ->orderBy('date_mouvement')
-                ->orderBy('created_at')
-                ->get();
-
-            $soldeCourant = $soldeInitialMois;
-
-            $mouvements = $moisMouvements->map(function (CashMovement $m) use (&$soldeCourant) {
-                if ($m->isEntree()) {
-                    $soldeCourant += $m->montant;
-                } else {
-                    $soldeCourant -= $m->montant;
-                }
-
-                $transformed = $this->transformMovement($m);
-                $transformed['solde_progressif'] = round($soldeCourant, 2);
-                return $transformed;
-            });
-
-            $totalEntreesMois = (float) $moisMouvements->where('type', 'entree')->sum('montant');
-            $totalSortiesMois = (float) $moisMouvements->where('type', 'sortie')->sum('montant');
-        }
-
-        return Inertia::render('Cashier/Ledger/Index', [
-            'userCaisses' => $userCaisses->map(fn ($c) => [
-                'id' => $c->id,
-                'name' => $c->name,
-                'devise' => $c->devise,
-            ]),
-            'selectedCaisse' => $selectedCaisse ? [
-                'id' => $selectedCaisse->id,
-                'name' => $selectedCaisse->name,
-                'devise' => $selectedCaisse->devise,
-                'solde_actuel' => (float) $selectedCaisse->solde_actuel,
-            ] : null,
-            'selectedPeriod' => $selectedPeriod,
-            'soldeInitialMois' => round($soldeInitialMois, 2),
-            'totalEntreesMois' => $totalEntreesMois,
-            'totalSortiesMois' => $totalSortiesMois,
-            'soldeFinMois' => round($soldeInitialMois + $totalEntreesMois - $totalSortiesMois, 2),
-            'mouvements' => $mouvements,
-        ]);
-    }
-
-    /**
-     * Exporte le Grand Livre mensuel au format CSV / Excel avec encodage UTF-8 BOM.
-     */
-    public function exportLedger(Request $request): StreamedResponse
-    {
-        $user = $request->user();
-        abort_unless($user->hasRole('cashier') || $user->hasRole('admin') || $user->hasRole('finance'), 403);
-
-        $selectedCaisseId = $request->input('caisse_id');
-        $caisse = CashRegister::findOrFail($selectedCaisseId);
-
-        $selectedPeriod = $request->input('period', now()->format('Y-m'));
-        [$year, $month] = explode('-', $selectedPeriod);
-        $dateDebutMois = "{$year}-{$month}-01";
-
-        $entreesPassees = (float) CashMovement::where('cash_register_id', $caisse->id)
-            ->where('type', 'entree')
-            ->whereDate('date_mouvement', '<', $dateDebutMois)
-            ->sum('montant');
-
-        $sortiesPassees = (float) CashMovement::where('cash_register_id', $caisse->id)
-            ->where('type', 'sortie')
-            ->whereDate('date_mouvement', '<', $dateDebutMois)
-            ->sum('montant');
-
-        $soldeInitialMois = $entreesPassees - $sortiesPassees;
-
-        $movements = CashMovement::with('cashier')
-            ->where('cash_register_id', $caisse->id)
-            ->whereYear('date_mouvement', (int) $year)
-            ->whereMonth('date_mouvement', (int) $month)
-            ->orderBy('date_mouvement')
-            ->orderBy('created_at')
-            ->get();
-
-        $fileName = 'grand_livre_' . Str::slug($caisse->name) . "_{$year}_{$month}.csv";
-
-        return response()->streamDownload(function () use ($caisse, $year, $month, $soldeInitialMois, $movements) {
-            $handle = fopen('php://output', 'w');
-            fputs($handle, "\xEF\xBB\xBF");
-
-            fputcsv($handle, ['ASBL BON PASTEUR - GRAND LIVRE DE CAISSE MENSUEL'], ';');
-            fputcsv($handle, ['Caisse :', $caisse->name, 'Devise :', $caisse->devise], ';');
-            fputcsv($handle, ['Période :', "{$month}/{$year}"], ';');
-            fputcsv($handle, ['Solde initial au 1er du mois :', number_format($soldeInitialMois, 2, ',', ' ')], ';');
-            fputcsv($handle, [], ';');
-
-            fputcsv($handle, [
-                'Date',
-                'N° Pièce',
-                'Type',
-                'Tiers / Bénéficiaire',
-                'Imputation',
-                'Motif / Libellé',
-                'Mode Règlement',
-                'Entrée (+)',
-                'Sortie (-)',
-                'Solde Progressif',
-                'Caissier',
-            ], ';');
-
-            $solde = $soldeInitialMois;
-            foreach ($movements as $m) {
-                if ($m->isEntree()) {
-                    $solde += $m->montant;
-                    $entree = number_format($m->montant, 2, ',', ' ');
-                    $sortie = '';
-                } else {
-                    $solde -= $m->montant;
-                    $entree = '';
-                    $sortie = number_format($m->montant, 2, ',', ' ');
-                }
-
-                fputcsv($handle, [
-                    $m->date_mouvement->format('d/m/Y'),
-                    $m->numero_piece,
-                    $m->isEntree() ? 'Entrée (BEC)' : 'Sortie (BSC)',
-                    $m->tiers_nom,
-                    $m->imputation,
-                    $m->motif,
-                    $m->mode_paiement,
-                    $entree,
-                    $sortie,
-                    number_format($solde, 2, ',', ' '),
-                    $m->cashier?->name,
-                ], ';');
-            }
-
-            fputcsv($handle, [], ';');
-            fputcsv($handle, ['Solde final de clôture :', number_format($solde, 2, ',', ' ')], ';');
-
-            fclose($handle);
-        }, $fileName, [
-            'Content-Type' => 'text/csv; charset=UTF-8',
-        ]);
-    }
-
-    /**
-     * Valide le décaissement, émet le Bon de Sortie Caisse (BSC) et impacte automatiquement la ligne budgétaire.
+     * BLOCAGE STRICT : Si solde_actuel <= 0 ou < montant, décaissement rejeté.
      */
     public function disburse(Request $request, Requisition $requisition)
     {
@@ -385,13 +199,32 @@ class CashierController extends Controller
         if (! $cashRegister) {
             return Redirect::back()->with(
                 'error',
-                "Impossible de décaisser : la caisse « {$requisition->caisse_decaissement} » n'existe pas ou est inactive."
+                "Impossible de décaisser : la caisse « {$requisition->caisse_decaissement} » est introuvable ou inactive."
             );
         }
 
         $session = $cashRegister->activeSession;
         if (! $session || $session->status !== 'ouverte') {
             return Redirect::back()->with('error', "Impossible de décaisser : le guichet « {$requisition->caisse_decaissement} » n'est pas ouvert aujourd'hui.");
+        }
+
+        $montantDecaisse = (float) $requisition->montant_total;
+        $soldeDisponible = (float) ($cashRegister->solde_actuel ?? 0.0);
+
+        if ($soldeDisponible <= 0.0) {
+            return Redirect::back()->with(
+                'error',
+                "Décaissement strictement impossible : Le solde de la caisse est de 0,00 {$cashRegister->devise}. Veuillez approvisionner la caisse via un Bon d'Entrée (BEC) avant toute dépense."
+            );
+        }
+
+        if ($soldeDisponible < $montantDecaisse) {
+            return Redirect::back()->with(
+                'error',
+                "Décaissement impossible : Fonds insuffisants en caisse. " .
+                "Solde disponible : " . number_format($soldeDisponible, 2, ',', ' ') . " {$cashRegister->devise}. " .
+                "Montant requis : " . number_format($montantDecaisse, 2, ',', ' ') . " {$cashRegister->devise}."
+            );
         }
 
         $validated = $request->validate([
@@ -408,7 +241,7 @@ class CashierController extends Controller
             return Redirect::back()->withErrors(['pin' => 'Code PIN caissier incorrect ou non configuré.']);
         }
 
-        DB::transaction(function () use ($validated, $requisition, $user, $cashRegister, $session) {
+        DB::transaction(function () use ($validated, $requisition, $user, $cashRegister, $session, $montantDecaisse) {
             $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
 
             $now = now();
@@ -420,7 +253,6 @@ class CashierController extends Controller
                 ?? $lockedRequisition->demandes()->first()?->code_all_budget
                 ?? '6.112.a';
 
-            $montantDecaisse = (float) $lockedRequisition->montant_total;
             $observation = preg_replace(
                 '/(?:^|\R)Motif rejet (?:MP|Finance|Administratif|Direction(?: \(P\.O\. Intérim\)| \(Urgence\))?):[^\r\n]*/u',
                 '',
@@ -433,11 +265,13 @@ class CashierController extends Controller
                 'cashier_id' => $user->id,
                 'requisition_id' => $lockedRequisition->id,
                 'type' => 'sortie',
+                'status_validation' => 'valide',
+                'pin_validated' => true,
                 'numero_piece' => $numeroBSC,
                 'date_mouvement' => $now->toDateString(),
                 'tiers_nom' => $lockedRequisition->user?->name ?? 'Demandeur',
                 'montant' => $montantDecaisse,
-                'devise' => $lockedRequisition->devise,
+                'devise' => $cashRegister->devise,
                 'montant_en_lettres' => trim($validated['montant_en_lettres']),
                 'motif' => 'En règlement de : ' . (trim($observation ?? '') ?: $lockedRequisition->nature_requisition),
                 'imputation' => $primaryImputation,
@@ -483,17 +317,426 @@ class CashierController extends Controller
                 user: $user,
                 roleSignataire: 'cashier',
                 action: 'disbursed',
-                commentaire: "Bon de Sortie Caisse {$numeroBSC} émis. Paiement effectué en {$validated['mode_paiement']}."
+                commentaire: "Bon de Sortie Caisse {$numeroBSC} émis. Paiement en {$validated['mode_paiement']}."
             );
 
             $this->notifierUtilisateur(
                 userId: $lockedRequisition->user_id,
                 titre: 'Bon de Sortie Caisse émis',
-                message: "Les fonds pour votre réquisition {$lockedRequisition->numero_requisition} ont été décaissés sous le Bon de Sortie Caisse N° {$numeroBSC}."
+                message: "Les fonds pour votre réquisition {$lockedRequisition->numero_requisition} ont été décaissés sous le N° {$numeroBSC}."
             );
         });
 
-        return Redirect::back()->with('success', "Bon de Sortie Caisse émis et ligne budgétaire débitée avec succès.");
+        return Redirect::back()->with('success', "Bon de Sortie Caisse émis et débité avec succès.");
+    }
+
+    /**
+     * Module 3 : Entrées & Approvisionnements (BEC).
+     */
+    public function receipts(Request $request): Response
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('cashier') || $user->hasRole('admin'), 403);
+
+        $userCaisses = $this->getUserCaisses($user);
+        $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
+        $selectedCaisse = CashRegister::with('activeSession')->find($selectedCaisseId) ?? $userCaisses->first();
+
+        $receiptsQuery = CashMovement::with(['cashRegister', 'cashier'])
+            ->where('type', 'entree')
+            ->orderByDesc('created_at')
+            ->limit(30);
+
+        if ($selectedCaisse) {
+            $receiptsQuery->where('cash_register_id', $selectedCaisse->id);
+        }
+
+        $receipts = $receiptsQuery->get()->map(fn (CashMovement $m) => $this->transformMovement($m));
+
+        return Inertia::render('Cashier/Receipts/Index', [
+            'userCaisses' => $userCaisses->map(fn ($c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'devise' => $c->devise,
+                'solde_actuel' => (float) ($c->solde_actuel ?? 0.0),
+                'is_ouverte' => $c->isOuverte(),
+            ]),
+            'selectedCaisse' => $selectedCaisse ? [
+                'id' => $selectedCaisse->id,
+                'name' => $selectedCaisse->name,
+                'devise' => $selectedCaisse->devise,
+                'solde_actuel' => (float) ($selectedCaisse->solde_actuel ?? 0.0),
+                'is_ouverte' => $selectedCaisse->isOuverte(),
+                'is_approvisionnee' => (bool) $selectedCaisse->is_approvisionnee,
+            ] : null,
+            'receipts' => $receipts,
+        ]);
+    }
+
+    /**
+     * Module 4 : Grand Livre de Caisse mensuel (Historique exact et sans fuite du solde actuel).
+     */
+    public function ledger(Request $request): Response
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('cashier') || $user->hasRole('admin') || $user->hasRole('finance'), 403);
+
+        $userCaisses = $user->hasRole('finance') || $user->hasRole('admin')
+            ? CashRegister::all()
+            : $user->cashRegisters;
+
+        $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
+        $selectedCaisse = CashRegister::find($selectedCaisseId) ?? $userCaisses->first();
+
+        $selectedPeriod = $request->input('period', now()->format('Y-m'));
+        [$year, $month] = explode('-', $selectedPeriod);
+
+        $mouvements = collect();
+        $totalEntreesMois = 0.0;
+        $totalSortiesMois = 0.0;
+        $soldeInitialMois = 0.0;
+
+        if ($selectedCaisse) {
+            $dateDebutMois = "{$year}-{$month}-01";
+
+            // Récupération de la dernière session fermée STRICTEMENT avant le 1er du mois demandé
+            $derniereSessionAvant = CashRegisterSession::where('cash_register_id', $selectedCaisse->id)
+                ->where('status', 'fermee')
+                ->whereDate('date_session', '<', $dateDebutMois)
+                ->latest('date_session')
+                ->first();
+
+            if ($derniereSessionAvant && $derniereSessionAvant->solde_fermeture !== null) {
+                // Solde de clôture antérieur + flux intermédiaires éventuels jusqu'au 1er du mois
+                $fluxIntermediaires = CashMovement::where('cash_register_id', $selectedCaisse->id)
+                    ->where('status_validation', 'valide')
+                    ->whereDate('date_mouvement', '>', $derniereSessionAvant->date_session)
+                    ->whereDate('date_mouvement', '<', $dateDebutMois)
+                    ->get();
+
+                $soldeInitialMois = (float) $derniereSessionAvant->solde_fermeture
+                    + (float) $fluxIntermediaires->where('type', 'entree')->sum('montant')
+                    - (float) $fluxIntermediaires->where('type', 'sortie')->sum('montant');
+            } else {
+                // Aucune session fermée avant ce mois : cumul strict des mouvements antérieurs réels
+                // Si la date est antérieure à toute activité, le solde initial est STRICTEMENT 0.00 (jamais solde_actuel !)
+                $entreesAvant = (float) CashMovement::where('cash_register_id', $selectedCaisse->id)
+                    ->where('status_validation', 'valide')
+                    ->whereDate('date_mouvement', '<', $dateDebutMois)
+                    ->where('type', 'entree')
+                    ->sum('montant');
+
+                $sortiesAvant = (float) CashMovement::where('cash_register_id', $selectedCaisse->id)
+                    ->where('status_validation', 'valide')
+                    ->whereDate('date_mouvement', '<', $dateDebutMois)
+                    ->where('type', 'sortie')
+                    ->sum('montant');
+
+                $soldeInitialMois = round($entreesAvant - $sortiesAvant, 2);
+            }
+
+            $moisMouvements = CashMovement::with('cashier')
+                ->where('cash_register_id', $selectedCaisse->id)
+                ->where('status_validation', 'valide')
+                ->whereYear('date_mouvement', (int) $year)
+                ->whereMonth('date_mouvement', (int) $month)
+                ->orderBy('date_mouvement')
+                ->orderBy('created_at')
+                ->get();
+
+            $soldeCourant = $soldeInitialMois;
+
+            $mouvements = $moisMouvements->map(function (CashMovement $m, $index) use (&$soldeCourant) {
+                if ($m->isEntree()) {
+                    $soldeCourant += (float) $m->montant;
+                } else {
+                    $soldeCourant -= (float) $m->montant;
+                }
+
+                return [
+                    'id' => (string) $m->id,
+                    'numero_ligne' => $index + 2,
+                    'date_mouvement' => $m->date_mouvement ? $m->date_mouvement->format('d/m/Y') : '',
+                    'projet' => $m->requisition?->projet ?? '',
+                    'numero_piece' => $m->numero_piece,
+                    'reference_externe' => $m->reference_externe,
+                    'imputation' => $m->imputation,
+                    'designation' => $m->motif,
+                    'entree' => $m->isEntree() ? (float) $m->montant : 0.0,
+                    'sortie' => $m->isSortie() ? (float) $m->montant : 0.0,
+                    'solde_progressif' => round($soldeCourant, 2),
+                    'devise' => $m->devise,
+                ];
+            });
+
+            $totalEntreesMois = (float) $moisMouvements->where('type', 'entree')->sum('montant');
+            $totalSortiesMois = (float) $moisMouvements->where('type', 'sortie')->sum('montant');
+        }
+
+        return Inertia::render('Cashier/Ledger/Index', [
+            'userCaisses' => $userCaisses->map(fn ($c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'code' => $c->code,
+                'devise' => $c->devise,
+            ]),
+            'selectedCaisse' => $selectedCaisse ? [
+                'id' => $selectedCaisse->id,
+                'name' => $selectedCaisse->name,
+                'code' => $selectedCaisse->code,
+                'devise' => $selectedCaisse->devise,
+            ] : null,
+            'selectedPeriod' => $selectedPeriod,
+            'soldeInitialMois' => round($soldeInitialMois, 2),
+            'totalEntreesMois' => round($totalEntreesMois, 2),
+            'totalSortiesMois' => round($totalSortiesMois, 2),
+            'soldeFinMois' => round($soldeInitialMois + $totalEntreesMois - $totalSortiesMois, 2),
+            'mouvements' => $mouvements,
+        ]);
+    }
+
+    public function exportLedger(Request $request): StreamedResponse
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('cashier') || $user->hasRole('admin') || $user->hasRole('finance'), 403);
+
+        $selectedCaisseId = $request->input('caisse_id');
+        $caisse = CashRegister::findOrFail($selectedCaisseId);
+
+        $selectedPeriod = $request->input('period', now()->format('Y-m'));
+        [$year, $month] = explode('-', $selectedPeriod);
+        $dateDebutMois = "{$year}-{$month}-01";
+
+        $derniereSessionAvant = CashRegisterSession::where('cash_register_id', $caisse->id)
+            ->where('status', 'fermee')
+            ->whereDate('date_session', '<', $dateDebutMois)
+            ->latest('date_session')
+            ->first();
+
+        if ($derniereSessionAvant && $derniereSessionAvant->solde_fermeture !== null) {
+            $fluxIntermediaires = CashMovement::where('cash_register_id', $caisse->id)
+                ->where('status_validation', 'valide')
+                ->whereDate('date_mouvement', '>', $derniereSessionAvant->date_session)
+                ->whereDate('date_mouvement', '<', $dateDebutMois)
+                ->get();
+
+            $soldeInitialMois = (float) $derniereSessionAvant->solde_fermeture
+                + (float) $fluxIntermediaires->where('type', 'entree')->sum('montant')
+                - (float) $fluxIntermediaires->where('type', 'sortie')->sum('montant');
+        } else {
+            $entreesAvant = (float) CashMovement::where('cash_register_id', $caisse->id)
+                ->where('status_validation', 'valide')
+                ->whereDate('date_mouvement', '<', $dateDebutMois)
+                ->where('type', 'entree')
+                ->sum('montant');
+
+            $sortiesAvant = (float) CashMovement::where('cash_register_id', $caisse->id)
+                ->where('status_validation', 'valide')
+                ->whereDate('date_mouvement', '<', $dateDebutMois)
+                ->where('type', 'sortie')
+                ->sum('montant');
+
+            $soldeInitialMois = round($entreesAvant - $sortiesAvant, 2);
+        }
+
+        $movements = CashMovement::with('cashier')
+            ->where('cash_register_id', $caisse->id)
+            ->where('status_validation', 'valide')
+            ->whereYear('date_mouvement', (int) $year)
+            ->whereMonth('date_mouvement', (int) $month)
+            ->orderBy('date_mouvement')
+            ->orderBy('created_at')
+            ->get();
+
+        $fileName = 'grand_livre_' . Str::slug($caisse->name) . "_{$year}_{$month}.csv";
+
+        return response()->streamDownload(function () use ($caisse, $year, $month, $soldeInitialMois, $movements) {
+            $handle = fopen('php://output', 'w');
+            fputs($handle, "\xEF\xBB\xBF");
+
+            fputcsv($handle, ['Bon Pasteur A.S.B.L. - Système Centralisé des Coûts'], ';');
+            fputcsv($handle, ["GRAND LIVRE CAISSE {$caisse->name} - {$month}/{$year} - Devise : {$caisse->devise}"], ';');
+            fputcsv($handle, [], ';');
+
+            fputcsv($handle, [
+                'DATE', 'N°', 'PROJET', 'N°BON', 'PIECE / REF', 'IMPUTATION', 'DESIGNATION',
+                "ENTREE ({$caisse->devise})", "SORTIE ({$caisse->devise})", "SOLDE ({$caisse->devise})"
+            ], ';');
+
+            fputcsv($handle, [
+                "01/{$month}/{$year}", '1', '', '', '', '', "SOLDE D'OUVERTURE",
+                '', '', number_format($soldeInitialMois, 2, ',', ' ')
+            ], ';');
+
+            $solde = $soldeInitialMois;
+            $totIn = 0.0;
+            $totOut = 0.0;
+
+            foreach ($movements as $idx => $m) {
+                if ($m->isEntree()) {
+                    $solde += $m->montant;
+                    $totIn += $m->montant;
+                    $in = number_format($m->montant, 2, ',', ' ');
+                    $out = '';
+                } else {
+                    $solde -= $m->montant;
+                    $totOut -= $m->montant;
+                    $in = '';
+                    $out = number_format($m->montant, 2, ',', ' ');
+                }
+
+                fputcsv($handle, [
+                    $m->date_mouvement ? $m->date_mouvement->format('d/m/Y') : '',
+                    $idx + 2,
+                    $m->requisition?->projet ?? '',
+                    $m->numero_piece,
+                    $m->reference_externe ?? '',
+                    $m->imputation,
+                    $m->motif,
+                    $in,
+                    $out,
+                    number_format($solde, 2, ',', ' ')
+                ], ';');
+            }
+
+            fputcsv($handle, [
+                now()->endOfMonth()->format('d/m/Y'), '', '', '', '', '', 'Solde de cloture',
+                '', '', number_format($solde, 2, ',', ' ')
+            ], ';');
+
+            fputcsv($handle, [
+                '', '', '', '', '', '', 'TOTAL',
+                number_format($totIn, 2, ',', ' '), number_format($totOut, 2, ',', ' '), ''
+            ], ';');
+
+            fclose($handle);
+        }, $fileName, ['Content-Type' => 'text/csv; charset=UTF-8']);
+    }
+
+    /**
+     * Module Journal Quotidien de Caisse (A4) avec gestion fidèle des dates antérieures.
+     */
+    public function journalDuJour(Request $request): Response
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('cashier') || $user->hasRole('admin') || $user->hasRole('finance'), 403);
+
+        $userCaisses = $this->getUserCaisses($user);
+        $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
+        $selectedCaisse = CashRegister::find($selectedCaisseId) ?? $userCaisses->first();
+
+        $selectedDate = $request->input('date', now()->toDateString());
+
+        $session = null;
+        $mouvements = [];
+        $openingBalanceResolved = 0.0;
+        $totalEntreesJour = 0.0;
+        $totalSortiesJour = 0.0;
+        $latestSessionDate = null;
+
+        if ($selectedCaisse) {
+            // Recherche de la session de la date ciblée
+            $session = CashRegisterSession::with(['cashier', 'authorizedBy'])
+                ->where('cash_register_id', $selectedCaisse->id)
+                ->whereDate('date_session', $selectedDate)
+                ->first();
+
+            // Date de la dernière session existante enregistrée pour cette caisse
+            $latestSession = CashRegisterSession::where('cash_register_id', $selectedCaisse->id)
+                ->latest('date_session')
+                ->first();
+            $latestSessionDate = $latestSession?->date_session?->toDateString();
+
+            if ($session && $session->solde_ouverture !== null) {
+                // 1. Session existante ce jour-là
+                $openingBalanceResolved = (float) $session->solde_ouverture;
+            } else {
+                // 2. Pas de session ce jour-là : chercher la session fermée immédiatement antérieure
+                $lastClosed = CashRegisterSession::where('cash_register_id', $selectedCaisse->id)
+                    ->where('status', 'fermee')
+                    ->whereDate('date_session', '<', $selectedDate)
+                    ->latest('date_session')
+                    ->first();
+
+                if ($lastClosed && $lastClosed->solde_fermeture !== null) {
+                    $openingBalanceResolved = (float) $lastClosed->solde_fermeture;
+                } else {
+                    // Si la date est antérieure à toute session de caisse : STRICTEMENT 0.00
+                    $openingBalanceResolved = 0.0;
+                }
+            }
+
+            // Mouvements rattachés à la journée
+            $movementsQuery = CashMovement::with('cashier')
+                ->where('cash_register_id', $selectedCaisse->id);
+
+            if ($session) {
+                $movementsQuery->where('session_id', $session->id);
+            } else {
+                $movementsQuery->whereDate('date_mouvement', $selectedDate);
+            }
+
+            $rawMouvements = $movementsQuery->orderBy('created_at')->get();
+
+            $soldeCourant = $openingBalanceResolved;
+            $mouvements = $rawMouvements->map(function (CashMovement $m) use (&$soldeCourant) {
+                if ($m->isEntree()) {
+                    $soldeCourant += (float) $m->montant;
+                } else {
+                    $soldeCourant -= (float) $m->montant;
+                }
+
+                $transformed = $this->transformMovement($m);
+                $transformed['solde_progressif'] = round($soldeCourant, 2);
+                return $transformed;
+            });
+
+            $totalEntreesJour = (float) $rawMouvements->where('type', 'entree')->sum('montant');
+            $totalSortiesJour = (float) $rawMouvements->where('type', 'sortie')->sum('montant');
+        }
+
+        $soldeTheoriqueJour = round($openingBalanceResolved + $totalEntreesJour - $totalSortiesJour, 2);
+
+        return Inertia::render('Cashier/JournalDuJour', [
+            'userCaisses' => $userCaisses->map(fn ($c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'code' => $c->code,
+                'devise' => $c->devise,
+                'solde_actuel' => (float) ($c->solde_actuel ?? 0.0),
+            ]),
+            'selectedCaisse' => $selectedCaisse ? [
+                'id' => $selectedCaisse->id,
+                'name' => $selectedCaisse->name,
+                'code' => $selectedCaisse->code,
+                'devise' => $selectedCaisse->devise,
+                'solde_actuel' => (float) ($selectedCaisse->solde_actuel ?? 0.0),
+            ] : null,
+            'selectedDate' => $selectedDate,
+            'latestSessionDate' => $latestSessionDate,
+            'openingBalanceResolved' => round($openingBalanceResolved, 2),
+            'totalEntreesJour' => round($totalEntreesJour, 2),
+            'totalSortiesJour' => round($totalSortiesJour, 2),
+            'soldeTheoriqueJour' => round($soldeTheoriqueJour, 2),
+            'session' => $session ? [
+                'id' => $session->id,
+                'date_session' => $session->date_session ? $session->date_session->format('d/m/Y') : '',
+                'cashier_nom' => $session->cashier?->name,
+                'authorized_by_nom' => $session->authorizedBy?->name,
+                'opened_at' => $session->opened_at ? $session->opened_at->format('H:i') : null,
+                'closed_at' => $session->closed_at ? $session->closed_at->format('H:i') : null,
+                'status' => $session->status,
+                'origine_ouverture' => $session->origine_ouverture ?? 'report_veille',
+                'solde_ouverture' => (float) ($session->solde_ouverture ?? $openingBalanceResolved),
+                'total_entrees' => (float) ($session->total_entrees ?? $totalEntreesJour),
+                'total_sorties' => (float) ($session->total_sorties ?? $totalSortiesJour),
+                'solde_theorique' => (float) ($session->solde_theorique_cloture ?? $soldeTheoriqueJour),
+                'solde_physique' => $session->solde_fermeture !== null ? (float) $session->solde_fermeture : null,
+                'ecart' => $session->ecart_caisse !== null ? (float) $session->ecart_caisse : null,
+                'justification_ecart' => $session->justification_ecart,
+            ] : null,
+            'mouvements' => $mouvements,
+        ]);
     }
 
     protected function getUserCaisses(User $user)
@@ -503,44 +746,14 @@ class CashierController extends Controller
             : $user->cashRegisters()->where('is_active', true)->orderBy('name')->get();
     }
 
-    protected function transformRequisition(Requisition $r): array
-    {
-        return [
-            'id' => (string) $r->id,
-            'numero' => $r->numero_requisition,
-            'projet' => $r->projet,
-            'initiateurNom' => $r->user?->name ?? 'Agent',
-            'initiateurRole' => $r->user?->role ?? 'Staff',
-            'nature' => $r->nature_requisition,
-            'devise' => $r->devise,
-            'montantTotal' => (float) $r->montant_total,
-            'caisseAttribuee' => $r->caisse_decaissement ?? 'Caisse principale',
-            'observation' => $r->observation,
-            'is_urgent' => (bool) $r->is_urgent,
-            'status' => $r->status,
-            'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
-            'mode_paiement' => $r->mode_paiement,
-            'reference_paiement' => $r->reference_paiement,
-            'date_decaissement' => $r->date_decaissement?->format('d/m/Y à H:i'),
-            'lignes' => $r->demandes->map(fn (Demande $d) => [
-                'id' => (string) $d->id,
-                'activite' => $d->activite,
-                'codeAllocation' => $d->code_allocation ?? $d->code_all_budget,
-                'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
-                'unite' => $d->unite ?? '',
-                'prixUnitaire' => (float) $d->frais_unitaire,
-                'total' => (float) $d->total_ligne,
-            ])->values()->all(),
-        ];
-    }
-
     protected function transformMovement(CashMovement $m): array
     {
         return [
             'id' => (string) $m->id,
             'type' => $m->type,
+            'is_approvisionnement' => (bool) ($m->is_approvisionnement || $m->is_approvisionnement_initial),
             'numero_piece' => $m->numero_piece,
-            'date_mouvement' => $m->date_mouvement->format('d/m/Y'),
+            'date_mouvement' => $m->date_mouvement ? $m->date_mouvement->format('d/m/Y') : '',
             'tiers_nom' => $m->tiers_nom,
             'montant' => (float) $m->montant,
             'devise' => $m->devise,
@@ -549,6 +762,7 @@ class CashierController extends Controller
             'imputation' => $m->imputation,
             'mode_paiement' => $m->mode_paiement,
             'reference_externe' => $m->reference_externe,
+            'bordereau_banque_ref' => $m->bordereau_banque_ref,
             'caisse_nom' => $m->cashRegister?->name,
             'cashier_nom' => $m->cashier?->name,
         ];

@@ -1,5 +1,5 @@
-import { PropsWithChildren, useState, useRef, useEffect, ReactNode } from 'react';
-import { Link, usePage, router } from '@inertiajs/react';
+import { PropsWithChildren, useState, useRef, useEffect, useMemo, ReactNode } from 'react';
+import { Link, usePage } from '@inertiajs/react';
 import { PageProps, User } from '@/types';
 import { useTranslation } from '@/lib/i18n';
 import {
@@ -30,6 +30,11 @@ import {
     KeyRound,
     BarChart3,
     FileCheck,
+    Search,
+    Check,
+    CheckCheck,
+    AlertTriangle,
+    CalendarDays,
 } from 'lucide-react';
 
 interface NotificationItem {
@@ -86,7 +91,11 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     const [showHelpModal, setShowHelpModal] = useState(false);
     const [selectedNotif, setSelectedNotif] = useState<NotificationItem | null>(null);
+
+    // Notifications en state React local (synchronisation fluide sans rechargement)
     const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+    const [notifSearch, setNotifSearch] = useState('');
+    const [notifTab, setNotifTab] = useState<'all' | 'urgent'>('all');
 
     const notifRef = useRef<HTMLDivElement>(null);
     const profileRef = useRef<HTMLDivElement>(null);
@@ -95,18 +104,55 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
         setNotifications((sharedNotifications ?? []).filter((n) => !n.lu));
     }, [sharedNotifications]);
 
-    const unreadCount = notifications.length;
+    const silentSync = (url: string) => {
+        if (typeof window !== 'undefined' && (window as any).axios) {
+            (window as any).axios.post(url).catch(() => {});
+            return;
+        }
+
+        const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+        fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                ...(token ? { 'X-CSRF-TOKEN': token } : {}),
+            },
+        }).catch(() => {});
+    };
 
     const handleMarkAllAsRead = () => {
         setNotifications([]);
-        router.post(route('notifications.mark-all-read'), {}, { preserveScroll: true });
+        silentSync(route('notifications.mark-all-read'));
+    };
+
+    const handleMarkSingleAsRead = (id: string, e?: React.MouseEvent) => {
+        if (e) e.stopPropagation();
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+        silentSync(`/notifications/${id}/mark-read`);
     };
 
     const handleViewNotification = (notif: NotificationItem) => {
         setSelectedNotif(notif);
-        setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
-        router.post(`/notifications/${notif.id}/mark-read`, {}, { preserveScroll: true });
+        handleMarkSingleAsRead(notif.id);
     };
+
+    const filteredNotifications = useMemo(() => {
+        return notifications.filter((n) => {
+            if (notifTab === 'urgent' && !n.urgent) return false;
+            if (notifSearch.trim()) {
+                const q = notifSearch.toLowerCase().trim();
+                const matchTitre = n.titre.toLowerCase().includes(q);
+                const matchMsg = n.message.toLowerCase().includes(q);
+                if (!matchTitre && !matchMsg) return false;
+            }
+            return true;
+        });
+    }, [notifications, notifTab, notifSearch]);
+
+    const urgentCount = notifications.filter((n) => n.urgent).length;
+    const unreadCount = notifications.length;
 
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
@@ -140,9 +186,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
 
     return (
         <div className="flex min-h-screen bg-[#F9F9FF] font-sans antialiased text-[#101c2e]">
-            {/* ============================================================
-                SIDEBAR OFFICIELLE
-            ============================================================ */}
+            {/* SIDEBAR OFFICIELLE */}
             <aside
                 className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#0B192C] flex flex-col justify-between text-white border-r border-[#1B2B44] lg:translate-x-0 transition-transform duration-200 ${
                     mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
@@ -232,7 +276,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </Link>
                         </div>
 
-                        {/* Direction Générale (Directrice OU Intérim PAM) */}
+                        {/* Direction Générale */}
                         {canAccessDirector && (
                             <div className="space-y-1">
                                 <div className="flex items-center justify-between px-3 mb-1">
@@ -402,7 +446,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </div>
                         )}
 
-                        {/* Direction Financière (Centre Financier Complet) */}
+                        {/* Direction Financière (SANS Journal du Jour) */}
                         {isFinance && (
                             <div className="space-y-1">
                                 <span className="px-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
@@ -471,7 +515,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </div>
                         )}
 
-                        {/* Guichet Caisse & Banque */}
+                        {/* Guichet Caisse (AVEC Journal du Jour) */}
                         {isCashier && (
                             <div className="space-y-1">
                                 <span className="px-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
@@ -488,6 +532,19 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 >
                                     <Wallet className="w-4 h-4 text-amber-300" />
                                     <span>Guichet & Sessions</span>
+                                </Link>
+
+                                {/* Uniquement présent pour le Caissier */}
+                                <Link
+                                    href={route('cashier.journal.du-jour')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('cashier.journal.du-jour')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <CalendarDays className="w-4 h-4 text-cyan-300" />
+                                    <span>Journal du Jour</span>
                                 </Link>
 
                                 <Link
@@ -570,7 +627,6 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                     <MapPin className="w-4 h-4 text-emerald-300" />
                                     <span>Sites Opérationnels</span>
                                 </Link>
-
                             </div>
                         )}
                     </nav>
@@ -618,9 +674,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                 />
             )}
 
-            {/* ============================================================
-                CONTENU PRINCIPAL
-            ============================================================ */}
+            {/* CONTENU PRINCIPAL */}
             <div className="flex-1 lg:pl-64 flex flex-col min-w-0">
                 <header className="h-16 bg-white border-b border-[#E2E8F0] flex items-center justify-between px-4 sm:px-8 sticky top-0 z-30 shadow-sm">
                     <div className="flex items-center gap-3">
@@ -669,7 +723,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </button>
                         </div>
 
-                        {/* Aide financière */}
+                        {/* Procédures & Règles */}
                         <button
                             type="button"
                             onClick={() => setShowHelpModal(true)}
@@ -679,7 +733,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             <HelpCircle className="w-5 h-5" />
                         </button>
 
-                        {/* Notifications MySQL */}
+                        {/* Notifications */}
                         <div className="relative" ref={notifRef}>
                             <button
                                 type="button"
@@ -689,54 +743,134 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             >
                                 <Bell className="w-5 h-5" />
                                 {unreadCount > 0 && (
-                                    <span className="absolute top-0 right-0 w-4 h-4 bg-[#F58F20] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                                    <span className="absolute top-0 right-0 w-4 h-4 bg-[#F58F20] text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-scale-in">
                                         {unreadCount}
                                     </span>
                                 )}
                             </button>
 
                             {showNotifications && (
-                                <div className="absolute right-0 mt-2 w-80 bg-white border border-[#B2BED6] rounded shadow-2xl z-50 text-xs overflow-hidden">
+                                <div className="absolute right-0 mt-2 w-88 sm:w-96 bg-white border border-[#B2BED6] rounded shadow-2xl z-50 text-xs overflow-hidden animate-slide-down">
                                     <div className="p-3 bg-[#0B192C] text-white flex items-center justify-between">
-                                        <span className="font-bold">
-                                            {__('Notifications')} ({unreadCount})
-                                        </span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-bold">
+                                                {__('Notifications')}
+                                            </span>
+                                            {unreadCount > 0 && (
+                                                <span className="px-1.5 py-0.2 rounded-full bg-[#F58F20] text-white font-mono text-[10px] font-bold">
+                                                    {unreadCount}
+                                                </span>
+                                            )}
+                                        </div>
+
                                         {unreadCount > 0 && (
                                             <button
                                                 type="button"
                                                 onClick={handleMarkAllAsRead}
-                                                className="text-[10px] text-[#F58F20] hover:underline"
+                                                className="inline-flex items-center gap-1 text-[10px] text-[#F58F20] hover:underline font-bold"
                                             >
-                                                Tout marquer comme lu
+                                                <CheckCheck className="w-3.5 h-3.5" />
+                                                <span>Tout marquer comme lu</span>
                                             </button>
                                         )}
                                     </div>
 
+                                    <div className="p-2.5 bg-gray-50 border-b border-gray-200 space-y-2">
+                                        <div className="relative">
+                                            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                            <input
+                                                type="text"
+                                                placeholder="Filtrer les alertes..."
+                                                value={notifSearch}
+                                                onChange={(e) => setNotifSearch(e.target.value)}
+                                                className="w-full pl-8 pr-7 py-1 bg-white border border-[#B2BED6] rounded text-[11px] text-[#0B192C] focus:outline-none focus:border-[#04326D]"
+                                            />
+                                            {notifSearch && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setNotifSearch('')}
+                                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                                >
+                                                    <X className="w-3 h-3" />
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        <div className="flex items-center gap-1.5">
+                                            <button
+                                                type="button"
+                                                onClick={() => setNotifTab('all')}
+                                                className={`px-2.5 py-0.5 rounded text-[10px] font-bold transition ${
+                                                    notifTab === 'all'
+                                                        ? 'bg-[#04326D] text-white'
+                                                        : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                                                }`}
+                                            >
+                                                Toutes ({notifications.length})
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setNotifTab('urgent')}
+                                                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] font-bold transition ${
+                                                    notifTab === 'urgent'
+                                                        ? 'bg-red-600 text-white'
+                                                        : 'bg-red-50 text-red-700 hover:bg-red-100'
+                                                }`}
+                                            >
+                                                <AlertTriangle className="w-3 h-3" />
+                                                <span>Urgentes ({urgentCount})</span>
+                                            </button>
+                                        </div>
+                                    </div>
+
                                     <div className="divide-y divide-gray-100 max-h-72 overflow-y-auto">
-                                        {notifications.length === 0 ? (
+                                        {filteredNotifications.length === 0 ? (
                                             <div className="p-6 text-center text-gray-400">
-                                                <Bell className="w-8 h-8 mx-auto text-gray-300 mb-1" />
-                                                <p className="text-[11px]">Aucune notification pour le moment.</p>
+                                                <Bell className="w-7 h-7 mx-auto text-gray-300 mb-1" />
+                                                <p className="text-[11px]">
+                                                    {notifications.length === 0
+                                                        ? 'Aucune notification en attente.'
+                                                        : 'Aucune notification ne correspond à ce filtre.'}
+                                                </p>
                                             </div>
                                         ) : (
-                                            notifications.map((n) => (
-                                                <div key={n.id} className="p-3 hover:bg-gray-50 bg-blue-50/30">
-                                                    <div className="flex items-center justify-between mb-1">
-                                                        <span className={`font-bold ${n.urgent ? 'text-[#DC2626]' : 'text-[#04326D]'}`}>
-                                                            {n.titre}
-                                                        </span>
-                                                        <span className="text-[10px] text-gray-400">{n.date}</span>
+                                            filteredNotifications.map((n) => (
+                                                <div
+                                                    key={n.id}
+                                                    onClick={() => handleViewNotification(n)}
+                                                    className="p-3 hover:bg-blue-50/50 bg-white transition cursor-pointer flex items-start justify-between gap-2.5 group"
+                                                >
+                                                    <div className="space-y-0.5 flex-1 min-w-0">
+                                                        <div className="flex items-center justify-between gap-1">
+                                                            <div className="flex items-center gap-1.5 truncate">
+                                                                {n.urgent && (
+                                                                    <span className="w-2 h-2 rounded-full bg-red-600 shrink-0 animate-pulse" />
+                                                                )}
+                                                                <span
+                                                                    className={`font-bold truncate text-[11px] ${
+                                                                        n.urgent ? 'text-red-700' : 'text-[#04326D]'
+                                                                    }`}
+                                                                >
+                                                                    {n.titre}
+                                                                </span>
+                                                            </div>
+                                                            <span className="text-[9.5px] text-gray-400 font-mono shrink-0">
+                                                                {n.date}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-gray-600 text-[11px] leading-snug line-clamp-2">
+                                                            {n.message}
+                                                        </p>
                                                     </div>
-                                                    <p className="text-gray-600 text-[11px] leading-snug">{n.message}</p>
-                                                    <div className="mt-2 flex justify-end">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleViewNotification(n)}
-                                                            className="text-[10px] font-bold text-[#04326D] hover:underline bg-white border border-[#B2BED6] px-2 py-0.5 rounded"
-                                                        >
-                                                            Voir & marquer lu &rarr;
-                                                        </button>
-                                                    </div>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => handleMarkSingleAsRead(n.id, e)}
+                                                        className="p-1 rounded text-gray-300 hover:text-emerald-700 hover:bg-emerald-50 transition shrink-0"
+                                                        title="Marquer comme lu"
+                                                    >
+                                                        <Check className="w-3.5 h-3.5" />
+                                                    </button>
                                                 </div>
                                             ))
                                         )}
@@ -745,7 +879,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             )}
                         </div>
 
-                        {/* Profil & Déconnexion */}
+                        {/* Profil */}
                         <div className="relative" ref={profileRef}>
                             <button
                                 type="button"
@@ -773,7 +907,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </button>
 
                             {showProfileMenu && (
-                                <div className="absolute right-0 mt-2 w-52 bg-white border border-[#B2BED6] rounded shadow-xl z-50 text-xs py-1">
+                                <div className="absolute right-0 mt-2 w-52 bg-white border border-[#B2BED6] rounded shadow-xl z-50 text-xs py-1 animate-slide-down">
                                     <div className="px-4 py-2 border-b border-gray-100 bg-gray-50">
                                         <p className="font-bold text-gray-800">{user.name}</p>
                                         <p className="text-[10px] text-gray-500 truncate">{user.email}</p>
@@ -804,10 +938,10 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                 </main>
             </div>
 
-            {/* MODALE : Détail Notification */}
+            {/* MODALE NOTIFICATION */}
             {selectedNotif && (
-                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4">
-                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-sm w-full p-5 space-y-3">
+                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
+                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-sm w-full p-5 space-y-3 animate-scale-in">
                         <div className="flex items-center justify-between border-b pb-2">
                             <h3
                                 className={`text-xs font-bold uppercase ${
@@ -835,7 +969,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             <button
                                 type="button"
                                 onClick={() => setSelectedNotif(null)}
-                                className="px-3 py-1 bg-[#04326D] text-white text-xs font-bold rounded hover:bg-[#06428f]"
+                                className="px-3.5 py-1.5 bg-[#04326D] text-white text-xs font-bold rounded hover:bg-[#06428f] transition"
                             >
                                 Fermer
                             </button>
@@ -844,10 +978,10 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                 </div>
             )}
 
-            {/* MODALE : Règles Financières & Procédures */}
+            {/* MODALE RÈGLES FINANCIÈRES */}
             {showHelpModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-lg w-full p-6 space-y-4">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
+                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-lg w-full p-6 space-y-4 animate-scale-in">
                         <div className="flex items-center justify-between border-b pb-3">
                             <h3 className="text-sm font-bold text-[#0B192C] uppercase flex items-center gap-2">
                                 <HelpCircle className="w-5 h-5 text-[#04326D]" />

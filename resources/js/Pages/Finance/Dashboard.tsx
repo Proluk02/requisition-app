@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
@@ -15,6 +15,11 @@ import {
     Building2,
     PieChart,
     AlertTriangle,
+    Search,
+    Check,
+    Coins,
+    BarChart3,
+    Activity,
 } from 'lucide-react';
 
 interface FinanceJustificatif {
@@ -126,6 +131,193 @@ interface Props extends PageProps {
 const money = (amount: number, currency: string) =>
     `${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${currency}`;
 
+/* =========================================================================
+ *  COMPOSANT AUTOCOMPLÉTION & FILTRAGE BUDGET FRONT-END (REACT)
+ * ========================================================================= */
+function BudgetLineSearchPicker({
+    currentCode,
+    projectId,
+    allBudgetLines,
+    lineTotal,
+    devise,
+    onSelectCode,
+}: {
+    currentCode: string;
+    projectId?: string;
+    allBudgetLines: BudgetLineClientItem[];
+    lineTotal: number;
+    devise: string;
+    onSelectCode: (code: string) => void;
+}) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState(currentCode);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        setSearchTerm(currentCode);
+    }, [currentCode]);
+
+    // Fermeture automatique au clic en dehors
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // Filtrage instantané côté client (Code OU Libellé)
+    const matchingLines = useMemo(() => {
+        const query = searchTerm.trim().toLowerCase();
+        return allBudgetLines.filter((line) => {
+            if (projectId && line.project_id !== projectId) return false;
+            if (!query) return true;
+            return (
+                line.code.toLowerCase().includes(query) ||
+                line.libelle.toLowerCase().includes(query)
+            );
+        });
+    }, [allBudgetLines, projectId, searchTerm]);
+
+    const activeLine = useMemo(() => {
+        const norm = currentCode.trim().toLowerCase();
+        return allBudgetLines.find(
+            (l) => l.normalizedCode === norm && (!projectId || l.project_id === projectId)
+        ) || null;
+    }, [allBudgetLines, currentCode, projectId]);
+
+    const solde = activeLine ? activeLine.solde : null;
+    const soldeRestant = solde !== null ? solde - lineTotal : null;
+    const isOverdraft = soldeRestant !== null && soldeRestant < 0;
+
+    return (
+        <div ref={containerRef} className="relative w-full space-y-1">
+            <div className="relative">
+                <input
+                    type="text"
+                    placeholder="Tapez un code (ex: 2.2)..."
+                    value={searchTerm}
+                    onFocus={() => setIsOpen(true)}
+                    onChange={(e) => {
+                        setSearchTerm(e.target.value);
+                        onSelectCode(e.target.value);
+                        setIsOpen(true);
+                    }}
+                    className="w-full pl-8 pr-3 py-1.5 border border-[#04326D] rounded text-xs font-mono font-bold text-[#04326D] bg-white focus:outline-none focus:ring-1 focus:ring-[#04326D]"
+                    required
+                />
+                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                {searchTerm && (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setSearchTerm('');
+                            onSelectCode('');
+                            setIsOpen(true);
+                        }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                        <X className="w-3 h-3" />
+                    </button>
+                )}
+            </div>
+
+            {/* Menu d'autocomplétion filtré en direct */}
+            {isOpen && (
+                <div className="absolute left-0 top-full mt-1 w-96 bg-white border border-[#04326D] rounded-lg shadow-2xl z-50 max-h-56 overflow-y-auto divide-y divide-gray-100 text-xs">
+                    <div className="p-2 bg-gray-50 text-[10px] text-gray-500 font-bold uppercase tracking-wider flex justify-between">
+                        <span>Lignes trouvées ({matchingLines.length})</span>
+                        <span>Solde disponible</span>
+                    </div>
+                    {matchingLines.length === 0 ? (
+                        <div className="p-3 text-center text-gray-400 italic">
+                            Aucune ligne ne correspond à « {searchTerm} »
+                        </div>
+                    ) : (
+                        matchingLines.map((line) => {
+                            const isEnough = line.solde >= lineTotal;
+                            const isSelected = line.code === currentCode;
+                            return (
+                                <button
+                                    key={line.id}
+                                    type="button"
+                                    onClick={() => {
+                                        setSearchTerm(line.code);
+                                        onSelectCode(line.code);
+                                        setIsOpen(false);
+                                    }}
+                                    className={`w-full p-2.5 text-left transition flex flex-col gap-0.5 ${
+                                        isSelected ? 'bg-blue-50/80' : 'hover:bg-slate-50'
+                                    }`}
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="font-mono font-bold text-[#04326D]">
+                                                {line.code}
+                                            </span>
+                                            {isSelected && <Check className="w-3 h-3 text-[#04326D]" />}
+                                        </div>
+                                        <span
+                                            className={`font-mono text-[11px] font-bold ${
+                                                isEnough ? 'text-emerald-700' : 'text-red-600'
+                                            }`}
+                                        >
+                                            {money(line.solde, line.devise || devise)}
+                                        </span>
+                                    </div>
+                                    <p className="text-[11px] text-gray-600 line-clamp-1">
+                                        {line.libelle}
+                                    </p>
+                                    <div className="flex justify-between items-center text-[10px] pt-0.5">
+                                        <span className="text-gray-400">
+                                            Initial : {money(line.budget_initial, line.devise || devise)}
+                                        </span>
+                                        {isEnough ? (
+                                            <span className="text-emerald-700 font-bold">
+                                                ✓ Couvre la ligne
+                                            </span>
+                                        ) : (
+                                            <span className="text-red-600 font-bold">
+                                                ⚠️ Manque {money(lineTotal - line.solde, devise)}
+                                            </span>
+                                        )}
+                                    </div>
+                                </button>
+                            );
+                        })
+                    )}
+                </div>
+            )}
+
+            {/* Fiche d'impact financier temps réel sous l'input */}
+            {activeLine ? (
+                <div className="p-1.5 rounded bg-gray-50 border border-gray-200 text-[10.5px] space-y-0.5">
+                    <p className="font-semibold text-gray-800 line-clamp-1" title={activeLine.libelle}>
+                        {activeLine.libelle}
+                    </p>
+                    <div className="flex items-center justify-between text-gray-600 pt-0.5 border-t border-gray-200">
+                        <span>Solde actuel : <strong className="font-mono">{money(activeLine.solde, devise)}</strong></span>
+                        <span className={isOverdraft ? 'text-red-700 font-bold' : 'text-emerald-700 font-bold'}>
+                            {isOverdraft
+                                ? `⚠️ Déficit : ${money(Math.abs(soldeRestant!), devise)}`
+                                : `✓ Reste : ${money(soldeRestant!, devise)}`}
+                        </span>
+                    </div>
+                </div>
+            ) : (
+                <span className="text-[10px] text-gray-400 italic block">
+                    Aucune ligne valide sélectionnée
+                </span>
+            )}
+        </div>
+    );
+}
+
+/* =========================================================================
+ *  PAGE PRINCIPALE DASHBOARD FINANCE
+ * ========================================================================= */
 export default function FinanceDashboard({
     requisitions: initialRequisitions = [],
     projects = [],
@@ -139,6 +331,8 @@ export default function FinanceDashboard({
 
     const [requisitions, setRequisitions] = useState<FinanceRequisition[]>(initialRequisitions);
 
+    // Filtres instantanés Front-End
+    const [searchQuery, setSearchQuery] = useState('');
     const [selectedProject, setSelectedProject] = useState<string>('all');
     const [selectedCaisse, setSelectedCaisse] = useState<string>('all');
     const [selectedNature, setSelectedNature] = useState<string>('all');
@@ -149,10 +343,9 @@ export default function FinanceDashboard({
     const [rejecting, setRejecting] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
 
-    // Édition directe du MF pendant l'examen de la réquisition
+    // Données modifiées en direct par le MF dans la modale d'examen
     const [financeCaisse, setFinanceCaisse] = useState<string>('');
     const [financeAllocations, setFinanceAllocations] = useState<Record<string, string>>({});
-    const [activeInputId, setActiveInputId] = useState<string | null>(null);
 
     const [pinModalOpen, setPinModalOpen] = useState(false);
     const [pinSaisi, setPinSaisi] = useState('');
@@ -182,6 +375,46 @@ export default function FinanceDashboard({
         ) || null;
     };
 
+    // Calculs pour les KPIs
+    const pendingCount = requisitions.filter((item) => item.canDecide).length;
+    const decaissementPretCount = requisitions.filter((item) => item.statusCode === 'decaissement_caisse').length;
+    const decaisseCount = requisitions.filter((item) => item.statusCode === 'decaisse').length;
+
+    // --- GRAPHIQUES 100% FRONT-END ---
+    const chartData = useMemo(() => {
+        const total = requisitions.length || 1;
+        const pending = requisitions.filter((item) => item.canDecide).length;
+        const processed = requisitions.length - pending;
+
+        const pctProcessed = requisitions.length > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+        const pctPending = requisitions.length > 0 ? Math.max(0, 100 - pctProcessed) : 0;
+        const isEmpty = requisitions.length === 0;
+
+        return { total, pending, processed, pctProcessed, pctPending, isEmpty };
+    }, [requisitions]);
+
+    const gaugeData = useMemo(() => {
+        const total = requisitions.length || 1;
+        const paid = requisitions.filter(r => r.statusCode === 'decaisse').length;
+        const ready = requisitions.filter(r => r.statusCode === 'decaissement_caisse').length;
+        
+        const pctPaid = requisitions.length > 0 ? Math.round((paid / total) * 100) : 0;
+        const pctReady = requisitions.length > 0 ? Math.round((ready / total) * 100) : 0;
+        
+        return { paid, ready, pctPaid, pctReady, isEmpty: requisitions.length === 0 };
+    }, [requisitions]);
+
+    const recentReqs = useMemo(() => {
+        return [...requisitions].slice(0, 10).reverse();
+    }, [requisitions]);
+
+    const maxReqAmount = useMemo(() => {
+        if (!recentReqs.length) return 1;
+        return Math.max(...recentReqs.map(r => r.montantTotal));
+    }, [recentReqs]);
+    // ---------------------------------
+
+    // Filtrage complet instantané côté React (aucun rechargement de page)
     const filteredRequisitions = useMemo(() => {
         return requisitions.filter((item) => {
             if (statusFilter === 'pending' && !item.canDecide) return false;
@@ -202,9 +435,25 @@ export default function FinanceDashboard({
                 return false;
             }
 
+            // Recherche textuelle instantanée (React)
+            if (searchQuery.trim()) {
+                const q = searchQuery.toLowerCase().trim();
+                const matchNum = item.numero.toLowerCase().includes(q);
+                const matchUser = item.initiateurNom.toLowerCase().includes(q);
+                const matchProj = item.projet.toLowerCase().includes(q);
+                const matchObs = item.observation?.toLowerCase().includes(q) ?? false;
+                const matchLigne = item.lignes.some((l) =>
+                    (l.codeAllocation || l.codeBudget || '').toLowerCase().includes(q) ||
+                    l.activite.toLowerCase().includes(q)
+                );
+                if (!matchNum && !matchUser && !matchProj && !matchObs && !matchLigne) {
+                    return false;
+                }
+            }
+
             return true;
         });
-    }, [requisitions, statusFilter, selectedProject, selectedCaisse, selectedNature]);
+    }, [requisitions, statusFilter, selectedProject, selectedCaisse, selectedNature, searchQuery]);
 
     const handleOpenExamen = (item: FinanceRequisition) => {
         setSelected(item);
@@ -285,7 +534,7 @@ export default function FinanceDashboard({
 
                     showToast(
                         'success',
-                        `Visa Financier certifié apposé sur ${selected.numero}. Transmis au Manager Administratif.`
+                        `Visa Financier certifié apposé sur ${selected.numero}. Transmis à l'Administration.`
                     );
                 },
                 onError: (errors) => {
@@ -369,10 +618,6 @@ export default function FinanceDashboard({
         );
     };
 
-    const pendingCount = requisitions.filter((item) => item.canDecide).length;
-    const decaissementPretCount = requisitions.filter((item) => item.statusCode === 'decaissement_caisse').length;
-    const decaisseCount = requisitions.filter((item) => item.statusCode === 'decaisse').length;
-
     return (
         <AppLayout>
             <Head title="Direction Financière — Centre Financier" />
@@ -407,17 +652,15 @@ export default function FinanceDashboard({
 
                 {pendingSessions.length > 0 && (
                     <div className="p-4 bg-amber-50 border-2 border-amber-400 rounded shadow-sm space-y-3">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2.5">
-                                <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0" />
-                                <div>
-                                    <h3 className="text-xs font-bold uppercase tracking-wider text-amber-950">
-                                        Demande d'Ouverture de Guichet en Attente ({pendingSessions.length})
-                                    </h3>
-                                    <p className="text-[11px] text-amber-900 mt-0.5">
-                                        Un caissier a demandé l'ouverture de sa caisse pour la journée. Votre autorisation par PIN est requise pour démarrer les opérations.
-                                    </p>
-                                </div>
+                        <div className="flex items-center gap-2.5">
+                            <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0" />
+                            <div>
+                                <h3 className="text-xs font-bold uppercase tracking-wider text-amber-950">
+                                    Demande d'Ouverture de Guichet en Attente ({pendingSessions.length})
+                                </h3>
+                                <p className="text-[11px] text-amber-900 mt-0.5">
+                                    Un caissier a demandé l'ouverture de sa caisse pour la journée. Votre autorisation par PIN est requise pour démarrer les opérations.
+                                </p>
                             </div>
                         </div>
 
@@ -472,6 +715,7 @@ export default function FinanceDashboard({
                     </div>
                 )}
 
+                {/* KPI Cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between border-l-4 border-l-[#F58F20]">
                         <span className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">
@@ -501,6 +745,189 @@ export default function FinanceDashboard({
                     </div>
                 </div>
 
+                {/* SECTION GRAPHIQUES : VISUALISATIONS FLUX & DOSSIERS (100% REACT/SVG NATIF) */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    {/* 1. Donut Graphique SVG - Statut des Dossiers */}
+                    <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
+                        <div className="flex items-center justify-between border-b pb-2.5">
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
+                                <PieChart className="w-4 h-4 text-[#04326D]" />
+                                <span>Statut Global des Dossiers</span>
+                            </h3>
+                            <span className="text-[10px] font-mono text-gray-500 font-bold">
+                                {requisitions.length} Total
+                            </span>
+                        </div>
+
+                        <div className="flex items-center justify-center gap-6 pt-2">
+                            {/* SVG Donut Chart */}
+                            <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
+                                <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                                    {/* Cercle d'arrière-plan (En attente / Orange) */}
+                                    <path
+                                        className={chartData.isEmpty ? "text-gray-200" : "text-[#F58F20]"}
+                                        strokeWidth="4"
+                                        stroke="currentColor"
+                                        fill="none"
+                                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                    />
+                                    {/* Segment Traité (Vert) */}
+                                    {!chartData.isEmpty && (
+                                        <path
+                                            className="text-emerald-500 transition-all duration-700 ease-out"
+                                            strokeDasharray={`${chartData.pctProcessed}, 100`}
+                                            strokeWidth="4"
+                                            strokeLinecap="round"
+                                            stroke="currentColor"
+                                            fill="none"
+                                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                        />
+                                    )}
+                                </svg>
+                                <div className="absolute text-center">
+                                    <span className="text-xs font-black font-mono text-[#0B192C] block">
+                                        {chartData.isEmpty ? '-' : `${chartData.pctProcessed}%`}
+                                    </span>
+                                    <span className="text-[8px] font-bold uppercase text-gray-400 block -mt-0.5">
+                                        Traité
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* Légende du Donut */}
+                            <div className="space-y-1.5 text-[11px] flex-1">
+                                <div className="flex items-center justify-between">
+                                    <span className="flex items-center gap-1.5 text-gray-600">
+                                        <span className={`w-2.5 h-2.5 rounded-full ${chartData.isEmpty ? 'bg-gray-300' : 'bg-emerald-500'}`} />
+                                        Traités :
+                                    </span>
+                                    <strong className="font-mono text-emerald-800">
+                                        {chartData.processed}
+                                    </strong>
+                                </div>
+                                <div className="flex items-center justify-between pt-1 border-t border-gray-100">
+                                    <span className="flex items-center gap-1.5 text-gray-600">
+                                        <span className={`w-2.5 h-2.5 rounded-full ${chartData.isEmpty ? 'bg-gray-300' : 'bg-[#F58F20]'}`} />
+                                        En attente (Visas) :
+                                    </span>
+                                    <strong className="font-mono text-[#F58F20]">
+                                        {chartData.pending}
+                                    </strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 2. Jauge de Ratio (Bon à Payer / Décaissé) */}
+                    <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
+                        <div className="flex items-center justify-between border-b pb-2.5">
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
+                                <BarChart3 className="w-4 h-4 text-emerald-700" />
+                                <span>Progression des Paiements</span>
+                            </h3>
+                            <span className="text-[10px] font-mono text-gray-500 font-bold">
+                                Global
+                            </span>
+                        </div>
+
+                        <div className="space-y-2 pt-1 text-xs">
+                            <div className="flex justify-between items-center text-[11px]">
+                                <span className="text-gray-600">Taux de décaissement (Payés) :</span>
+                                <strong className="font-mono text-sm text-[#04326D]">
+                                    {gaugeData.pctPaid}%
+                                </strong>
+                            </div>
+
+                            {/* Barre de progression (Décaissé / Bon à payer / Autre) */}
+                            <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden flex relative">
+                                <div
+                                    className={`${gaugeData.isEmpty ? 'bg-gray-300' : 'bg-emerald-500'} transition-all duration-700`}
+                                    style={{ width: `${gaugeData.pctPaid}%` }}
+                                    title={`Décaissés: ${gaugeData.pctPaid}%`}
+                                />
+                                <div
+                                    className={`${gaugeData.isEmpty ? 'bg-gray-200' : 'bg-[#04326D]'} transition-all duration-700`}
+                                    style={{ width: `${gaugeData.pctReady}%` }}
+                                    title={`Prêts pour Caisse: ${gaugeData.pctReady}%`}
+                                />
+                            </div>
+
+                            <div className="p-2.5 bg-gray-50 rounded border border-gray-100 space-y-1 text-[11px]">
+                                <div className="flex justify-between">
+                                    <span className="text-gray-500">Prêts pour la caisse (Bon à Payer) :</span>
+                                    <strong className="font-mono text-[#04326D]">{gaugeData.ready}</strong>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-gray-500">Déjà décaissés physiquement :</span>
+                                    <strong className="font-mono text-emerald-700">{gaugeData.paid}</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 3. DIAGRAMME À BARRES CHRONOLOGIQUE */}
+                    <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
+                        <div className="flex items-center justify-between border-b pb-2.5">
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
+                                <Activity className="w-4 h-4 text-[#04326D]" />
+                                <span>Flux (10 Dernières)</span>
+                            </h3>
+                            <span className="text-[10px] font-mono text-gray-500 font-bold">
+                                Max: {money(maxReqAmount, 'USD/FC')}
+                            </span>
+                        </div>
+
+                        <div className="pt-5 flex items-end justify-between h-40 gap-2 relative">
+                            {/* Lignes de repère arrières */}
+                            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-20 pb-5">
+                                {[1,2,3,4].map(i => <div key={i} className="border-b border-gray-400 w-full h-0"></div>)}
+                            </div>
+
+                            {recentReqs.length === 0 ? (
+                                <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs italic pb-5">
+                                    Aucune donnée disponible.
+                                </div>
+                            ) : (
+                                recentReqs.map((req) => {
+                                    const heightPct = Math.max((req.montantTotal / maxReqAmount) * 100, 2);
+                                    
+                                    // Code couleur selon le statut
+                                    let barColor = 'bg-gray-400';
+                                    if (req.statusCode === 'decaisse') barColor = 'bg-emerald-500';
+                                    else if (req.statusCode === 'decaissement_caisse') barColor = 'bg-[#04326D]';
+                                    else if (req.canDecide) barColor = 'bg-[#F58F20]'; // En attente Finance
+                                    else if (req.financeRejected) barColor = 'bg-red-500';
+
+                                    return (
+                                        <div key={req.id} className="relative group flex-1 flex flex-col items-center justify-end h-full">
+                                            {/* Tooltip au survol */}
+                                            <div className="absolute bottom-[calc(100%+0.5rem)] mb-0 hidden group-hover:block z-10 w-max max-w-[160px] bg-gray-900 text-white text-[10px] p-2.5 rounded shadow-lg text-center animate-fade-in">
+                                                <span className="font-bold border-b border-gray-700 pb-1 mb-1 block">
+                                                    {req.numero}
+                                                </span>
+                                                <span className="font-mono text-xs block text-blue-300">
+                                                    {money(req.montantTotal, req.devise)}
+                                                </span>
+                                                <span className="text-gray-300 block mt-1">{req.statusLabel}</span>
+                                            </div>
+                                            
+                                            {/* La Barre */}
+                                            <div
+                                                className={`w-full max-w-[2rem] rounded-t-sm transition-all duration-700 ease-out hover:opacity-80 cursor-pointer ${barColor}`}
+                                                style={{ height: `calc(${heightPct}% - 20px)` }}
+                                            />
+                                            <span className="text-[9px] font-mono mt-2 text-gray-500 truncate w-full text-center h-4">
+                                                ...{req.numero.split('-').pop()}
+                                            </span>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* État des caisses */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm p-4 space-y-3">
                     <header className="flex items-center justify-between border-b pb-2">
                         <h2 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
@@ -540,9 +967,31 @@ export default function FinanceDashboard({
                     </div>
                 </div>
 
+                {/* Liste des réquisitions avec filtre instantané React */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="border-b px-4 py-3 bg-gray-50 flex flex-wrap items-center justify-between gap-3 text-xs">
                         <div className="flex flex-wrap items-center gap-2">
+                            {/* Barre de recherche instantanée */}
+                            <div className="relative">
+                                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                <input
+                                    type="text"
+                                    placeholder="Recherche instantanée (N°, agent, projet...)"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="pl-8 pr-3 py-1 border border-[#B2BED6] rounded text-xs bg-white text-[#0B192C] w-64 focus:outline-none focus:border-[#04326D]"
+                                />
+                                {searchQuery && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setSearchQuery('')}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                    >
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                )}
+                            </div>
+
                             <select
                                 value={selectedProject}
                                 onChange={(e) => setSelectedProject(e.target.value)}
@@ -590,7 +1039,7 @@ export default function FinanceDashboard({
                         </div>
 
                         <span className="text-[11px] font-bold text-gray-500 font-mono">
-                            {filteredRequisitions.length} dossier(s)
+                            {filteredRequisitions.length} dossier(s) trouvé(s)
                         </span>
                     </div>
 
@@ -612,7 +1061,7 @@ export default function FinanceDashboard({
                                 {filteredRequisitions.length === 0 ? (
                                     <tr>
                                         <td colSpan={8} className="py-12 text-center text-gray-400 italic">
-                                            Aucune réquisition ne correspond aux filtres appliqués.
+                                            Aucune réquisition ne correspond à la recherche et aux filtres.
                                         </td>
                                     </tr>
                                 ) : (
@@ -676,10 +1125,10 @@ export default function FinanceDashboard({
                 </div>
             </div>
 
-            {/* MODALE D'EXAMEN ET D'ÉDITION POUR LE MANAGER FINANCIER */}
+            {/* MODALE D'EXAMEN & D'IMPUTATION AVEC FILTRAGE REACT INSTANTANÉ */}
             {selected && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
-                    <div className="w-full max-w-4xl max-h-[92vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-4 animate-slide-down">
+                    <div className="w-full max-w-5xl max-h-[92vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-4 animate-slide-down">
                         <header className="flex items-start justify-between border-b pb-3">
                             <div>
                                 <span className="text-[10px] uppercase font-bold text-[#F58F20] tracking-wider">
@@ -694,17 +1143,14 @@ export default function FinanceDashboard({
                             </div>
                             <button
                                 type="button"
-                                onClick={() => {
-                                    setSelected(null);
-                                    setActiveInputId(null);
-                                }}
+                                onClick={() => setSelected(null)}
                                 className="text-gray-400 hover:text-gray-600 text-lg font-bold"
                             >
                                 <X className="w-5 h-5" />
                             </button>
                         </header>
 
-                        {/* Choix et Modification de la Caisse par le MF */}
+                        {/* Choix et Modification directe de la Caisse par le MF */}
                         {selected.canDecide && (
                             <div className="p-3 bg-blue-50 border border-blue-200 rounded flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                                 <div>
@@ -733,15 +1179,16 @@ export default function FinanceDashboard({
                             </div>
                         )}
 
-                        {/* Tableau des lignes avec modification & autocomplétion des codes budgétaires */}
+                        {/* Tableau des lignes avec autocomplétion & filtrage dynamique */}
                         <div>
                             <div className="flex items-center justify-between mb-2">
                                 <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
                                     Contrôle et Ajustement des Imputations Budgétaires
                                 </h3>
                                 {selected.canDecide && (
-                                    <span className="text-[10px] text-gray-500 italic">
-                                        Tapez un code (ex: 2.2) pour afficher les suggestions et soldes disponibles
+                                    <span className="text-[10px] text-[#04326D] font-bold flex items-center gap-1">
+                                        <Coins className="w-3.5 h-3.5 text-emerald-600" />
+                                        Tapez un code pour filtrer instantanément le solde en direct
                                     </span>
                                 )}
                             </div>
@@ -751,7 +1198,7 @@ export default function FinanceDashboard({
                                     <thead className="bg-[#0B192C] text-white font-bold">
                                         <tr>
                                             <th className="p-2.5">Désignation</th>
-                                            <th className="p-2.5 w-72">Code Imputé & Recherche</th>
+                                            <th className="p-2.5 w-80">Code Imputé & Recherche Front-End</th>
                                             <th className="p-2.5 text-right">Solde Disponible</th>
                                             <th className="p-2.5 text-right">Total Ligne</th>
                                             <th className="p-2.5 text-center">Faisabilité</th>
@@ -765,71 +1212,24 @@ export default function FinanceDashboard({
                                             const soldeDispo = matchedLine ? matchedLine.solde : line.budget_solde_actuel;
                                             const depassement = soldeDispo !== null && soldeDispo !== undefined && line.total > soldeDispo;
 
-                                            const filteredSuggestions = allBudgetLines.filter((b) => {
-                                                if (selected.project_id && b.project_id !== selected.project_id) return false;
-                                                const q = currentCode.trim().toLowerCase();
-                                                if (!q) return false;
-                                                return b.code.toLowerCase().includes(q) || b.libelle.toLowerCase().includes(q);
-                                            });
-
                                             return (
                                                 <tr key={line.id} className={depassement ? 'bg-red-50/60' : ''}>
                                                     <td className="p-2.5 font-medium max-w-xs">{line.activite}</td>
-                                                    <td className="p-2.5 relative">
+                                                    <td className="p-2.5">
                                                         {selected.canDecide ? (
-                                                            <div className="relative">
-                                                                <input
-                                                                    type="text"
-                                                                    placeholder="Recherche (ex: 2.2)..."
-                                                                    value={currentCode}
-                                                                    onFocus={() => setActiveInputId(line.id)}
-                                                                    onChange={(e) => {
-                                                                        setFinanceAllocations({
-                                                                            ...financeAllocations,
-                                                                            [line.id]: e.target.value,
-                                                                        });
-                                                                        setActiveInputId(line.id);
-                                                                    }}
-                                                                    className="w-full border border-[#04326D] rounded p-1.5 text-xs font-mono font-bold text-[#04326D] bg-white focus:outline-none"
-                                                                    required
-                                                                />
-
-                                                                {/* Menu d'autocomplétion Front-End instantané */}
-                                                                {activeInputId === line.id && filteredSuggestions.length > 0 && (
-                                                                    <div className="absolute left-0 top-full mt-1 w-80 bg-white border border-[#04326D] rounded shadow-2xl z-30 max-h-48 overflow-y-auto divide-y text-xs">
-                                                                        {filteredSuggestions.map((sug) => (
-                                                                            <button
-                                                                                key={sug.id}
-                                                                                type="button"
-                                                                                onClick={() => {
-                                                                                    setFinanceAllocations({
-                                                                                        ...financeAllocations,
-                                                                                        [line.id]: sug.code,
-                                                                                    });
-                                                                                    setActiveInputId(null);
-                                                                                }}
-                                                                                className="w-full p-2 text-left hover:bg-blue-50 flex flex-col justify-between"
-                                                                            >
-                                                                                <div className="flex items-center justify-between">
-                                                                                    <span className="font-mono font-black text-[#04326D]">
-                                                                                        {sug.code}
-                                                                                    </span>
-                                                                                    <span className="font-mono text-[10px] font-bold text-emerald-700">
-                                                                                        Solde: {sug.solde.toLocaleString()} {sug.devise}
-                                                                                    </span>
-                                                                                </div>
-                                                                                <span className="text-[10px] text-gray-600 truncate mt-0.5">
-                                                                                    {sug.libelle}
-                                                                                </span>
-                                                                            </button>
-                                                                        ))}
-                                                                    </div>
-                                                                )}
-
-                                                                <span className="text-[10px] text-gray-500 block truncate mt-1">
-                                                                    {matchedLine ? matchedLine.libelle : (line.libelleAllocation || 'Non assigné')}
-                                                                </span>
-                                                            </div>
+                                                            <BudgetLineSearchPicker
+                                                                currentCode={currentCode}
+                                                                projectId={selected.project_id}
+                                                                allBudgetLines={allBudgetLines}
+                                                                lineTotal={line.total}
+                                                                devise={selected.devise}
+                                                                onSelectCode={(code) => {
+                                                                    setFinanceAllocations({
+                                                                        ...financeAllocations,
+                                                                        [line.id]: code,
+                                                                    });
+                                                                }}
+                                                            />
                                                         ) : (
                                                             <div>
                                                                 <span className="font-mono font-bold text-[#04326D] block">
@@ -855,11 +1255,11 @@ export default function FinanceDashboard({
                                                         {soldeDispo === null || soldeDispo === undefined ? (
                                                             <span className="text-[10px] text-gray-400">À vérifier</span>
                                                         ) : depassement ? (
-                                                            <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-[10px] font-bold">
+                                                            <span className="px-2 py-0.5 rounded bg-red-100 text-red-800 text-[10px] font-bold">
                                                                 Dépassement crédit
                                                             </span>
                                                         ) : (
-                                                            <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                                                            <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
                                                                 Crédit suffisant
                                                             </span>
                                                         )}
@@ -915,10 +1315,7 @@ export default function FinanceDashboard({
                                         <div className="flex gap-2">
                                             <button
                                                 type="button"
-                                                onClick={() => {
-                                                    setSelected(null);
-                                                    setActiveInputId(null);
-                                                }}
+                                                onClick={() => setSelected(null)}
                                                 className="px-3.5 py-2 border rounded text-xs font-semibold text-gray-600 hover:bg-gray-50"
                                             >
                                                 Fermer

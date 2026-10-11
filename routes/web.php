@@ -66,7 +66,6 @@ Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admi
     Route::get('/backup/download', [BackupController::class, 'download'])->name('backup.download');
 });
 
-
 Route::middleware(['auth', 'active'])->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
@@ -104,6 +103,7 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::get('/receipts', [CashierController::class, 'receipts'])->name('receipts.index');
         Route::get('/ledger', [CashierController::class, 'ledger'])->name('ledger.index');
         Route::get('/ledger/export', [CashierController::class, 'exportLedger'])->name('ledger.export');
+        Route::get('/journal/du-jour', [CashierController::class, 'journalDuJour'])->name('journal.du-jour');
     });
 
     Route::patch('/requisitions/{requisition}/cashier-disburse', [CashierController::class, 'disburse'])->name('requisitions.cashier-disburse');
@@ -112,6 +112,10 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::patch('/cashier/sessions/{session}/authorize-opening', [CashierSessionController::class, 'authorizeOpening'])->name('cashier.session.authorize-opening');
     Route::post('/cashier/sessions/{session}/close', [CashierSessionController::class, 'closeSession'])->name('cashier.session.close');
     Route::post('/cashier/registers/{cashRegister}/entree', [CashierSessionController::class, 'storeEntree'])->name('cashier.movement.entree');
+
+    Route::post('/cashier/movements/{movement}/validate-approvisionnement', [CashierSessionController::class, 'validateApprovisionnement'])
+        ->name('cashier.movement.validate-approvisionnement')
+        ->middleware('role:finance,admin');
 
     Route::get('/justifications', [ExpenseJustificationController::class, 'index'])->name('justifications.index');
     Route::post('/justifications', [ExpenseJustificationController::class, 'store'])->name('justifications.store');
@@ -157,7 +161,7 @@ Route::middleware(['auth', 'active'])->group(function () {
                 'updated_at' => now(),
             ]);
 
-        return back();
+        return response()->json(['success' => true]);
     })->name('notifications.mark-read');
 
     Route::post('/notifications/mark-all-read', function (Request $request) {
@@ -170,7 +174,7 @@ Route::middleware(['auth', 'active'])->group(function () {
                 'updated_at' => now(),
             ]);
 
-        return back();
+        return response()->json(['success' => true]);
     })->name('notifications.mark-all-read');
 });
 

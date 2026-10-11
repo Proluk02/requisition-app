@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { Head, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
@@ -11,7 +11,7 @@ import PinSignatureModal from '@/Components/Director/PinSignatureModal';
 import RequisitionDetailModal from '@/Components/Director/RequisitionDetailModal';
 import type { RequisitionSuivi } from '@/types/requisitionsList';
 import { numberToWordsFR } from '@/lib/numberToWords';
-import { Calendar, Eye, Printer, ShieldCheck } from 'lucide-react';
+import { Calendar, Eye, Printer, ShieldCheck, PieChart, BarChart3, Activity } from 'lucide-react';
 
 interface WorkflowLevel {
     step: number;
@@ -137,6 +137,40 @@ export default function DirectorDashboard({
         () => requisitions.reduce((acc, r) => acc + (r.devise === 'USD' ? r.montantTotal : 0), 0),
         [requisitions]
     );
+
+    // --- GRAPHIQUES 100% FRONT-END ---
+    const donutData = useMemo(() => {
+        const total = requisitions.length || 1;
+        const pctDecaisse = requisitions.length > 0 ? Math.round((decaisseesCount / total) * 100) : 0;
+        const pctNonDecaisse = requisitions.length > 0 ? 100 - pctDecaisse : 0;
+        const isEmpty = requisitions.length === 0;
+
+        return { total, decaisseesCount, nonDecaisseesCount, pctDecaisse, pctNonDecaisse, isEmpty };
+    }, [requisitions, decaisseesCount, nonDecaisseesCount]);
+
+    const gaugeData = useMemo(() => {
+        const totalUSD = volumeUSD || 1;
+        const decaisseUSD = caissesStats.reduce((sum, c) => sum + c.decaisse_usd, 0);
+        const pctDecaisse = volumeUSD > 0 ? Math.min(100, Math.round((decaisseUSD / totalUSD) * 100)) : 0;
+        const pctRestant = volumeUSD > 0 ? 100 - pctDecaisse : 100;
+        
+        return { totalUSD, decaisseUSD, pctDecaisse, pctRestant, isEmpty: volumeUSD === 0 };
+    }, [volumeUSD, caissesStats]);
+
+    const timelineReqs = useMemo(() => {
+        return [...filteredList].slice(0, 10).reverse();
+    }, [filteredList]);
+
+    const maxTimelineAmount = useMemo(() => {
+        if (!timelineReqs.length) return 1;
+        return Math.max(...timelineReqs.map(r => r.montantTotal));
+    }, [timelineReqs]);
+
+    const maxProjectVolume = useMemo(() => {
+        if (!projectsStats.length) return 1;
+        return Math.max(...projectsStats.map(p => p.total_usd));
+    }, [projectsStats]);
+    // ---------------------------------
 
     const handleOpenSignature = (req: RequisitionDirectrice) => {
         setPinError(null);
@@ -336,36 +370,218 @@ export default function DirectorDashboard({
                     />
                 </div>
 
+                {/* --- NOUVELLE SECTION DES GRAPHIQUES --- */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    {/* 1. Donut Graphique SVG - Statut des Dossiers */}
+                    <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
+                        <div className="flex items-center justify-between border-b pb-2.5">
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
+                                <PieChart className="w-4 h-4 text-[#04326D]" />
+                                <span>Statut des Opérations</span>
+                            </h3>
+                            <span className="text-[10px] font-mono text-gray-500 font-bold">
+                                {donutData.total} Total
+                            </span>
+                        </div>
+
+                        <div className="flex items-center justify-center gap-6 pt-2">
+                            <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
+                                <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                                    <path
+                                        className={donutData.isEmpty ? "text-gray-200" : "text-[#F58F20]"}
+                                        strokeWidth="4"
+                                        stroke="currentColor"
+                                        fill="none"
+                                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                    />
+                                    {!donutData.isEmpty && (
+                                        <path
+                                            className="text-emerald-500 transition-all duration-700 ease-out"
+                                            strokeDasharray={`${donutData.pctDecaisse}, 100`}
+                                            strokeWidth="4"
+                                            strokeLinecap="round"
+                                            stroke="currentColor"
+                                            fill="none"
+                                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                        />
+                                    )}
+                                </svg>
+                                <div className="absolute text-center">
+                                    <span className="text-xs font-black font-mono text-[#0B192C] block">
+                                        {donutData.isEmpty ? '-' : `${donutData.pctDecaisse}%`}
+                                    </span>
+                                    <span className="text-[8px] font-bold uppercase text-gray-400 block -mt-0.5">
+                                        Décaissé
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="space-y-1.5 text-[11px] flex-1">
+                                <div className="flex items-center justify-between">
+                                    <span className="flex items-center gap-1.5 text-gray-600">
+                                        <span className={`w-2.5 h-2.5 rounded-full ${donutData.isEmpty ? 'bg-gray-300' : 'bg-emerald-500'}`} />
+                                        Décaissées :
+                                    </span>
+                                    <strong className="font-mono text-emerald-800">
+                                        {donutData.decaisseesCount}
+                                    </strong>
+                                </div>
+                                <div className="flex items-center justify-between pt-1 border-t border-gray-100">
+                                    <span className="flex items-center gap-1.5 text-gray-600">
+                                        <span className={`w-2.5 h-2.5 rounded-full ${donutData.isEmpty ? 'bg-gray-300' : 'bg-[#F58F20]'}`} />
+                                        En attente :
+                                    </span>
+                                    <strong className="font-mono text-[#F58F20]">
+                                        {donutData.nonDecaisseesCount}
+                                    </strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 2. Jauge de Ratio d'Exécution Financière */}
+                    <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
+                        <div className="flex items-center justify-between border-b pb-2.5">
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
+                                <BarChart3 className="w-4 h-4 text-emerald-700" />
+                                <span>Exécution Financière (USD)</span>
+                            </h3>
+                            <span className="text-[10px] font-mono text-gray-500 font-bold">Période</span>
+                        </div>
+
+                        <div className="space-y-2 pt-1 text-xs">
+                            <div className="flex justify-between items-center text-[11px]">
+                                <span className="text-gray-600">Taux d'exécution (Fonds sortis) :</span>
+                                <strong className="font-mono text-sm text-[#04326D]">
+                                    {gaugeData.pctDecaisse}%
+                                </strong>
+                            </div>
+
+                            {/* Barre de progression */}
+                            <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden flex relative">
+                                <div
+                                    className={`${gaugeData.isEmpty ? 'bg-gray-300' : 'bg-emerald-500'} transition-all duration-700`}
+                                    style={{ width: `${gaugeData.pctDecaisse}%` }}
+                                    title={`Décaissés: ${gaugeData.pctDecaisse}%`}
+                                />
+                                <div
+                                    className={`${gaugeData.isEmpty ? 'bg-gray-200' : 'bg-[#F58F20]'} transition-all duration-700`}
+                                    style={{ width: `${gaugeData.pctRestant}%` }}
+                                    title={`Engagés restants: ${gaugeData.pctRestant}%`}
+                                />
+                            </div>
+
+                            <div className="p-2.5 bg-gray-50 rounded border border-gray-100 space-y-1 text-[11px]">
+                                <div className="flex justify-between">
+                                    <span className="text-gray-500">Volume total engagé :</span>
+                                    <strong className="font-mono text-[#04326D]">${gaugeData.totalUSD.toLocaleString('fr-FR')}</strong>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-gray-500">Fonds libérés en caisse :</span>
+                                    <strong className="font-mono text-emerald-700">${gaugeData.decaisseUSD.toLocaleString('fr-FR')}</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 3. DIAGRAMME À BARRES CHRONOLOGIQUE */}
+                    <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
+                        <div className="flex items-center justify-between border-b pb-2.5">
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
+                                <Activity className="w-4 h-4 text-[#04326D]" />
+                                <span>Flux (10 Dernières)</span>
+                            </h3>
+                            <span className="text-[10px] font-mono text-gray-500 font-bold">
+                                Max: ${maxTimelineAmount.toLocaleString('fr-FR')}
+                            </span>
+                        </div>
+
+                        <div className="pt-5 flex items-end justify-between h-40 gap-2 relative">
+                            {/* Lignes de repère arrières */}
+                            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-20 pb-5">
+                                {[1,2,3,4].map(i => <div key={i} className="border-b border-gray-400 w-full h-0"></div>)}
+                            </div>
+
+                            {timelineReqs.length === 0 ? (
+                                <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs italic pb-5">
+                                    Aucune donnée disponible.
+                                </div>
+                            ) : (
+                                timelineReqs.map((req) => {
+                                    const heightPct = Math.max((req.montantTotal / maxTimelineAmount) * 100, 2);
+                                    
+                                    // Code couleur selon le statut
+                                    let barColor = 'bg-gray-400';
+                                    if (req.is_decaissee) barColor = 'bg-emerald-500';
+                                    else if (req.statusCode === 'decaissement_caisse') barColor = 'bg-[#04326D]';
+                                    else if (req.statusCode === 'visa_admin') barColor = 'bg-[#F58F20]'; // En attente Directrice
+
+                                    return (
+                                        <div key={req.id} className="relative group flex-1 flex flex-col items-center justify-end h-full">
+                                            {/* Tooltip au survol */}
+                                            <div className="absolute bottom-[calc(100%+0.5rem)] mb-0 hidden group-hover:block z-10 w-max max-w-[160px] bg-gray-900 text-white text-[10px] p-2.5 rounded shadow-lg text-center animate-fade-in">
+                                                <span className="font-bold border-b border-gray-700 pb-1 mb-1 block">
+                                                    {req.numero}
+                                                </span>
+                                                <span className="font-mono text-xs block text-blue-300">
+                                                    {money(req.montantTotal, req.devise)}
+                                                </span>
+                                                <span className="text-gray-300 block mt-1 truncate">{req.projet}</span>
+                                            </div>
+                                            
+                                            {/* La Barre */}
+                                            <div
+                                                className={`w-full max-w-[2rem] rounded-t-sm transition-all duration-700 ease-out hover:opacity-80 cursor-pointer ${barColor}`}
+                                                style={{ height: `calc(${heightPct}% - 20px)` }}
+                                            />
+                                            <span className="text-[9px] font-mono mt-2 text-gray-500 truncate w-full text-center h-4">
+                                                ...{req.numero.split('-').pop()}
+                                            </span>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* --- SECTIONS SYNTHÈSE PROJET & CAISSE AMÉLIORÉES --- */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                     <section className="lg:col-span-7 bg-white border border-[#B2BED6] rounded">
                         <header className="px-4 py-3 border-b border-[#E2E8F0] flex items-center justify-between">
                             <h2 className="text-[11px] font-bold uppercase tracking-widest text-[#0B192C]">
-                                Répartition par projet
+                                Volume Financier par Projet
                             </h2>
                             <span className="text-[10.5px] text-gray-400 font-bold uppercase">Période {period}</span>
                         </header>
-                        <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div className="p-3 space-y-3">
                             {projectsStats.length === 0 ? (
                                 <p className="col-span-full text-[12px] text-gray-400 italic py-3 text-center">
                                     Aucune donnée pour cette période.
                                 </p>
                             ) : (
-                                projectsStats.map((p) => (
-                                    <div
-                                        key={p.id}
-                                        className="p-3 bg-[#F9F9FF] border border-[#E2E8F0] rounded flex justify-between items-center gap-3"
-                                    >
-                                        <div className="min-w-0">
-                                            <p className="text-[12.5px] font-bold text-[#04326D] truncate">{p.name}</p>
-                                            <p className="text-[10.5px] text-gray-500 mt-0.5">
-                                                {p.count} réquisition{p.count > 1 ? 's' : ''}
-                                            </p>
+                                projectsStats.map((p) => {
+                                    const widthPct = Math.max((p.total_usd / maxProjectVolume) * 100, 1);
+                                    return (
+                                        <div key={p.id} className="relative">
+                                            <div className="flex justify-between items-center text-[11px] mb-1 z-10 relative">
+                                                <strong className="text-[#04326D] truncate max-w-[70%]">{p.name}</strong>
+                                                <div className="text-right">
+                                                    <span className="font-mono font-bold text-[#0B192C] mr-2">
+                                                        ${p.total_usd.toLocaleString('fr-FR')}
+                                                    </span>
+                                                    <span className="text-gray-400">({p.count} doss.)</span>
+                                                </div>
+                                            </div>
+                                            <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
+                                                <div
+                                                    className="bg-[#04326D] h-full rounded-full"
+                                                    style={{ width: `${widthPct}%` }}
+                                                />
+                                            </div>
                                         </div>
-                                        <span className="text-[12.5px] font-mono tabular-nums font-bold text-[#0B192C] whitespace-nowrap">
-                                            ${p.total_usd.toLocaleString('fr-FR')}
-                                        </span>
-                                    </div>
-                                ))
+                                    );
+                                })
                             )}
                         </div>
                     </section>
@@ -382,27 +598,41 @@ export default function DirectorDashboard({
                                     Aucune donnée.
                                 </p>
                             ) : (
-                                caissesStats.map((c, idx) => (
-                                    <div
-                                        key={idx}
-                                        className="p-2.5 border border-[#E2E8F0] rounded flex justify-between items-center gap-3"
-                                    >
-                                        <div className="min-w-0">
-                                            <p className="text-[12px] font-bold text-[#0B192C] truncate">{c.caisse}</p>
-                                            <p className="text-[10.5px] text-gray-500 mt-0.5">
-                                                {c.count} dossier{c.count > 1 ? 's' : ''}
-                                            </p>
+                                caissesStats.map((c, idx) => {
+                                    const total = c.total_usd || 1;
+                                    const decaisse = c.decaisse_usd;
+                                    const pct = Math.round((decaisse / total) * 100);
+
+                                    return (
+                                        <div
+                                            key={idx}
+                                            className="p-2.5 border border-[#E2E8F0] rounded flex flex-col justify-between gap-1.5 relative overflow-hidden"
+                                        >
+                                            <div className="flex justify-between items-center z-10 relative">
+                                                <div className="min-w-0">
+                                                    <p className="text-[12px] font-bold text-[#0B192C] truncate">{c.caisse}</p>
+                                                    <p className="text-[10.5px] text-gray-500 mt-0.5">
+                                                        {c.count} dossier{c.count > 1 ? 's' : ''} engagé(s)
+                                                    </p>
+                                                </div>
+                                                <div className="text-right font-mono tabular-nums">
+                                                    <p className="text-[12.5px] font-bold text-[#04326D]">
+                                                        ${c.total_usd.toLocaleString('fr-FR')}
+                                                    </p>
+                                                    <p className="text-[10px] text-emerald-700 font-bold">
+                                                        Décaissé : ${c.decaisse_usd.toLocaleString('fr-FR')}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="w-full bg-gray-100 h-1 mt-1 rounded-full overflow-hidden z-10 relative">
+                                                <div
+                                                    className="bg-emerald-500 h-full rounded-full"
+                                                    style={{ width: `${pct}%` }}
+                                                />
+                                            </div>
                                         </div>
-                                        <div className="text-right font-mono tabular-nums">
-                                            <p className="text-[12.5px] font-bold text-[#04326D]">
-                                                ${c.total_usd.toLocaleString('fr-FR')}
-                                            </p>
-                                            <p className="text-[10px] text-emerald-700 font-bold">
-                                                Décaissé : ${c.decaisse_usd.toLocaleString('fr-FR')}
-                                            </p>
-                                        </div>
-                                    </div>
-                                ))
+                                    )
+                                })
                             )}
                         </div>
                     </section>

@@ -20,6 +20,7 @@ import {
     Square,
     MinusSquare,
     Loader2,
+    RotateCcw,
 } from 'lucide-react';
 
 interface ProjectOption {
@@ -77,9 +78,6 @@ interface StatsBudgets {
 }
 
 interface Props extends PageProps {
-    selectedProject: string;
-    selectedDonor: string;
-    search: string;
     projects: ProjectOption[];
     donors: DonorOption[];
     donorsSummary: DonorSummary[];
@@ -96,21 +94,19 @@ const money = (n: number, currency = '$') =>
     `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${currency}`;
 
 export default function BudgetIndex({
-    selectedProject = 'all',
-    selectedDonor = 'all',
-    search: initialSearch = '',
     projects = [],
     donors = [],
     donorsSummary = [],
     budgetLines = [],
-    stats,
 }: Props) {
     const { flash } = usePage<PageProps>().props;
 
     const [activeTab, setActiveTab] = useState<'lignes' | 'donateurs'>('lignes');
-    const [projectFilter, setProjectFilter] = useState(selectedProject);
-    const [donorFilter, setDonorFilter] = useState(selectedDonor);
-    const [search, setSearch] = useState(initialSearch);
+
+    // États de filtrage 100% Front-End React (zéro requête serveur)
+    const [projectFilter, setProjectFilter] = useState('all');
+    const [donorFilter, setDonorFilter] = useState('all');
+    const [search, setSearch] = useState('');
 
     // Sélection multiple de lignes
     const [selectedLineIds, setSelectedLineIds] = useState<string[]>([]);
@@ -120,7 +116,7 @@ export default function BudgetIndex({
     const [donorModalOpen, setDonorModalOpen] = useState(false);
     const [lineModalOpen, setLineModalOpen] = useState(false);
 
-    // Modale moderne de confirmation de suppression
+    // Modale moderne de suppression
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -160,29 +156,78 @@ export default function BudgetIndex({
     });
 
     /* =========================================================================
-     *  FILTRES
+     *  FILTRAGE DIRECT CÔTÉ FRONT-END (REACT USEMEMO)
      * ========================================================================= */
-    const handleApplyFilters = (p = projectFilter, d = donorFilter, s = search) => {
-        router.get(
-            route('finance.budgets.index'),
-            { project_id: p, donor_id: d, search: s },
-            { preserveState: true, preserveScroll: true }
-        );
+    const filteredBudgetLines = useMemo(() => {
+        const q = search.trim().toLowerCase();
+
+        return budgetLines.filter((line) => {
+            if (projectFilter !== 'all' && line.project_id !== projectFilter) {
+                return false;
+            }
+            if (donorFilter !== 'all' && line.donor_id !== donorFilter) {
+                return false;
+            }
+            if (q) {
+                const matchCode = line.code.toLowerCase().includes(q);
+                const matchLibelle = line.libelle.toLowerCase().includes(q);
+                const matchProject = line.project_name?.toLowerCase().includes(q) ?? false;
+                const matchDonor = line.donor_name?.toLowerCase().includes(q) ?? false;
+                if (!matchCode && !matchLibelle && !matchProject && !matchDonor) {
+                    return false;
+                }
+            }
+            return true;
+        });
+    }, [budgetLines, projectFilter, donorFilter, search]);
+
+    // Recalcul instantané des KPI en fonction des éléments filtrés à l'écran
+    const dynamicStats = useMemo(() => {
+        const linesUSD = filteredBudgetLines.filter((l) => l.devise === 'USD');
+        return {
+            totalInitialUSD: linesUSD.reduce((acc, l) => acc + l.budget_initial, 0),
+            totalEngageUSD: linesUSD.reduce((acc, l) => acc + l.montant_engage, 0),
+            totalDecaisseUSD: linesUSD.reduce((acc, l) => acc + l.montant_decaisse, 0),
+            totalSoldeUSD: linesUSD.reduce((acc, l) => acc + l.solde, 0),
+            totalLinesCount: filteredBudgetLines.length,
+        };
+    }, [filteredBudgetLines]);
+
+    // Filtrage direct des donateurs
+    const filteredDonorsSummary = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        return donorsSummary.filter((d) => {
+            if (donorFilter !== 'all' && d.id !== donorFilter) return false;
+            if (q) {
+                return d.name.toLowerCase().includes(q) || d.code.toLowerCase().includes(q);
+            }
+            return true;
+        });
+    }, [donorsSummary, donorFilter, search]);
+
+    const hasActiveFilters = projectFilter !== 'all' || donorFilter !== 'all' || search !== '';
+
+    const handleResetFilters = () => {
+        setProjectFilter('all');
+        setDonorFilter('all');
+        setSearch('');
     };
 
     /* =========================================================================
-     *  SÉLECTION MULTIPLE
+     *  SÉLECTION MULTIPLE (SYNCHRONISÉE SUR LES LIGNES VISIBLES)
      * ========================================================================= */
     const isAllSelected =
-        budgetLines.length > 0 && selectedLineIds.length === budgetLines.length;
+        filteredBudgetLines.length > 0 &&
+        filteredBudgetLines.every((l) => selectedLineIds.includes(l.id));
+
     const isSomeSelected =
-        selectedLineIds.length > 0 && selectedLineIds.length < budgetLines.length;
+        selectedLineIds.length > 0 && !isAllSelected;
 
     const handleToggleSelectAll = () => {
         if (isAllSelected) {
             setSelectedLineIds([]);
         } else {
-            setSelectedLineIds(budgetLines.map((l) => l.id));
+            setSelectedLineIds(filteredBudgetLines.map((l) => l.id));
         }
     };
 
@@ -193,11 +238,11 @@ export default function BudgetIndex({
     };
 
     const selectedLinesObjects = useMemo(() => {
-        return budgetLines.filter((l) => selectedLineIds.includes(l.id));
-    }, [budgetLines, selectedLineIds]);
+        return filteredBudgetLines.filter((l) => selectedLineIds.includes(l.id));
+    }, [filteredBudgetLines, selectedLineIds]);
 
     /* =========================================================================
-     *  OUVERTURE MODALE DE SUPPRESSION (MODERNE)
+     *  SUPPRESSION (MODALE MODERNE)
      * ========================================================================= */
     const triggerDeleteSingleLine = (line: BudgetLineItem) => {
         setDeleteTarget({ type: 'single_line', line });
@@ -217,7 +262,6 @@ export default function BudgetIndex({
 
     const handleConfirmDelete = () => {
         if (!deleteTarget) return;
-
         setIsDeleting(true);
 
         if (deleteTarget.type === 'single_line') {
@@ -229,14 +273,11 @@ export default function BudgetIndex({
                         setIsDeleting(false);
                         setDeleteModalOpen(false);
                         setDeleteTarget(null);
-                        setSelectedLineIds((prev) =>
-                            prev.filter((id) => id !== deleteTarget.line.id)
-                        );
+                        setSelectedLineIds((prev) => prev.filter((id) => id !== deleteTarget.line.id));
                     },
                 }
             );
         } else if (deleteTarget.type === 'bulk_lines') {
-            // Suppression groupée : boucle sécurisée sur les lignes supprimables
             const deletableLines = deleteTarget.lines.filter(
                 (l) => l.montant_engage === 0 && l.montant_decaisse === 0
             );
@@ -247,7 +288,6 @@ export default function BudgetIndex({
                 return;
             }
 
-            // Envoi des suppressions
             let completed = 0;
             deletableLines.forEach((l) => {
                 router.delete(
@@ -282,7 +322,7 @@ export default function BudgetIndex({
     };
 
     /* =========================================================================
-     *  SOUMISSIONS FORMULAIRES
+     *  SOUMISSION FORMULAIRES (POST / PUT)
      * ========================================================================= */
     const handleImportSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -417,7 +457,7 @@ export default function BudgetIndex({
             <Head title="Centre Budgétaire & Suivi Donateurs" />
 
             <div className="space-y-6">
-                {/* Header */}
+                {/* Header Institutionnel */}
                 <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
                     <div>
                         <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1.5 flex items-center gap-1.5">
@@ -430,7 +470,7 @@ export default function BudgetIndex({
                             Gestion des Budgets & Donateurs
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
-                            Maquette budgétaire de référence, codification analytique stricte et suivi de consommation par bailleur de fonds.
+                            Maquette budgétaire de référence, codification analytique et suivi instantané des consommations.
                         </p>
                     </div>
 
@@ -464,7 +504,7 @@ export default function BudgetIndex({
                     </div>
                 </header>
 
-                {/* Messages Flash */}
+                {/* Notifications Flash */}
                 {flash?.success && (
                     <div className="p-3.5 rounded bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
@@ -478,17 +518,17 @@ export default function BudgetIndex({
                     </div>
                 )}
 
-                {/* KPI Cards */}
+                {/* KPI Cards : Recalculées dynamiquement en direct sans requête */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between">
                         <span className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">
-                            Budget Alloué Total
+                            Budget Alloué
                         </span>
                         <p className="text-2xl font-black text-[#0B192C] mt-2 font-mono tabular-nums">
-                            {money(stats.totalInitialUSD, 'USD')}
+                            {money(dynamicStats.totalInitialUSD, 'USD')}
                         </p>
                         <span className="text-[10px] text-gray-400 mt-1">
-                            Sur {stats.totalLinesCount} ligne(s) budgétaire(s)
+                            Sur {dynamicStats.totalLinesCount} ligne(s) affichée(s)
                         </span>
                     </div>
 
@@ -497,10 +537,10 @@ export default function BudgetIndex({
                             Montant Engagé (Visas)
                         </span>
                         <p className="text-2xl font-black text-[#F58F20] mt-2 font-mono tabular-nums">
-                            {money(stats.totalEngageUSD, 'USD')}
+                            {money(dynamicStats.totalEngageUSD, 'USD')}
                         </p>
                         <span className="text-[10px] text-gray-400 mt-1">
-                            En circuit d'approbation
+                            Circuit de validation
                         </span>
                     </div>
 
@@ -509,10 +549,10 @@ export default function BudgetIndex({
                             Montant Décaissé (Caisse)
                         </span>
                         <p className="text-2xl font-black text-emerald-700 mt-2 font-mono tabular-nums">
-                            {money(stats.totalDecaisseUSD, 'USD')}
+                            {money(dynamicStats.totalDecaisseUSD, 'USD')}
                         </p>
                         <span className="text-[10px] text-gray-400 mt-1">
-                            Fonds remis au guichet
+                            Sorties effectives
                         </span>
                     </div>
 
@@ -521,15 +561,15 @@ export default function BudgetIndex({
                             Solde Budgétaire Disponible
                         </span>
                         <p className="text-2xl font-black text-white mt-2 font-mono tabular-nums">
-                            {money(stats.totalSoldeUSD, 'USD')}
+                            {money(dynamicStats.totalSoldeUSD, 'USD')}
                         </p>
                         <span className="text-[10px] text-[#B2BED6] mt-1">
-                            Reliquat net non engagé
+                            Reliquat net disponible
                         </span>
                     </div>
                 </div>
 
-                {/* Barre d'action contextuelle pour sélection multiple */}
+                {/* Barre d'action sélection groupée */}
                 {selectedLineIds.length > 0 && activeTab === 'lignes' && (
                     <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between shadow-sm animate-fade-in">
                         <div className="flex items-center gap-2">
@@ -544,7 +584,7 @@ export default function BudgetIndex({
                                 onClick={() => setSelectedLineIds([])}
                                 className="px-2.5 py-1 text-xs text-gray-600 hover:text-gray-900 font-semibold"
                             >
-                                Désélectionner
+                                Tout désélectionner
                             </button>
                             <button
                                 type="button"
@@ -558,7 +598,7 @@ export default function BudgetIndex({
                     </div>
                 )}
 
-                {/* Section Table & Onglets */}
+                {/* Zone Centrale : Onglets & Filtrage Front-End */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="border-b border-[#E2E8F0] px-4 pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white">
                         <div className="flex gap-2">
@@ -574,7 +614,7 @@ export default function BudgetIndex({
                                 <Layers className="w-3.5 h-3.5" />
                                 <span>Lignes Budgétaires</span>
                                 <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-blue-100 text-[#04326D] font-bold">
-                                    {budgetLines.length}
+                                    {filteredBudgetLines.length}
                                 </span>
                             </button>
 
@@ -590,60 +630,77 @@ export default function BudgetIndex({
                                 <Users className="w-3.5 h-3.5" />
                                 <span>Suivi par Donateur</span>
                                 <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 font-bold">
-                                    {donorsSummary.length}
+                                    {filteredDonorsSummary.length}
                                 </span>
                             </button>
                         </div>
 
-                        {activeTab === 'lignes' && (
-                            <div className="flex flex-wrap items-center gap-2 pb-2 sm:pb-0">
-                                <select
-                                    value={projectFilter}
-                                    onChange={(e) => {
-                                        setProjectFilter(e.target.value);
-                                        handleApplyFilters(e.target.value, donorFilter, search);
-                                    }}
-                                    className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold"
-                                >
-                                    <option value="all">Tous les projets</option>
-                                    {projects.map((p) => (
-                                        <option key={p.id} value={p.id}>
-                                            {p.name}
-                                        </option>
-                                    ))}
-                                </select>
+                        {/* Filtres 100% Front-End React : Zéro requête au serveur */}
+                        <div className="flex flex-wrap items-center gap-2 pb-2 sm:pb-0">
+                            {/* Filtre Projet */}
+                            <select
+                                value={projectFilter}
+                                onChange={(e) => setProjectFilter(e.target.value)}
+                                className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold focus:outline-none focus:border-[#04326D]"
+                            >
+                                <option value="all">Tous les projets</option>
+                                {projects.map((p) => (
+                                    <option key={p.id} value={p.id}>
+                                        {p.name}
+                                    </option>
+                                ))}
+                            </select>
 
-                                <select
-                                    value={donorFilter}
-                                    onChange={(e) => {
-                                        setDonorFilter(e.target.value);
-                                        handleApplyFilters(projectFilter, e.target.value, search);
-                                    }}
-                                    className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold"
-                                >
-                                    <option value="all">Tous les donateurs</option>
-                                    {donors.map((d) => (
-                                        <option key={d.id} value={d.id}>
-                                            {d.name}
-                                        </option>
-                                    ))}
-                                </select>
+                            {/* Filtre Donateur */}
+                            <select
+                                value={donorFilter}
+                                onChange={(e) => setDonorFilter(e.target.value)}
+                                className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold focus:outline-none focus:border-[#04326D]"
+                            >
+                                <option value="all">Tous les donateurs</option>
+                                {donors.map((d) => (
+                                    <option key={d.id} value={d.id}>
+                                        {d.name}
+                                    </option>
+                                ))}
+                            </select>
 
-                                <div className="relative">
-                                    <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                                    <input
-                                        type="text"
-                                        placeholder="Code (ex: 1.1.3.a) ou libellé..."
-                                        value={search}
-                                        onChange={(e) => setSearch(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleApplyFilters(projectFilter, donorFilter, search)}
-                                        className="pl-8 pr-3 py-1 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D] w-52"
-                                    />
-                                </div>
+                            {/* Barre de Recherche instantanée (chaque touche filtre en direct) */}
+                            <div className="relative">
+                                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                <input
+                                    type="text"
+                                    placeholder="Code (ex: 1.1.3) ou libellé..."
+                                    value={search}
+                                    onChange={(e) => setSearch(e.target.value)}
+                                    className="pl-8 pr-7 py-1 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D] w-52"
+                                />
+                                {search && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setSearch('')}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                    >
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                )}
                             </div>
-                        )}
+
+                            {/* Bouton de réinitialisation si un filtre est actif */}
+                            {hasActiveFilters && (
+                                <button
+                                    type="button"
+                                    onClick={handleResetFilters}
+                                    className="p-1 rounded text-gray-500 hover:text-[#04326D] hover:bg-gray-100 transition"
+                                    title="Réinitialiser tous les filtres"
+                                >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                </button>
+                            )}
+                        </div>
                     </div>
 
+                    {/* Tableau des Lignes Budgétaires */}
                     {activeTab === 'lignes' && (
                         <div className="overflow-x-auto">
                             <table className="w-full text-left text-xs border-collapse">
@@ -677,14 +734,16 @@ export default function BudgetIndex({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
-                                    {budgetLines.length === 0 ? (
+                                    {filteredBudgetLines.length === 0 ? (
                                         <tr>
                                             <td colSpan={10} className="py-12 text-center text-gray-400 italic">
-                                                Aucune ligne budgétaire trouvée. Cliquez sur « Importer Budget Excel » pour charger la maquette de référence.
+                                                {hasActiveFilters
+                                                    ? 'Aucune ligne budgétaire ne correspond aux filtres appliqués.'
+                                                    : 'Aucune ligne budgétaire trouvée. Cliquez sur « Importer Budget Excel » pour charger la maquette.'}
                                             </td>
                                         </tr>
                                     ) : (
-                                        budgetLines.map((line) => {
+                                        filteredBudgetLines.map((line) => {
                                             const isSelected = selectedLineIds.includes(line.id);
                                             return (
                                                 <tr
@@ -780,14 +839,15 @@ export default function BudgetIndex({
                         </div>
                     )}
 
+                    {/* Grille des Donateurs */}
                     {activeTab === 'donateurs' && (
                         <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {donorsSummary.length === 0 ? (
+                            {filteredDonorsSummary.length === 0 ? (
                                 <p className="col-span-full py-12 text-center text-gray-400 italic">
-                                    Aucun bailleur de fonds configuré.
+                                    Aucun bailleur de fonds ne correspond aux critères.
                                 </p>
                             ) : (
-                                donorsSummary.map((donor) => (
+                                filteredDonorsSummary.map((donor) => (
                                     <div
                                         key={donor.id}
                                         className="p-4 rounded border border-[#B2BED6] bg-[#F9F9FF] flex flex-col justify-between space-y-3"
@@ -864,9 +924,7 @@ export default function BudgetIndex({
                 </div>
             </div>
 
-            {/* =========================================================================
-             *  MODALE MODERNE DE SUPPRESSION (SINGLE & BULK)
-             * ========================================================================= */}
+            {/* Modale Moderne de Suppression */}
             {deleteModalOpen && deleteTarget && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
                     <div className="bg-white rounded-xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-4 animate-scale-in">
@@ -888,7 +946,6 @@ export default function BudgetIndex({
                             </div>
                         </div>
 
-                        {/* Corps informatif */}
                         {deleteTarget.type === 'single_line' && (
                             <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1">
                                 <div className="flex justify-between">
@@ -983,7 +1040,7 @@ export default function BudgetIndex({
                 </div>
             )}
 
-            {/* MODAL IMPORT EXCEL */}
+            {/* Modal Import Excel */}
             {importModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-md w-full p-6 space-y-4 animate-slide-down">
@@ -1065,7 +1122,7 @@ export default function BudgetIndex({
                 </div>
             )}
 
-            {/* MODAL CRÉATION / MODIFICATION DONATEUR */}
+            {/* Modal Création / Édition Donateur */}
             {donorModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
@@ -1157,7 +1214,7 @@ export default function BudgetIndex({
                 </div>
             )}
 
-            {/* MODAL CRÉATION / MODIFICATION LIGNE BUDGÉTAIRE */}
+            {/* Modal Création / Édition Ligne Budgétaire */}
             {lineModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-lg w-full p-6 space-y-4 animate-slide-down">
