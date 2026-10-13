@@ -5,6 +5,22 @@ interface PdfOptions {
 
 let exportSequence = 0;
 
+function hasRenderedContent(canvas: HTMLCanvasElement): boolean {
+    const context = canvas.getContext('2d');
+    if (!context) {
+        throw new Error('Unable to inspect the rendered PDF canvas.');
+    }
+
+    const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+    for (let index = 0; index < data.length; index += 4) {
+        if (data[index] < 245 || data[index + 1] < 245 || data[index + 2] < 245) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 export async function downloadPdf(elementId: string, fileName: string, options: PdfOptions = {}) {
     const safeFileName = fileName
         .replace(/[<>:"\\|?*\u0000-\u001f]/g, '-')
@@ -22,12 +38,11 @@ export async function downloadPdf(elementId: string, fileName: string, options: 
     const width = options.contentWidth ?? (orientation === 'landscape' ? '277mm' : '190mm');
     const exportId = `pdf-export-${++exportSequence}`;
     const clone = element.cloneNode(true) as HTMLElement;
-    clone.removeAttribute('id');
     clone.setAttribute('data-pdf-export', exportId);
     clone.classList.remove('hidden');
     clone.style.setProperty('display', 'block', 'important');
     clone.style.setProperty('visibility', 'visible', 'important');
-    clone.style.setProperty('position', 'fixed', 'important');
+    clone.style.setProperty('position', 'absolute', 'important');
     clone.style.setProperty('top', '0', 'important');
     clone.style.setProperty('left', '0', 'important');
     clone.style.setProperty('width', width, 'important');
@@ -35,9 +50,11 @@ export async function downloadPdf(elementId: string, fileName: string, options: 
     clone.style.setProperty('max-height', 'none', 'important');
     clone.style.setProperty('overflow', 'visible', 'important');
     clone.style.setProperty('opacity', '1', 'important');
-    clone.style.setProperty('z-index', '-1', 'important');
+    clone.style.setProperty('z-index', '2147483647', 'important');
+    clone.style.setProperty('pointer-events', 'none', 'important');
     clone.style.setProperty('background-color', '#ffffff', 'important');
     clone.style.setProperty('color', '#000000', 'important');
+    clone.querySelectorAll<HTMLElement>('.hidden').forEach((child) => child.classList.remove('hidden'));
     try {
         document.body.appendChild(clone);
         await document.fonts.ready;
@@ -49,7 +66,7 @@ export async function downloadPdf(elementId: string, fileName: string, options: 
         }
 
         const { default: html2pdf } = await import('html2pdf.js');
-        await html2pdf()
+        const worker = html2pdf()
             .set({
                 margin: orientation === 'landscape' ? [8, 10, 8, 10] : [10, 10, 10, 10],
                 filename: `${safeFileName}.pdf`,
@@ -83,13 +100,21 @@ export async function downloadPdf(elementId: string, fileName: string, options: 
 
                         clonedElement.querySelectorAll<HTMLElement>('*').forEach((child) => {
                             child.style.setProperty('visibility', 'visible', 'important');
+                            child.classList.remove('hidden');
                         });
                     },
                 },
                 jsPDF: { unit: 'mm', format: 'a4', orientation },
             })
-            .from(clone)
-            .save();
+            .from(clone);
+
+        await worker.toCanvas();
+        const canvas = await worker.get('canvas') as HTMLCanvasElement;
+        if (!hasRenderedContent(canvas)) {
+            throw new Error(`PDF rendering produced an empty page: #${elementId}`);
+        }
+
+        await worker.toPdf().save();
     } catch (error) {
         console.error('PDF generation failed.', error);
         window.alert('La génération du PDF a échoué. Veuillez réessayer.');
