@@ -290,6 +290,14 @@ class CashierSessionController extends Controller
             }
         });
 
+        if ($isInitialDotation) {
+            $this->notifierRole(
+                roleCible: 'finance',
+                titre: 'Bon d’Entrée Caisse à valider',
+                message: "Le caissier {$user->name} a enregistré une dotation initiale pour la caisse {$cashRegister->name}. Une décision Finance est requise."
+            );
+        }
+
         return Redirect::back()->with('success', "Bon d'Entrée Caisse enregistré avec succès.");
     }
 
@@ -300,35 +308,53 @@ class CashierSessionController extends Controller
     {
         $user = $request->user();
         abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
+        abort_unless($movement->is_approvisionnement_initial, 400);
         abort_unless($movement->status_validation === 'en_attente_finance', 400);
 
         $validated = $request->validate([
+            'decision' => ['sometimes', 'in:approve,reject'],
             'pin' => ['required', 'string', 'digits_between:4,6'],
         ]);
+        $decision = $validated['decision'] ?? 'approve';
 
         if (empty($user->signature_pin) || ! Hash::check($validated['pin'], $user->signature_pin)) {
             return Redirect::back()->withErrors(['pin' => 'Code PIN financier incorrect.']);
         }
 
-        DB::transaction(function () use ($movement, $user) {
-            $caisse = $movement->cashRegister;
-            $montant = (float) $movement->montant;
+        DB::transaction(function () use ($movement, $user, $decision) {
+            $lockedMovement = CashMovement::query()->whereKey($movement->id)->lockForUpdate()->firstOrFail();
+            abort_unless($lockedMovement->status_validation === 'en_attente_finance', 400);
 
-            $movement->update([
-                'status_validation' => 'valide',
+            $lockedMovement->update([
+                'status_validation' => $decision === 'approve' ? 'valide' : 'rejete',
                 'validated_by' => $user->id,
                 'validated_at' => now(),
-                'pin_validated' => true,
+                'pin_validated' => $decision === 'approve',
             ]);
 
-            $caisse->update([
-                'is_approvisionnee' => true,
-                'solde_initial_dotation' => $montant,
-                'solde_actuel' => $montant,
-            ]);
+            if ($decision === 'approve') {
+                $lockedMovement->cashRegister->update([
+                    'is_approvisionnee' => true,
+                    'solde_initial_dotation' => (float) $lockedMovement->montant,
+                    'solde_actuel' => (float) $lockedMovement->montant,
+                ]);
+            }
         });
 
-        return Redirect::back()->with('success', "Dotation initiale validée avec succès.");
+        if ($decision === 'reject') {
+            $this->notifierUtilisateur(
+                userId: $movement->cashier_id,
+                titre: 'Bon d’Entrée Caisse refusé',
+                message: "Le Manager Finance a refusé le bon {$movement->numero_piece}. Vous pouvez enregistrer un nouveau bon."
+            );
+        }
+
+        return Redirect::back()->with(
+            'success',
+            $decision === 'approve'
+                ? 'Dotation initiale validée avec succès.'
+                : 'Bon d’Entrée Caisse refusé. Le caissier peut enregistrer un nouveau bon.'
+        );
     }
 
     protected function notifierRole(string $roleCible, string $titre, string $message, bool $urgent = false): void

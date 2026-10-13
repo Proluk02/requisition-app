@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Head, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
@@ -42,6 +42,20 @@ interface CaisseOption {
     devise: string;
 }
 
+interface PendingApprovisionnement {
+    id: string;
+    numero_piece: string;
+    date_mouvement: string;
+    caisse_name: string;
+    caisse_devise: string;
+    cashier_name: string;
+    tiers_nom: string;
+    montant: number;
+    motif: string;
+    bordereau_banque_ref: string | null;
+    bordereau_url: string | null;
+}
+
 interface Props extends PageProps {
     sessions: {
         data: SessionItem[];
@@ -50,6 +64,7 @@ interface Props extends PageProps {
     caissesList: CaisseOption[];
     statusFilter?: string;
     caisseFilter?: string;
+    pendingApprovisionnements: PendingApprovisionnement[];
 }
 
 const money = (n: number, dev: string) =>
@@ -58,6 +73,7 @@ const money = (n: number, dev: string) =>
 export default function SessionsIndex({
     sessions,
     caissesList = [],
+    pendingApprovisionnements = [],
 }: Props) {
     const { flash, auth } = usePage<PageProps>().props;
     const currentUser = auth.user;
@@ -79,6 +95,16 @@ export default function SessionsIndex({
     const [pin, setPin] = useState('');
     const [pinError, setPinError] = useState<string | null>(null);
     const [processing, setProcessing] = useState(false);
+
+    const [pendingSupplies, setPendingSupplies] = useState(pendingApprovisionnements);
+    const [supplyToDecide, setSupplyToDecide] = useState<PendingApprovisionnement | null>(null);
+    const [supplyPin, setSupplyPin] = useState('');
+    const [supplyPinError, setSupplyPinError] = useState<string | null>(null);
+    const [supplyProcessing, setSupplyProcessing] = useState(false);
+
+    useEffect(() => {
+        setPendingSupplies(pendingApprovisionnements);
+    }, [pendingApprovisionnements]);
 
     /* =========================================================================
      *  FILTRAGE DIRECT CÔTÉ FRONT-END (REACT USEMEMO)
@@ -174,9 +200,33 @@ export default function SessionsIndex({
         );
     };
 
+    const handleSupplyDecision = (decision: 'approve' | 'reject') => {
+        if (!supplyToDecide || !supplyPin.trim()) return;
+
+        setSupplyProcessing(true);
+        setSupplyPinError(null);
+
+        router.post(
+            route('cashier.movement.validate-approvisionnement', supplyToDecide.id),
+            { decision, pin: supplyPin.trim() },
+            {
+                preserveScroll: true,
+                onFinish: () => setSupplyProcessing(false),
+                onSuccess: () => {
+                    setPendingSupplies((items) => items.filter((item) => item.id !== supplyToDecide.id));
+                    setSupplyToDecide(null);
+                    setSupplyPin('');
+                },
+                onError: (errors) => {
+                    setSupplyPinError(errors.pin || 'La décision n’a pas pu être enregistrée.');
+                },
+            }
+        );
+    };
+
     return (
         <AppLayout>
-            <Head title="Approbations d'Ouvertures de Guichet" />
+            <Head title="Décisions BEC et ouvertures de guichet" />
 
             <div className="space-y-6">
                 {/* Header Institutionnel */}
@@ -216,6 +266,98 @@ export default function SessionsIndex({
                         <span>{flash.success}</span>
                     </div>
                 )}
+                {flash?.error && (
+                    <div className="p-3.5 rounded bg-red-50 border border-red-300 text-red-900 text-xs font-semibold">
+                        {flash.error}
+                    </div>
+                )}
+
+                <section className="bg-white border border-amber-300 rounded shadow-sm overflow-hidden">
+                    <div className="p-4 border-b bg-amber-50 flex items-center justify-between gap-3">
+                        <div>
+                            <h2 className="text-sm font-bold text-[#0B192C]">
+                                Bons d’Entrée Caisse — Dotations initiales à décider
+                            </h2>
+                            <p className="text-xs text-gray-600 mt-1">
+                                Examinez le bordereau bancaire avant de valider ou refuser le bon.
+                            </p>
+                        </div>
+                        <span className="rounded-full bg-amber-200 px-2.5 py-1 text-xs font-black text-amber-950">
+                            {pendingSupplies.length} en attente
+                        </span>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                                <tr className="bg-[#0B192C] text-white uppercase text-[10px] font-bold tracking-wider">
+                                    <th className="py-3 px-4">N° / Date</th>
+                                    <th className="py-3 px-4">Caisse / Caissier</th>
+                                    <th className="py-3 px-4">Déposant / Motif</th>
+                                    <th className="py-3 px-4">Bordereau bancaire</th>
+                                    <th className="py-3 px-4 text-right">Montant</th>
+                                    <th className="py-3 px-4 text-right">Décision</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
+                                {pendingSupplies.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={6} className="py-8 text-center text-gray-500">
+                                            Aucun bon de dotation initial en attente.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    pendingSupplies.map((supply) => (
+                                        <tr key={supply.id} className="hover:bg-amber-50/40">
+                                            <td className="py-3 px-4 whitespace-nowrap">
+                                                <strong className="block font-mono text-[#04326D]">{supply.numero_piece}</strong>
+                                                <span className="text-gray-500">{supply.date_mouvement}</span>
+                                            </td>
+                                            <td className="py-3 px-4">
+                                                <strong className="block text-[#0B192C]">{supply.caisse_name}</strong>
+                                                <span>{supply.cashier_name}</span>
+                                            </td>
+                                            <td className="py-3 px-4">
+                                                <strong className="block">{supply.tiers_nom}</strong>
+                                                <span className="text-gray-500">{supply.motif}</span>
+                                            </td>
+                                            <td className="py-3 px-4">
+                                                {supply.bordereau_url ? (
+                                                    <a
+                                                        href={supply.bordereau_url}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="font-semibold text-[#04326D] underline"
+                                                    >
+                                                        {supply.bordereau_banque_ref || 'Consulter la preuve'}
+                                                    </a>
+                                                ) : (
+                                                    supply.bordereau_banque_ref || '—'
+                                                )}
+                                            </td>
+                                            <td className="py-3 px-4 text-right font-mono font-bold whitespace-nowrap">
+                                                {money(supply.montant, supply.caisse_devise)}
+                                            </td>
+                                            <td className="py-3 px-4 text-right whitespace-nowrap">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setSupplyToDecide(supply);
+                                                        setSupplyPin('');
+                                                        setSupplyPinError(null);
+                                                    }}
+                                                    className="inline-flex items-center gap-1 rounded bg-[#04326D] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#06428f]"
+                                                >
+                                                    <KeyRound className="h-3.5 w-3.5" />
+                                                    Décider
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
 
                 {/* KPI cliquables en direct pour filtrer */}
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
@@ -520,6 +662,78 @@ export default function SessionsIndex({
                                     className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition"
                                 >
                                     {processing ? 'Validation...' : 'Valider l’Ouverture'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {supplyToDecide && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+                    <div className="w-full max-w-md space-y-4 rounded border border-[#B2BED6] bg-white p-6 shadow-2xl">
+                        <header className="flex items-start justify-between border-b pb-3">
+                            <div>
+                                <h2 className="text-sm font-bold uppercase text-[#0B192C]">Décision sur le BEC</h2>
+                                <p className="mt-1 text-xs text-gray-500">{supplyToDecide.numero_piece} — {supplyToDecide.caisse_name}</p>
+                            </div>
+                            <button type="button" onClick={() => setSupplyToDecide(null)} aria-label="Fermer">
+                                <X className="h-5 w-5 text-gray-500" />
+                            </button>
+                        </header>
+                        <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs">
+                            <p>Caissier : <strong>{supplyToDecide.cashier_name}</strong></p>
+                            <p>Montant déclaré : <strong>{money(supplyToDecide.montant, supplyToDecide.caisse_devise)}</strong></p>
+                            <p>Référence bancaire : <strong>{supplyToDecide.bordereau_banque_ref || '—'}</strong></p>
+                        </div>
+                        {supplyPinError && (
+                            <div role="alert" className="rounded border border-red-300 bg-red-50 p-2.5 text-xs text-red-800">
+                                {supplyPinError}
+                            </div>
+                        )}
+                        <form
+                            onSubmit={(event) => {
+                                event.preventDefault();
+                                handleSupplyDecision('approve');
+                            }}
+                            className="space-y-3"
+                        >
+                            <label className="block text-xs font-bold text-gray-700">
+                                Code PIN personnel du Manager Finance
+                                <input
+                                    type="password"
+                                    inputMode="numeric"
+                                    maxLength={6}
+                                    pattern="[0-9]{4,6}"
+                                    value={supplyPin}
+                                    onChange={(event) => setSupplyPin(event.target.value)}
+                                    className="mt-1 w-full rounded border border-[#B2BED6] p-2 font-mono tracking-widest"
+                                    autoFocus
+                                    required
+                                />
+                            </label>
+                            <div className="flex justify-end gap-2 border-t pt-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setSupplyToDecide(null)}
+                                    className="rounded border px-3 py-1.5 text-xs font-semibold text-gray-600"
+                                >
+                                    Annuler
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={supplyProcessing || supplyPin.length < 4}
+                                    onClick={() => handleSupplyDecision('reject')}
+                                    className="rounded bg-red-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                                >
+                                    Refuser
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={supplyProcessing || supplyPin.length < 4}
+                                    className="rounded bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                                >
+                                    Valider la dotation
                                 </button>
                             </div>
                         </form>

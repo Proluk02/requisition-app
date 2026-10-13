@@ -84,6 +84,133 @@ beforeEach(function () {
     ]);
 });
 
+it('shows initial cash deposits to Finance and allows rejection without opening the register', function () {
+    $finance = workflowUser('finance');
+    $finance->update(['signature_pin' => Hash::make('1234')]);
+    $cashier = workflowUser('cashier');
+    $cashRegister = CashRegister::create([
+        'name' => 'Initial Deposit Register',
+        'code' => 'INIT',
+        'devise' => 'USD',
+        'solde_actuel' => 0,
+        'is_approvisionnee' => false,
+        'is_active' => true,
+    ]);
+    $movement = CashMovement::create([
+        'cash_register_id' => $cashRegister->id,
+        'cashier_id' => $cashier->id,
+        'type' => 'entree',
+        'is_approvisionnement_initial' => true,
+        'is_approvisionnement' => true,
+        'status_validation' => 'en_attente_finance',
+        'pin_validated' => false,
+        'numero_piece' => 'BEC-2026-901',
+        'date_mouvement' => now()->toDateString(),
+        'tiers_nom' => 'Banque locale',
+        'montant' => 150,
+        'devise' => 'USD',
+        'montant_en_lettres' => 'Cent cinquante dollars',
+        'motif' => 'Dotation initiale',
+        'imputation' => '6.112.a',
+        'mode_paiement' => 'Virement',
+        'bordereau_banque_ref' => 'BR-901',
+    ]);
+
+    $this->actingAs($finance)
+        ->get(route('finance.caisses.sessions'))
+        ->assertInertia(fn ($page) => $page
+            ->component('Finance/Caisses/Sessions')
+            ->where('pendingApprovisionnements.0.id', $movement->id)
+            ->where('pendingApprovisionnements.0.bordereau_banque_ref', 'BR-901')
+        );
+
+    $this->actingAs($finance)
+        ->post(route('cashier.movement.validate-approvisionnement', $movement), [
+            'decision' => 'reject',
+            'pin' => '1234',
+        ])
+        ->assertRedirect();
+
+    $this->assertDatabaseHas('cash_movements', [
+        'id' => $movement->id,
+        'status_validation' => 'rejete',
+        'validated_by' => $finance->id,
+        'pin_validated' => false,
+    ]);
+    $this->assertDatabaseHas('cash_registers', [
+        'id' => $cashRegister->id,
+        'is_approvisionnee' => false,
+        'solde_actuel' => 0,
+    ]);
+});
+
+it('validates an initial cash deposit and makes the register eligible for opening', function () {
+    $finance = workflowUser('finance');
+    $finance->update(['signature_pin' => Hash::make('1234')]);
+    $cashier = workflowUser('cashier');
+    $cashRegister = CashRegister::create([
+        'name' => 'Approved Deposit Register',
+        'code' => 'APPROVED',
+        'devise' => 'USD',
+        'solde_actuel' => 0,
+        'is_approvisionnee' => false,
+        'is_active' => true,
+    ]);
+    $cashRegister->cashiers()->attach($cashier->id);
+    $movement = CashMovement::create([
+        'cash_register_id' => $cashRegister->id,
+        'cashier_id' => $cashier->id,
+        'type' => 'entree',
+        'is_approvisionnement_initial' => true,
+        'is_approvisionnement' => true,
+        'status_validation' => 'en_attente_finance',
+        'pin_validated' => false,
+        'numero_piece' => 'BEC-2026-902',
+        'date_mouvement' => now()->toDateString(),
+        'tiers_nom' => 'Banque locale',
+        'montant' => 250,
+        'devise' => 'USD',
+        'montant_en_lettres' => 'Deux cent cinquante dollars',
+        'motif' => 'Dotation initiale',
+        'imputation' => '6.112.a',
+        'mode_paiement' => 'Virement',
+    ]);
+
+    $this->actingAs($finance)
+        ->post(route('cashier.movement.validate-approvisionnement', $movement), [
+            'decision' => 'approve',
+            'pin' => '1234',
+        ])
+        ->assertRedirect();
+
+    $this->assertDatabaseHas('cash_movements', [
+        'id' => $movement->id,
+        'status_validation' => 'valide',
+        'validated_by' => $finance->id,
+        'pin_validated' => true,
+    ]);
+    $this->assertDatabaseHas('cash_registers', [
+        'id' => $cashRegister->id,
+        'is_approvisionnee' => true,
+        'solde_initial_dotation' => 250,
+        'solde_actuel' => 250,
+    ]);
+
+    $this->actingAs($cashier)
+        ->post(route('cashier.session.request-opening', $cashRegister), [
+            'observation' => 'Première ouverture après validation de dotation',
+        ])
+        ->assertRedirect();
+
+    $this->assertDatabaseHas('cash_register_sessions', [
+        'cash_register_id' => $cashRegister->id,
+        'cashier_id' => $cashier->id,
+        'status' => 'en_attente_autorisation',
+        'solde_ouverture' => 250,
+        'approvisionnement_movement_id' => $movement->id,
+    ]);
+});
+
 it('returns a project-manager rejection to the beneficiary for correction and resubmission', function () {
     $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
     $manager = workflowUser('project_manager', $project);

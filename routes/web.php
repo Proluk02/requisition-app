@@ -115,7 +115,7 @@ Route::middleware(['auth', 'active'])->group(function () {
 
     Route::post('/cashier/movements/{movement}/validate-approvisionnement', [CashierSessionController::class, 'validateApprovisionnement'])
         ->name('cashier.movement.validate-approvisionnement')
-        ->middleware('role:finance,admin');
+        ->middleware('role:finance|admin');
 
     Route::get('/justifications', [ExpenseJustificationController::class, 'index'])->name('justifications.index');
     Route::post('/justifications', [ExpenseJustificationController::class, 'store'])->name('justifications.store');

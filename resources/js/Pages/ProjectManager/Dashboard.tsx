@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
+import RequisitionCorrectionForm, { type RequisitionCorrectionData } from '@/Components/RequisitionCorrectionForm';
 import { PageProps } from '@/types';
 import {
     ShieldCheck,
@@ -115,15 +116,16 @@ export default function ProjectManagerDashboard({
     const [signingLoading, setSigningLoading] = useState<boolean>(false);
     const [pinError, setPinError] = useState<string | null>(null);
 
-    const [editingReq, setEditingReq] = useState<RequisitionMP | null>(null);
-    const [savingEdit, setSavingEdit] = useState(false);
-    const [editError, setEditError] = useState<string | null>(null);
-    const [editFiles, setEditFiles] = useState<Record<string, File[]>>({});
+    const [editingReq, setEditingReq] = useState<RequisitionCorrectionData | null>(null);
 
     const [toast, setToast] = useState<{
         type: 'success' | 'error';
         message: string;
     } | null>(null);
+
+    useEffect(() => {
+        setDemandes(requisitions);
+    }, [requisitions]);
 
     const showToast = (type: 'success' | 'error', message: string) => {
         setToast({ type, message });
@@ -296,79 +298,23 @@ export default function ProjectManagerDashboard({
     };
 
     const openEditModal = (req: RequisitionMP) => {
-        setEditingReq({ ...req, lignes: req.lignes.map((l) => ({ ...l })) });
-        setEditFiles({});
-        setEditError(null);
-    };
-
-    const updateEditingLine = (lineId: string, changes: Partial<LigneDemande>) => {
-        setEditingReq((current) => {
-            if (!current) return current;
-            return {
-                ...current,
-                lignes: current.lignes.map((line) => {
-                    if (line.id !== lineId) return line;
-                    const updated = { ...line, ...changes };
-                    updated.total =
-                        Number(updated.quantiteOuDuree || 0) * Number(updated.frais || 0);
-                    return updated;
-                }),
-                montantTotal: current.lignes.reduce((sum, line) => {
-                    if (line.id !== lineId) return sum + line.total;
-                    const updated = { ...line, ...changes };
-                    return (
-                        sum + Number(updated.quantiteOuDuree || 0) * Number(updated.frais || 0)
-                    );
-                }, 0),
-            };
+        setEditingReq({
+            id: req.id,
+            numero: req.numero,
+            nature: req.nature,
+            devise: req.devise,
+            caisse: req.caisseAttribuee || req.caisseSouhaitee,
+            observation: req.observation ?? null,
+            lignes: req.lignes.map((line) => ({
+                id: line.id,
+                activite: line.activite,
+                codeBudget: line.code_allocation || line.codeAllBudget,
+                nature: line.nature,
+                quantiteOuDuree: line.quantiteOuDuree,
+                unite: line.unite,
+                prixUnitaire: line.frais,
+            })),
         });
-    };
-
-    const handleSaveEdit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!editingReq) return;
-
-        router.post(
-            route('requisitions.update', editingReq.id),
-            {
-                _method: 'patch',
-                nature_requisition: editingReq.nature,
-                caisse_decaissement: editingReq.caisseSouhaitee,
-                devise: editingReq.devise,
-                observation: editingReq.observation || null,
-                articles: editingReq.lignes.map((line) => ({
-                    id: line.id,
-                    activite: line.activite,
-                    code_all_budget: line.codeAllBudget,
-                    nature: line.nature,
-                    quantiteOuDuree: line.quantiteOuDuree,
-                    unite: line.unite,
-                    prixUnitaire: line.frais,
-                    justificatifs: (editFiles[line.id] ?? []).map((file) => ({
-                        description: file.name,
-                        date: new Date().toISOString().slice(0, 10),
-                        montant: 0,
-                        file,
-                    })),
-                })),
-            },
-            {
-                preserveScroll: true,
-                forceFormData: true,
-                onStart: () => setSavingEdit(true),
-                onFinish: () => setSavingEdit(false),
-                onError: (errs) =>
-                    setEditError(Object.values(errs)[0] ?? 'Erreur lors de la mise à jour.'),
-                onSuccess: (page) => {
-                    const refreshed = (page.props as any).requisitions as
-                        | RequisitionMP[]
-                        | undefined;
-                    if (refreshed) setDemandes(refreshed);
-                    showToast('success', 'Corrections enregistrées avec succès.');
-                    setEditingReq(null);
-                },
-            }
-        );
     };
 
     return (
@@ -892,6 +838,18 @@ export default function ProjectManagerDashboard({
                         </form>
                     </div>
                 </div>
+            )}
+
+            {editingReq && (
+                <RequisitionCorrectionForm
+                    key={editingReq.id}
+                    requisition={editingReq}
+                    onClose={() => setEditingReq(null)}
+                    onSuccess={() => {
+                        showToast('success', `Réquisition ${editingReq.numero} corrigée et transmise aux Finances.`);
+                        setEditingReq(null);
+                    }}
+                />
             )}
         </AppLayout>
     );

@@ -11,6 +11,7 @@ use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redirect;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -139,10 +140,34 @@ class CaisseManagementController extends Controller
         ]);
 
         $caissesList = CashRegister::orderBy('name')->get(['id', 'name', 'code', 'devise']);
+        $pendingApprovisionnements = CashMovement::query()
+            ->with(['cashRegister:id,name,devise', 'cashier:id,name'])
+            ->where('type', 'entree')
+            ->where('is_approvisionnement_initial', true)
+            ->where('status_validation', 'en_attente_finance')
+            ->orderBy('created_at')
+            ->get()
+            ->map(fn (CashMovement $movement) => [
+                'id' => $movement->id,
+                'numero_piece' => $movement->numero_piece,
+                'date_mouvement' => $movement->date_mouvement->format('d/m/Y'),
+                'caisse_name' => $movement->cashRegister?->name ?? 'Caisse inconnue',
+                'caisse_devise' => $movement->devise,
+                'cashier_name' => $movement->cashier?->name ?? 'Caissier inconnu',
+                'tiers_nom' => $movement->tiers_nom,
+                'montant' => (float) $movement->montant,
+                'motif' => $movement->motif,
+                'bordereau_banque_ref' => $movement->bordereau_banque_ref,
+                'bordereau_url' => $movement->bordereau_file_path
+                    ? Storage::disk('public')->url($movement->bordereau_file_path)
+                    : null,
+            ])
+            ->values();
 
         return Inertia::render('Finance/Caisses/Sessions', [
             'sessions' => $sessions,
             'caissesList' => $caissesList,
+            'pendingApprovisionnements' => $pendingApprovisionnements,
             'statusFilter' => $statusFilter,
             'caisseFilter' => $caisseFilter,
         ]);
