@@ -65,6 +65,7 @@ interface FinanceRequisition {
     canDecide: boolean;
     canCorrect?: boolean;
     financeRejected: boolean;
+    motifRejet?: string | null;
     dateSoumission: string;
     lignes: FinanceLine[];
 }
@@ -373,6 +374,27 @@ export default function FinanceDashboard({
         return allBudgetLines.find(
             (l) => l.normalizedCode === normalized && (!projectId || l.project_id === projectId)
         ) || null;
+    };
+
+    const openCorrection = (item: FinanceRequisition) => {
+        setCorrecting({
+            id: item.id,
+            numero: item.numero,
+            nature: item.nature,
+            devise: item.devise,
+            caisse: item.caisseAttribuee || 'Caisse principale',
+            observation: item.observation,
+            motifRejet: item.motifRejet,
+            lignes: item.lignes.map((line) => ({
+                id: line.id,
+                activite: line.activite,
+                codeBudget: line.codeAllocation || line.codeBudget,
+                nature: line.nature,
+                quantiteOuDuree: line.quantiteOuDuree,
+                unite: line.unite,
+                prixUnitaire: line.prixUnitaire,
+            })),
+        });
     };
 
     // Calculs pour les KPIs
@@ -1107,6 +1129,15 @@ export default function FinanceDashboard({
                                                 </span>
                                             </td>
                                             <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                                                {item.canCorrect && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openCorrection(item)}
+                                                        className="mr-2 rounded border border-amber-600 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-50"
+                                                    >
+                                                        Corriger
+                                                    </button>
+                                                )}
                                                 <button
                                                     type="button"
                                                     onClick={() => handleOpenExamen(item)}
@@ -1514,7 +1545,7 @@ export default function FinanceDashboard({
                     onSuccess={() => {
                         setRequisitions((items) => items.filter((item) => item.id !== correcting.id));
                         setCorrecting(null);
-                        showToast('success', `Réquisition ${correcting.numero} corrigée et transmise au PAM.`);
+                        showToast('success', `Réquisition ${correcting.numero} corrigée et resoumise à l’étape de contrôle suivante.`);
                     }}
                 />
             )}

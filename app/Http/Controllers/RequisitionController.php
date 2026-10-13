@@ -174,6 +174,7 @@ class RequisitionController extends Controller
                 403,
                 'Cette réquisition n’est plus disponible pour correction.'
             );
+            $previousStatus = $lockedRequisition->status;
             $demandes = $lockedRequisition->demandes()->lockForUpdate()->get()->keyBy('id');
             $montantTotal = 0;
             $observation = $validated['observation'] ?? null;
@@ -229,6 +230,27 @@ class RequisitionController extends Controller
                 'montant_total' => round($montantTotal, 2),
                 'status' => $resubmissionStatus,
             ]);
+
+            $correctionRole = match (true) {
+                $user->hasRole('project_manager') => 'project_manager',
+                $user->hasRole('finance') => 'finance',
+                $user->hasRole('admin_manager') => 'admin_manager',
+                default => 'initiator',
+            };
+            $rejection = $lockedRequisition->signatures()
+                ->where('action', 'rejected')
+                ->latest('signed_at')
+                ->first();
+
+            $this->enregistrerSignature(
+                requisition: $lockedRequisition,
+                user: $user,
+                roleSignataire: $correctionRole,
+                action: 'resubmitted',
+                commentaire: $rejection?->commentaire
+                    ? "Correction après rejet : {$rejection->commentaire}"
+                    : "Correction enregistrée après retour au statut {$previousStatus}."
+            );
         });
 
         $nextRole = match ($resubmissionStatus) {

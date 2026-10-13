@@ -19,6 +19,7 @@ export interface RequisitionCorrectionData {
     devise: 'USD' | 'FC' | 'EUR';
     caisse: string;
     observation: string | null;
+    motifRejet?: string | null;
     lignes: RequisitionCorrectionLine[];
 }
 
@@ -89,6 +90,13 @@ export default function RequisitionCorrectionForm({ requisition, onClose, onSucc
                 </header>
 
                 {error && <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+
+                {requisition.motifRejet && (
+                    <section className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+                        <h3 className="font-bold">Motif du retour pour correction</h3>
+                        <p className="mt-1 whitespace-pre-wrap">{requisition.motifRejet}</p>
+                    </section>
+                )}
 
                 <div className="grid gap-3 sm:grid-cols-3">
                     <label className="text-xs font-semibold">Nature

@@ -43,6 +43,7 @@ interface RequisitionAdmin {
     statusLabel: string;
     canDecide: boolean;
     canCorrect?: boolean;
+    motifRejet?: string | null;
     dateSoumission: string;
     lignes: LigneRequisition[];
 }
@@ -66,6 +67,7 @@ interface HistoryRequisition {
         date: string;
         code?: string;
         hash: string;
+        commentaire?: string | null;
     }[];
 }
 
@@ -279,6 +281,7 @@ export default function AdminManagerDashboard({
                                                             devise: item.devise,
                                                             caisse: item.caisseAttribuee || 'Caisse principale',
                                                             observation: item.observation,
+                                                            motifRejet: item.motifRejet,
                                                             lignes: item.lignes.map((line) => ({
                                                                 id: line.id,
                                                                 activite: line.activite,

@@ -370,12 +370,24 @@ it('returns a Finance rejection to the project manager and resumes at Finance af
 });
 
 it('returns a PAM rejection to Finance and resumes at the PAM after correction', function () {
+    Storage::fake('public');
     $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
     $pam = workflowUser('admin_manager');
     $finance = workflowUser('finance');
     $beneficiary = workflowUser('beneficiary');
     $requisition = workflowRequisition($beneficiary, $project, 'controle_finance');
     $demande = workflowDemand($requisition);
+    $attachment = UploadedFile::fake()->create('devis.pdf', 20, 'application/pdf');
+    $attachmentPath = $attachment->store('requisition-attachments', 'public');
+    $justificatif = DemandeJustificatif::create([
+        'demande_id' => $demande->id,
+        'description' => 'Devis fournisseur',
+        'date' => now()->toDateString(),
+        'montant' => 100,
+        'file_path' => $attachmentPath,
+        'original_name' => 'devis.pdf',
+        'mime_type' => 'application/pdf',
+    ]);
 
     $this->actingAs($pam)
         ->patch(route('requisitions.admin-decision', $requisition), [
@@ -386,10 +398,44 @@ it('returns a PAM rejection to Finance and resumes at the PAM after correction',
     $this->assertDatabaseHas('requisitions', ['id' => $requisition->id, 'status' => 'returned_to_finance']);
 
     $this->actingAs($finance)
+        ->get(route('finance.dashboard'))
+        ->assertInertia(fn ($page) => $page
+            ->where('requisitions.0.statusCode', 'returned_to_finance')
+            ->where('requisitions.0.canCorrect', true)
+            ->where('requisitions.0.motifRejet', 'Justificatif administratif manquant')
+        );
+
+    $this->actingAs($finance)
         ->patch(route('requisitions.update', $requisition), correctionPayload($demande))
         ->assertRedirect();
 
     $this->assertDatabaseHas('requisitions', ['id' => $requisition->id, 'status' => 'controle_finance']);
+    $this->assertDatabaseHas('requisition_signatures', [
+        'requisition_id' => $requisition->id,
+        'role_signataire' => 'finance',
+        'action' => 'resubmitted',
+    ]);
+
+    $director = workflowUser('director');
+    $this->actingAs($director)
+        ->get(route('director.dashboard'))
+        ->assertInertia(fn ($page) => $page
+            ->where('requisitions.0.signatures.1.action', 'resubmitted')
+            ->where('requisitions.0.signatures.1.commentaire', 'Correction après rejet : Justificatif administratif manquant')
+        );
+
+    $this->actingAs($pam)
+        ->get(route('dashboard'))
+        ->assertInertia(fn ($page) => $page
+            ->where('historyRequisitions.0.signatures.1.action', 'resubmitted')
+            ->where('historyRequisitions.0.signatures.1.commentaire', 'Correction après rejet : Justificatif administratif manquant')
+            ->where('requisitions.0.lignes.0.justificatifs.0.fileUrl', route('requisitions.justificatif.show', $justificatif))
+        );
+
+    $this->actingAs($pam)
+        ->get(route('requisitions.justificatif.show', $justificatif))
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf');
 });
 
 it('returns a Director rejection to the PAM and resumes at the Director after correction', function () {

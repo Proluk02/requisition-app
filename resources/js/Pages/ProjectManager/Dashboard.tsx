@@ -59,6 +59,7 @@ interface RequisitionMP {
     caisseSouhaitee: string;
     caisseAttribuee?: string;
     observation?: string;
+    motifRejet?: string | null;
     is_urgent: boolean;
     statut: string;
     statusCode: string;
@@ -216,8 +217,9 @@ export default function ProjectManagerDashboard({
                                 ? {
                                       ...d,
                                       statut: 'valide_mp',
-                                      statusLabel: 'Validé MP',
-                                      canDecide: false,
+                                        statusCode: 'visa_mp',
+                                        statusLabel: 'Transmis aux Finances',
+                                        canDecide: false,
                                       lignes: d.lignes.map((ligne) => {
                                           const allocation = allocationsArray.find(
                                               (item) => item.demande_id === ligne.id
@@ -281,8 +283,9 @@ export default function ProjectManagerDashboard({
                             d.id === selectedReq.id
                                 ? {
                                       ...d,
-                                      statut: 'rejete_mp',
-                                      statusLabel: 'Rejeté',
+                                      statut: 'a_corriger',
+                                      statusCode: 'returned_to_beneficiary',
+                                      statusLabel: 'À corriger par le bénéficiaire',
                                       canDecide: false,
                                   }
                                 : d
@@ -305,6 +308,7 @@ export default function ProjectManagerDashboard({
             devise: req.devise,
             caisse: req.caisseAttribuee || req.caisseSouhaitee,
             observation: req.observation ?? null,
+            motifRejet: req.motifRejet,
             lignes: req.lignes.map((line) => ({
                 id: line.id,
                 activite: line.activite,
@@ -477,7 +481,15 @@ export default function ProjectManagerDashboard({
                                             )}
                                         </td>
                                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-[#04326D]">
+                                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                                req.statut === 'a_corriger'
+                                                    ? 'bg-red-50 text-red-800'
+                                                    : req.statut === 'en_attente_mp'
+                                                      ? 'bg-amber-50 text-amber-800'
+                                                      : ['decaisse', 'cloture'].includes(req.statusCode)
+                                                        ? 'bg-emerald-50 text-emerald-800'
+                                                        : 'bg-blue-50 text-[#04326D]'
+                                            }`}>
                                                 {req.statusLabel}
                                             </span>
                                         </td>
@@ -533,6 +545,7 @@ export default function ProjectManagerDashboard({
                                 </h2>
                                 <p className="text-xs text-gray-500 mt-0.5">
                                     Initiateur : <strong>{selectedReq.initiateurNom}</strong> • Date : {selectedReq.dateSoumission}
+                                    {' '}• Statut : <strong>{selectedReq.statusLabel}</strong>
                                 </p>
                             </div>
                             <button
@@ -545,6 +558,13 @@ export default function ProjectManagerDashboard({
                                 <X className="w-5 h-5" />
                             </button>
                         </header>
+
+                        {selectedReq.motifRejet && (
+                            <div className="rounded border border-red-200 bg-red-50 p-3 text-xs text-red-900">
+                                <strong>Motif du dernier retour :</strong>
+                                <p className="mt-1 whitespace-pre-wrap">{selectedReq.motifRejet}</p>
+                            </div>
+                        )}
 
                         <div>
                             <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
@@ -668,10 +688,29 @@ export default function ProjectManagerDashboard({
                                                         )}
                                                     </td>
                                                     <td className="p-2.5">
-                                                        {ligne.justif && ligne.justif.length > 0 ? (
-                                                            <span className="text-[11px] font-semibold text-[#04326D]">
-                                                                {ligne.justif.length} pièce(s)
-                                                            </span>
+                                                        {ligne.justif.length > 0 ? (
+                                                            <ul className="space-y-1">
+                                                                {ligne.justif.map((file) => (
+                                                                    <li key={file.id} className="text-[10px]">
+                                                                        {file.fileUrl ? (
+                                                                            <a
+                                                                                href={file.fileUrl}
+                                                                                target="_blank"
+                                                                                rel="noreferrer"
+                                                                                className="inline-flex items-center gap-1 font-semibold text-[#04326D] underline hover:text-blue-800"
+                                                                            >
+                                                                                <Paperclip className="h-3 w-3 shrink-0" />
+                                                                                <span>{file.scan}</span>
+                                                                            </a>
+                                                                        ) : (
+                                                                            <span className="text-gray-500">{file.scan}</span>
+                                                                        )}
+                                                                        {file.description && file.description !== file.scan && (
+                                                                            <span className="block text-gray-500">{file.description}</span>
+                                                                        )}
+                                                                    </li>
+                                                                ))}
+                                                            </ul>
                                                         ) : (
                                                             <span className="text-gray-400 text-[10px]">Aucune</span>
                                                         )}

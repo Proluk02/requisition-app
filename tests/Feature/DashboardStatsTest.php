@@ -349,3 +349,65 @@ it('provides the director with requisition dates and attachment links', function
         ->assertOk()
         ->assertHeader('Content-Type', 'application/pdf');
 });
+
+it('shows accurate requisition status and accessible attachments to the project manager', function () {
+    Storage::fake('public');
+    Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
+    Role::firstOrCreate(['name' => 'beneficiary', 'guard_name' => 'web']);
+
+    $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
+    $manager = User::factory()->create([
+        'role' => 'project_manager',
+        'project_id' => $project->id,
+        'status' => 'active',
+    ]);
+    $manager->assignRole('project_manager');
+    $initiator = User::factory()->create(['status' => 'active']);
+    $initiator->assignRole('beneficiary');
+    $requisition = Requisition::create([
+        'user_id' => $initiator->id,
+        'project_id' => $project->id,
+        'numero_requisition' => 'PM-STATUS-001',
+        'nature_requisition' => 'Achat',
+        'projet' => $project->name,
+        'devise' => 'USD',
+        'montant_total' => 80,
+        'status' => 'decaisse',
+    ]);
+    $demande = Demande::create([
+        'requisition_id' => $requisition->id,
+        'activite' => 'Papeterie',
+        'code_all_budget' => 'BUD-001',
+        'nature' => 'Achat',
+        'quantite' => 2,
+        'duree' => 0,
+        'unite' => 'Lot',
+        'frais_unitaire' => 40,
+        'total_ligne' => 80,
+    ]);
+    $attachment = UploadedFile::fake()->create('devis.pdf', 20, 'application/pdf');
+    $path = $attachment->store('requisition-attachments', 'public');
+    $justificatif = DemandeJustificatif::create([
+        'demande_id' => $demande->id,
+        'description' => 'Devis fournisseur',
+        'date' => now()->toDateString(),
+        'montant' => 80,
+        'file_path' => $path,
+        'original_name' => 'devis.pdf',
+        'mime_type' => 'application/pdf',
+    ]);
+
+    $this->actingAs($manager)
+        ->get(route('dashboard'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('ProjectManager/Dashboard')
+            ->where('requisitions.0.statusCode', 'decaisse')
+            ->where('requisitions.0.statusLabel', 'Décaissée')
+            ->where('requisitions.0.lignes.0.justif.0.fileUrl', route('requisitions.justificatif.show', $justificatif))
+        );
+
+    $this->actingAs($manager)
+        ->get(route('requisitions.justificatif.show', $justificatif))
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf');
+});

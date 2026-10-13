@@ -374,6 +374,7 @@ class DashboardController extends Controller
                         'visa_mp' => 'À viser par les Finances',
                         'returned_to_finance' => 'À corriger par les Finances',
                         'returned_to_project_manager' => 'Renvoyée au Manager de Projet',
+                        'returned_to_admin_manager' => 'Renvoyée au PAM',
                         'returned_to_urgent_initiator' => 'Urgence à corriger par son initiateur',
                         'controle_finance' => 'Validée par les Finances',
                         'decaissement_caisse' => 'Prête pour la Caisse',
@@ -384,6 +385,7 @@ class DashboardController extends Controller
                     'canCorrect' => $r->status === 'returned_to_finance'
                         || ($r->status === 'returned_to_urgent_initiator' && (string) $r->user_id === (string) $user->id),
                     'financeRejected' => $r->status === 'returned_to_project_manager',
+                    'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
                     'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
                     'lignes' => $r->demandes->map(function (Demande $d) use ($r, $budgetLines) {
                         $codeAlloc = trim((string) ($d->code_allocation ?: $d->code_all_budget));
@@ -457,6 +459,7 @@ class DashboardController extends Controller
                     'role' => $signature->role_signataire,
                     'nom' => $signature->nom_signataire,
                     'action' => $signature->action,
+                    'commentaire' => $signature->commentaire,
                     'date' => $signature->signed_at->format('d/m/Y H:i'),
                     'code' => $signature->signature_code,
                     'hash' => $signature->signature_hash,
@@ -483,6 +486,7 @@ class DashboardController extends Controller
                 'canDecide' => $r->status === 'controle_finance',
                 'canCorrect' => $r->status === 'returned_to_admin_manager'
                     || ($r->status === 'returned_to_urgent_initiator' && (string) $r->user_id === (string) $user->id),
+                'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
                 'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
                 'lignes' => $r->demandes->map(fn ($d) => [
                     'id' => (string) $d->id,
@@ -578,7 +582,18 @@ class DashboardController extends Controller
     {
         return $requisitions->map(function ($r) use ($managerId, $budgetLines) {
             $isFinanceReturned = $r->status === 'returned_to_project_manager';
-            $isRejectedForInitiator = in_array($r->status, ['returned_to_beneficiary', 'returned_to_urgent_initiator'], true);
+            $isRejectedForInitiator = in_array($r->status, [
+                'returned_to_beneficiary',
+                'returned_to_urgent_initiator',
+                'returned_to_finance',
+                'returned_to_admin_manager',
+            ], true);
+            $statut = match (true) {
+                $isFinanceReturned || $isRejectedForInitiator => 'a_corriger',
+                $r->status === 'draft' => 'en_attente_mp',
+                $r->status === 'rejetee' => 'rejete_mp',
+                default => 'valide_mp',
+            };
             return [
                 'id' => (string) $r->id,
                 'numero' => $r->numero_requisition,
@@ -591,8 +606,9 @@ class DashboardController extends Controller
                 'caisseSouhaitee' => $r->caisse_decaissement ?? 'Caisse principale',
                 'caisseAttribuee' => $r->caisse_decaissement,
                 'observation' => $r->observation,
+                'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
                 'is_urgent' => (bool) $r->is_urgent,
-                'statut' => ($isFinanceReturned || $isRejectedForInitiator) ? 'a_corriger' : ($r->status === 'draft' ? 'en_attente_mp' : 'valide_mp'),
+                'statut' => $statut,
                 'statusCode' => $r->status,
                 'statusLabel' => match ($r->status) {
                     'draft' => 'En attente Visa MP',
@@ -604,6 +620,11 @@ class DashboardController extends Controller
                     'visa_mp' => 'Transmis aux Finances',
                     'controle_finance' => 'Transmis au PAM',
                     'visa_admin' => 'Transmis à la Direction',
+                    'urgent_direction' => 'Urgence en attente de la Direction',
+                    'decaissement_caisse' => 'En attente de la Caisse',
+                    'decaisse' => 'Décaissée',
+                    'cloture' => 'Clôturée',
+                    'rejetee' => 'Rejetée',
                     default => 'Validé MP',
                 },
                 'canDecide' => $r->status === 'draft'
