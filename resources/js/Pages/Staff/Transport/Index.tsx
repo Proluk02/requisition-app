@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Head, Link, useForm, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
 import PettyCashVoucherPrint from '@/Components/PettyCashVoucherPrint';
+import { downloadPdf } from '@/lib/downloadPdf';
 import { numberToWordsFR } from '@/lib/numberToWords';
 import {
     Wallet,
@@ -115,10 +116,16 @@ export default function TransportIndex({ requisitions = [], vouchers = [] }: Pro
 
     const handlePrintVoucher = (voucher: PettyCashData) => {
         setSelectedPrintVoucher(voucher);
-        setTimeout(() => {
-            window.print();
-        }, 300);
     };
+
+    useEffect(() => {
+        if (!selectedPrintVoucher) return;
+        void downloadPdf(
+            'bon-pasteur-petty-cash-sheet',
+            `${selectedPrintVoucher.numero_voucher}.pdf`,
+            { contentWidth: '148mm' }
+        ).then(() => setSelectedPrintVoucher(null));
+    }, [selectedPrintVoucher]);
 
     return (
         <AppLayout>

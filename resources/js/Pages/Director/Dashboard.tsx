@@ -11,6 +11,7 @@ import PinSignatureModal from '@/Components/Director/PinSignatureModal';
 import RequisitionDetailModal from '@/Components/Director/RequisitionDetailModal';
 import type { RequisitionSuivi } from '@/types/requisitionsList';
 import { numberToWordsFR } from '@/lib/numberToWords';
+import { downloadPdf } from '@/lib/downloadPdf';
 import { Calendar, Eye, Printer, ShieldCheck, PieChart, BarChart3, Activity } from 'lucide-react';
 
 interface WorkflowLevel {
@@ -52,11 +53,14 @@ interface RequisitionDirectrice {
     statusCode: string;
     workflowLevel: WorkflowLevel;
     dateSoumission: string;
+    date_paiement?: string | null;
+    date_livraison?: string | null;
     signatures: {
         role: string;
         nom: string;
         action: string;
         date: string;
+        commentaire?: string | null;
         code?: string;
         hash: string;
     }[];
@@ -210,18 +214,8 @@ export default function DirectorDashboard({
     useEffect(() => {
         if (!printReq) return;
 
-        let secondFrame = 0;
-        const firstFrame = window.requestAnimationFrame(() => {
-            secondFrame = window.requestAnimationFrame(() => window.print());
-        });
-        const clearPrintRequest = () => setPrintReq(null);
-        window.addEventListener('afterprint', clearPrintRequest);
-
-        return () => {
-            window.cancelAnimationFrame(firstFrame);
-            window.cancelAnimationFrame(secondFrame);
-            window.removeEventListener('afterprint', clearPrintRequest);
-        };
+        void downloadPdf('bon-pasteur-print-zone', `${printReq.numero}.pdf`, { orientation: 'landscape' })
+            .then(() => setPrintReq(null));
     }, [printReq]);
 
     const handleReject = (event: React.FormEvent) => {
@@ -262,6 +256,8 @@ export default function DirectorDashboard({
         montantTotal: printReq.montantTotal,
         montantLettres: numberToWordsFR(printReq.montantTotal, printReq.devise),
         dateSoumission: printReq.dateSoumission,
+        date_paiement: printReq.date_paiement,
+        date_livraison: printReq.date_livraison,
         observation: printReq.observation ?? undefined,
         is_urgent: printReq.is_urgent,
         etapeActuelle: 'approbation_direction' as const,
@@ -275,6 +271,14 @@ export default function DirectorDashboard({
             prixUnitaire: line.prixUnitaire,
             total: line.total,
             justificatifsCount: line.justificatifs.length,
+            justificatifs: line.justificatifs.map((file) => ({
+                id: file.id,
+                description: file.nom,
+                originalName: file.nom,
+                date: '',
+                montant: 0,
+                fileUrl: file.fileUrl,
+            })),
         })),
         signatures: printReq.signatures,
         initiateurNom: printReq.initiateurNom,

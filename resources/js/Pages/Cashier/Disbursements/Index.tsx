@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Head, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
 import { numberToWordsFR } from '@/lib/numberToWords';
+import { downloadPdf } from '@/lib/downloadPdf';
 import {
     ArrowUpRight,
     Building2,
@@ -91,6 +92,13 @@ export default function DisbursementsIndex({
     const [disburseReq, setDisburseReq] = useState<RequisitionItem | null>(null);
     const [printBSC, setPrintBSC] = useState<MovementBSC | null>(null);
 
+    useEffect(() => {
+        if (!printBSC) return;
+        void downloadPdf('bon-sortie-caisse-print', `${printBSC.numero_piece}.pdf`, {
+            contentWidth: '148mm',
+        }).then(() => setPrintBSC(null));
+    }, [printBSC]);
+
     const [modePaiement, setModePaiement] = useState('Espèces');
     const [refPaiement, setRefPaiement] = useState('');
     const [montantLettres, setMontantLettres] = useState('');
@@ -150,7 +158,6 @@ export default function DisbursementsIndex({
 
     const handleTriggerPrint = (bsc: MovementBSC) => {
         setPrintBSC(bsc);
-        setTimeout(() => window.print(), 300);
     };
 
     const filteredADecaisser = useMemo(() => {

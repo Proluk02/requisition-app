@@ -30,6 +30,7 @@
         "esbuild@0.25.12": true
     },
     "dependencies": {
+        "html2pdf.js": "^0.14.0",
         "lucide-react": "^1.48.0"
     }
 }

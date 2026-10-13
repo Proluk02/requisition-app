@@ -4,9 +4,11 @@ use App\Models\Demande;
 use App\Models\DemandeJustificatif;
 use App\Models\Project;
 use App\Models\Requisition;
+use App\Models\RequisitionSignature;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Role;
 
 it('loads the staff dashboard without crashing when no justificatifs exist', function () {
@@ -205,7 +207,6 @@ it('allows the requisition owner to consult a stored attachment through a protec
         'original_name' => 'facture.pdf',
         'mime_type' => 'application/pdf',
     ]);
-
     $response = $this->actingAs($user)->get(route('requisitions.justificatif.show', ['justificatif' => $justificatif->id]));
 
     $response->assertOk();
@@ -273,4 +274,78 @@ it('persists edits to a draft requisition and recalculates its totals', function
         'frais_unitaire' => 40,
         'total_ligne' => 120,
     ]);
+});
+
+it('provides the director with requisition dates and attachment links', function () {
+    Storage::fake('public');
+    Role::firstOrCreate(['name' => 'director', 'guard_name' => 'web']);
+    $director = User::factory()->create([
+        'role' => 'director',
+        'status' => 'active',
+    ]);
+    $director->assignRole('director');
+
+    $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
+    $initiator = User::factory()->create(['status' => 'active']);
+    $requisition = Requisition::create([
+        'user_id' => $initiator->id,
+        'project_id' => $project->id,
+        'numero_requisition' => 'DIR-ATTACHMENT-001',
+        'nature_requisition' => 'Achat',
+        'projet' => $project->name,
+        'devise' => 'USD',
+        'observation' => 'Achat documenté',
+        'montant_total' => 100,
+        'status' => 'visa_admin',
+        'date_livraison' => '2026-10-20',
+    ]);
+    $demande = Demande::create([
+        'requisition_id' => $requisition->id,
+        'activite' => 'Matériel',
+        'code_all_budget' => 'BUD-001',
+        'nature' => 'Achat',
+        'quantite' => 2,
+        'duree' => 0,
+        'unite' => 'Lot',
+        'frais_unitaire' => 50,
+        'total_ligne' => 100,
+    ]);
+    $attachment = UploadedFile::fake()->create('devis.pdf', 20, 'application/pdf');
+    $attachmentPath = $attachment->store('requisition-attachments', 'public');
+    $justificatif = DemandeJustificatif::create([
+        'demande_id' => $demande->id,
+        'description' => 'Devis fournisseur',
+        'date' => now()->toDateString(),
+        'montant' => 100,
+        'file_path' => $attachmentPath,
+        'original_name' => 'devis.pdf',
+        'mime_type' => 'application/pdf',
+    ]);
+    RequisitionSignature::create([
+        'requisition_id' => $requisition->id,
+        'user_id' => $initiator->id,
+        'role_signataire' => 'finance',
+        'nom_signataire' => 'Manager Finance',
+        'action' => 'rejected',
+        'commentaire' => 'Merci de joindre un devis valide.',
+        'signature_hash' => hash('sha256', 'director-test'),
+        'signed_at' => now(),
+    ]);
+
+    $this->actingAs($director)
+        ->get(route('director.dashboard'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Director/Dashboard')
+            ->where('requisitions.0.observation', 'Achat documenté')
+            ->where('requisitions.0.date_livraison', '20/10/2026')
+            ->where('requisitions.0.signatures.0.commentaire', 'Merci de joindre un devis valide.')
+            ->where('requisitions.0.lignes.0.justificatifs.0.nom', 'devis.pdf')
+            ->where('requisitions.0.lignes.0.justificatifs.0.description', 'Devis fournisseur')
+            ->where('requisitions.0.lignes.0.justificatifs.0.fileUrl', route('requisitions.justificatif.show', $justificatif))
+        );
+
+    $this->actingAs($director)
+        ->get(route('requisitions.justificatif.show', $justificatif))
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf');
 });

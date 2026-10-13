@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Head, router, useForm, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
 import { numberToWordsFR } from '@/lib/numberToWords';
+import { downloadPdf } from '@/lib/downloadPdf';
 import {
     ArrowDownLeft,
     Building2,
@@ -69,6 +70,13 @@ export default function ReceiptsIndex({
     const [search, setSearch] = useState('');
     const [printBEC, setPrintBEC] = useState<MovementBEC | null>(null);
 
+    useEffect(() => {
+        if (!printBEC) return;
+        void downloadPdf('bon-entree-caisse-print', `${printBEC.numero_piece}.pdf`, {
+            contentWidth: '148mm',
+        }).then(() => setPrintBEC(null));
+    }, [printBEC]);
+
     const form = useForm<{
         tiers_nom: string;
         montant: string;
@@ -132,7 +140,6 @@ export default function ReceiptsIndex({
 
     const handleTriggerPrint = (bec: MovementBEC) => {
         setPrintBEC(bec);
-        setTimeout(() => window.print(), 300);
     };
 
     const filteredReceipts = receipts.filter((r) =>

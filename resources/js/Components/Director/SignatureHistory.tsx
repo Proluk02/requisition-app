@@ -3,6 +3,7 @@ interface Signature {
     nom: string;
     action: string;
     date: string;
+    commentaire?: string | null;
     code?: string;
     hash: string;
 }
@@ -59,6 +60,11 @@ export default function SignatureHistory({ signatures }: Props) {
                             <p className="text-[10.5px] text-gray-500 font-mono mt-1 truncate">
                                 Cert. {sig.code || 'BP-SIG'} · {sig.hash.substring(0, 20)}…
                             </p>
+                            {sig.commentaire && (
+                                <p className="mt-1 text-[11px] text-red-800">
+                                    Motif : {sig.commentaire}
+                                </p>
+                            )}
                         </div>
                         <span className="text-[11px] text-gray-500 font-medium whitespace-nowrap">{sig.date}</span>
                     </li>

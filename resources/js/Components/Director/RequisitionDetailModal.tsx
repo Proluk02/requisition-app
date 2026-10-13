@@ -5,10 +5,19 @@ interface Ligne {
     id: string;
     activite: string;
     codeAllocation: string | null;
+    nature?: string;
     quantiteOuDuree: number;
     unite: string;
     prixUnitaire: number;
     total: number;
+    justificatifs?: {
+        id: string;
+        nom: string;
+        description?: string | null;
+        date?: string | null;
+        montant?: number;
+        fileUrl: string | null;
+    }[];
 }
 
 interface Requisition {
@@ -20,6 +29,10 @@ interface Requisition {
     nature: 'Achat' | 'Service';
     devise: string;
     montantTotal: number;
+    observation: string | null;
+    dateSoumission: string;
+    date_paiement?: string | null;
+    date_livraison?: string | null;
     statusCode: string;
     is_urgent: boolean;
     signatures: {
@@ -27,6 +40,7 @@ interface Requisition {
         nom: string;
         action: string;
         date: string;
+        commentaire?: string | null;
         code?: string;
         hash: string;
     }[];
@@ -96,6 +110,18 @@ export default function RequisitionDetailModal({ open, requisition, onClose, onP
 
                 {/* Body scrollable */}
                 <div className="overflow-y-auto px-5 py-5 space-y-6">
+                    <section className="grid gap-3 rounded border border-[#E2E8F0] bg-gray-50 p-4 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                        <p><strong>Statut :</strong> {r.statusCode}</p>
+                        <p><strong>Soumise le :</strong> {r.dateSoumission}</p>
+                        {r.date_paiement && <p><strong>Date de paiement :</strong> {r.date_paiement}</p>}
+                        {r.date_livraison && <p><strong>Date de livraison :</strong> {r.date_livraison}</p>}
+                        <p><strong>Urgence :</strong> {r.is_urgent ? 'Oui' : 'Non'}</p>
+                        <p><strong>Montant :</strong> {money(r.montantTotal, r.devise)}</p>
+                        <p className="sm:col-span-2 lg:col-span-3">
+                            <strong>Observation :</strong> {r.observation || 'Aucune observation'}
+                        </p>
+                    </section>
+
                     <section>
                         <h3 className="text-[11px] font-bold uppercase tracking-widest text-gray-500 mb-3">
                             Circuit d'approbation
@@ -120,6 +146,7 @@ export default function RequisitionDetailModal({ open, requisition, onClose, onP
                                     <tr>
                                         <th className="px-3 py-2 font-bold">Désignation</th>
                                         <th className="px-3 py-2 font-bold">Code budget</th>
+                                        <th className="px-3 py-2 font-bold">Nature</th>
                                         <th className="px-3 py-2 text-center font-bold">
                                             {r.nature === 'Achat' ? 'Qté' : 'Durée'}
                                         </th>
@@ -130,10 +157,42 @@ export default function RequisitionDetailModal({ open, requisition, onClose, onP
                                 <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
                                     {r.lignes.map((l) => (
                                         <tr key={l.id}>
-                                            <td className="px-3 py-2 font-medium text-[#0B192C]">{l.activite}</td>
+                                            <td className="px-3 py-2 font-medium text-[#0B192C]">
+                                                <span>{l.activite}</span>
+                                                {!!l.justificatifs?.length && (
+                                                    <ul className="mt-2 space-y-1 text-[11px] font-normal">
+                                                        {l.justificatifs.map((file) => (
+                                                            <li key={file.id} className="flex flex-wrap items-center gap-x-2">
+                                                                {file.fileUrl ? (
+                                                                    <a
+                                                                        href={file.fileUrl}
+                                                                        target="_blank"
+                                                                        rel="noreferrer"
+                                                                        className="font-semibold text-[#04326D] underline"
+                                                                    >
+                                                                        Consulter : {file.nom}
+                                                                    </a>
+                                                                ) : (
+                                                                    <span>{file.nom}</span>
+                                                                )}
+                                                                {file.description && file.description !== file.nom && (
+                                                                    <span className="text-gray-500">({file.description})</span>
+                                                                )}
+                                                                {file.date && <span className="text-gray-500">· {file.date}</span>}
+                                                                {file.montant !== undefined && (
+                                                                    <span className="text-gray-500">
+                                                                        · {money(file.montant, r.devise)}
+                                                                    </span>
+                                                                )}
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                )}
+                                            </td>
                                             <td className="px-3 py-2 font-mono text-[11.5px] font-bold text-[#04326D]">
                                                 {l.codeAllocation || '—'}
                                             </td>
+                                            <td className="px-3 py-2">{l.nature || r.nature}</td>
                                             <td className="px-3 py-2 text-center tabular-nums">
                                                 {l.quantiteOuDuree} {l.unite}
                                             </td>
@@ -148,7 +207,7 @@ export default function RequisitionDetailModal({ open, requisition, onClose, onP
                                 </tbody>
                                 <tfoot className="bg-gray-50 border-t border-[#B2BED6]">
                                     <tr>
-                                        <td colSpan={4} className="px-3 py-2.5 text-right text-[11.5px] font-bold uppercase tracking-widest text-gray-600">
+                                        <td colSpan={5} className="px-3 py-2.5 text-right text-[11.5px] font-bold uppercase tracking-widest text-gray-600">
                                             Total général
                                         </td>
                                         <td className="px-3 py-2.5 text-right font-mono font-black text-[#04326D]">

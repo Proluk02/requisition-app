@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Head, Link, router } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import {
@@ -8,6 +8,7 @@ import {
 } from '@/types/requisitionsList';
 import { numberToWordsFR } from '@/lib/numberToWords';
 import OfficialPrintSheet from '@/Components/OfficialPrintSheet';
+import { downloadPdf } from '@/lib/downloadPdf';
 import {
     Search,
     Plus,
@@ -93,10 +94,14 @@ export default function RequisitionsIndex({
 
     const handleTriggerPrint = (req: RequisitionSuivi) => {
         setPrintReq(req);
-        setTimeout(() => {
-            window.print();
-        }, 350);
     };
+
+    useEffect(() => {
+        if (!printReq) return;
+        void downloadPdf('bon-pasteur-print-zone', `${printReq.numero}.pdf`, {
+            orientation: 'landscape',
+        }).then(() => setPrintReq(null));
+    }, [printReq]);
 
     const handleSaveEdit = (e: React.FormEvent) => {
         e.preventDefault();

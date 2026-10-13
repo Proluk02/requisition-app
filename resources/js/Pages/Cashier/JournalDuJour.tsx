@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Head, router, Link } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
+import { downloadPdf } from '@/lib/downloadPdf';
 import {
     Printer,
     Calendar,
@@ -203,7 +204,11 @@ export default function JournalDuJour({
 
                         <button
                             type="button"
-                            onClick={() => window.print()}
+                            onClick={() => void downloadPdf(
+                                'journal-print-document',
+                                `Journal-Caisse-${selectedDate}.pdf`,
+                                { orientation: 'landscape' }
+                            )}
                             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow-sm transition"
                         >
                             <Printer className="w-3.5 h-3.5" />

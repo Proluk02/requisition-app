@@ -42,6 +42,8 @@ export interface RequisitionSuivi {
     montantTotal: number;
     montantLettres: string;
     dateSoumission: string;
+    date_paiement?: string | null;
+    date_livraison?: string | null;
     observation?: string;
     is_urgent?: boolean;
     statusCode?: string;

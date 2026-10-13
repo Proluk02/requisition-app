@@ -21,8 +21,8 @@ interface Props {
             role?: string;
         };
         is_urgent?: boolean;
-        date_paiement?: string;
-        date_livraison?: string;
+        date_paiement?: string | null;
+        date_livraison?: string | null;
         signatures?: SignatureOffi[];
     };
 }

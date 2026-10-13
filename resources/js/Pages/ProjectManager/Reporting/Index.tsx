@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Head, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
+import { downloadPdf } from '@/lib/downloadPdf';
 import {
     BarChart3,
     Calendar,
@@ -174,7 +175,11 @@ export default function ReportingIndex({
 
                         <button
                             type="button"
-                            onClick={() => window.print()}
+                            onClick={() => void downloadPdf(
+                                'pm-reporting-print-sheet',
+                                `Rapport-${project?.name ?? 'Projet'}-${filters.labelPeriode}.pdf`,
+                                { orientation: 'landscape' }
+                            )}
                             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[#0B192C] hover:bg-[#1B2B44] text-white rounded text-xs font-bold shadow transition"
                         >
                             <Printer className="w-4 h-4 text-emerald-400" />
