@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
-import { downloadPdf } from '@/lib/downloadPdf';
+import { openPrintPreview } from '@/lib/printPreview';
 import {
     FileText,
     Plus,
@@ -247,11 +247,7 @@ export default function JustificationsIndex({
 
     useEffect(() => {
         if (!printTarget) return;
-        void downloadPdf(
-            'appendice2-print-sheet',
-            `${printTarget.numero_return_form}.pdf`,
-            { contentWidth: '190mm' }
-        ).then(() => setPrintTarget(null));
+        void openPrintPreview('appendice2-print-sheet').then(() => setPrintTarget(null));
     }, [printTarget]);
 
     return (

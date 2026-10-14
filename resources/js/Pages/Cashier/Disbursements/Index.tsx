@@ -3,7 +3,7 @@ import { Head, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
 import { numberToWordsFR } from '@/lib/numberToWords';
-import { downloadPdf } from '@/lib/downloadPdf';
+import { openPrintPreview } from '@/lib/printPreview';
 import {
     ArrowUpRight,
     Building2,
@@ -94,9 +94,7 @@ export default function DisbursementsIndex({
 
     useEffect(() => {
         if (!printBSC) return;
-        void downloadPdf('bon-sortie-caisse-print', `${printBSC.numero_piece}.pdf`, {
-            contentWidth: '148mm',
-        }).then(() => setPrintBSC(null));
+        void openPrintPreview('bon-sortie-caisse-print').then(() => setPrintBSC(null));
     }, [printBSC]);
 
     const [modePaiement, setModePaiement] = useState('Espèces');

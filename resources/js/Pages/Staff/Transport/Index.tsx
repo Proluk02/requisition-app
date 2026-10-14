@@ -3,7 +3,7 @@ import { Head, Link, useForm, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
 import PettyCashVoucherPrint from '@/Components/PettyCashVoucherPrint';
-import { downloadPdf } from '@/lib/downloadPdf';
+import { openPrintPreview } from '@/lib/printPreview';
 import { numberToWordsFR } from '@/lib/numberToWords';
 import {
     Wallet,
@@ -120,11 +120,7 @@ export default function TransportIndex({ requisitions = [], vouchers = [] }: Pro
 
     useEffect(() => {
         if (!selectedPrintVoucher) return;
-        void downloadPdf(
-            'bon-pasteur-petty-cash-sheet',
-            `${selectedPrintVoucher.numero_voucher}.pdf`,
-            { contentWidth: '148mm' }
-        ).then(() => setSelectedPrintVoucher(null));
+        void openPrintPreview('bon-pasteur-petty-cash-sheet').then(() => setSelectedPrintVoucher(null));
     }, [selectedPrintVoucher]);
 
     return (

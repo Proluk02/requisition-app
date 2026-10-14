@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Head, router } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
-import { downloadPdf } from '@/lib/downloadPdf';
+import { openPrintPreview } from '@/lib/printPreview';
 import {
     BookOpen,
     Building2,
@@ -179,11 +179,7 @@ export default function LedgerIndex({
 
                         <button
                             type="button"
-                            onClick={() => void downloadPdf(
-                                'grand-livre-print-document',
-                                `Grand-Livre-${selectedCaisse?.name ?? 'Caisse'}-${period}.pdf`,
-                                { orientation: 'landscape', contentWidth: '277mm' }
-                            )}
+                            onClick={() => void openPrintPreview('grand-livre-print-document')}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#0B192C] hover:bg-[#1B2B44] text-white rounded font-bold text-xs shadow-sm transition"
                         >
                             <Printer className="w-3.5 h-3.5" />

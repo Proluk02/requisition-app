@@ -11,7 +11,7 @@ import PinSignatureModal from '@/Components/Director/PinSignatureModal';
 import RequisitionDetailModal from '@/Components/Director/RequisitionDetailModal';
 import type { RequisitionSuivi } from '@/types/requisitionsList';
 import { numberToWordsFR } from '@/lib/numberToWords';
-import { downloadPdf } from '@/lib/downloadPdf';
+import { openPrintPreview } from '@/lib/printPreview';
 import { Calendar, Eye, Printer, ShieldCheck, PieChart, BarChart3, Activity } from 'lucide-react';
 
 interface WorkflowLevel {
@@ -214,7 +214,7 @@ export default function DirectorDashboard({
     useEffect(() => {
         if (!printReq) return;
 
-        void downloadPdf('bon-pasteur-print-zone', `${printReq.numero}.pdf`, { orientation: 'landscape' })
+        void openPrintPreview('bon-pasteur-print-zone')
             .then(() => setPrintReq(null));
     }, [printReq]);
 

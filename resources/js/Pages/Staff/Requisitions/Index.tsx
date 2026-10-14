@@ -8,7 +8,7 @@ import {
 } from '@/types/requisitionsList';
 import { numberToWordsFR } from '@/lib/numberToWords';
 import OfficialPrintSheet from '@/Components/OfficialPrintSheet';
-import { downloadPdf } from '@/lib/downloadPdf';
+import { openPrintPreview } from '@/lib/printPreview';
 import {
     Search,
     Plus,
@@ -98,9 +98,7 @@ export default function RequisitionsIndex({
 
     useEffect(() => {
         if (!printReq) return;
-        void downloadPdf('bon-pasteur-print-zone', `${printReq.numero}.pdf`, {
-            orientation: 'landscape',
-        }).then(() => setPrintReq(null));
+        void openPrintPreview('bon-pasteur-print-zone').then(() => setPrintReq(null));
     }, [printReq]);
 
     const handleSaveEdit = (e: React.FormEvent) => {
@@ -229,6 +227,23 @@ export default function RequisitionsIndex({
     return (
         <AppLayout>
             <Head title="Suivi des Réquisitions" />
+            <style>{`
+                @media screen {
+                    #bon-pasteur-print-zone { display: none; }
+                }
+                @media print {
+                    body * { visibility: hidden !important; }
+                    #bon-pasteur-print-zone,
+                    #bon-pasteur-print-zone * { visibility: visible !important; }
+                    #bon-pasteur-print-zone {
+                        display: block !important;
+                        position: fixed !important;
+                        inset: 0 !important;
+                        width: 100% !important;
+                        background: white !important;
+                    }
+                }
+            `}</style>
 
             <div className="space-y-6 no-print-zone">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-outline-soft pb-5">

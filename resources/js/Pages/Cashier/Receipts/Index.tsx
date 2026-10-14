@@ -3,7 +3,7 @@ import { Head, router, useForm, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
 import { numberToWordsFR } from '@/lib/numberToWords';
-import { downloadPdf } from '@/lib/downloadPdf';
+import { openPrintPreview } from '@/lib/printPreview';
 import {
     ArrowDownLeft,
     Building2,
@@ -72,9 +72,7 @@ export default function ReceiptsIndex({
 
     useEffect(() => {
         if (!printBEC) return;
-        void downloadPdf('bon-entree-caisse-print', `${printBEC.numero_piece}.pdf`, {
-            contentWidth: '148mm',
-        }).then(() => setPrintBEC(null));
+        void openPrintPreview('bon-entree-caisse-print').then(() => setPrintBEC(null));
     }, [printBEC]);
 
     const form = useForm<{
