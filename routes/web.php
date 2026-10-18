@@ -17,6 +17,7 @@ use App\Http\Controllers\PettyCashController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ProjectManager\ReportingController;
 use App\Http\Controllers\RequisitionController;
+use App\Http\Controllers\SignatureVerificationController;
 use App\Models\CashRegister;
 use App\Models\Project;
 use Illuminate\Foundation\Application;
@@ -150,6 +151,9 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::patch('/petty-cash/{voucher}/authorize', [PettyCashController::class, 'authorizeVoucher'])->name('petty-cash.authorize');
 
     Route::get('/transport', [PettyCashController::class, 'index'])->name('transport.index');
+    Route::get('/requisitions/{requisition}/pdf', [RequisitionController::class, 'generatePdf'])->name('requisitions.pdf');
+    Route::get('/verify/signature/{hash}', [SignatureVerificationController::class, 'verify'])
+    ->name('signature.verify');
 
     Route::post('/notifications/{id}/mark-read', function (Request $request, $id) {
         DB::table('notifications')

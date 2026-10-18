@@ -1,26 +1,11 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import RequisitionCorrectionForm, { type RequisitionCorrectionData } from '@/Components/RequisitionCorrectionForm';
 import { PageProps } from '@/types';
 import {
-    ShieldCheck,
-    Plus,
-    Eye,
-    Pencil,
-    X,
-    AlertCircle,
-    CheckCircle2,
-    Clock,
-    FileText,
-    Paperclip,
-    Download,
-    Ban,
-    Lock,
-    KeyRound,
-    Loader2,
-    Filter,
-    Search,
+    ShieldCheck, Plus, Eye, X, AlertCircle, CheckCircle2,
+    Paperclip, Filter, PieChart, BarChart3, Search, Check
 } from 'lucide-react';
 
 interface Justificatif {
@@ -51,6 +36,7 @@ interface RequisitionMP {
     id: string;
     numero: string;
     projet: string;
+    project_id?: string;
     initiateurNom: string;
     initiateurRole: string;
     nature: 'Achat' | 'Service';
@@ -80,6 +66,7 @@ interface CashRegisterOption {
 
 interface BudgetLineOption {
     id: string;
+    project_id?: string;
     code: string;
     libelle: string;
     normalizedCode: string;
@@ -88,14 +75,32 @@ interface BudgetLineOption {
     budget_initial: number;
 }
 
+interface PmStats {
+    budget_total: number;
+    budget_solde: number;
+    budget_consomme: number;
+    req_en_attente: number;
+    req_validees: number;
+    req_a_corriger: number;
+}
+
 export default function ProjectManagerDashboard({
     requisitions = [],
     cashRegisters = [],
     budgetLines = [],
+    pmStats = {
+        budget_total: 0,
+        budget_solde: 0,
+        budget_consomme: 0,
+        req_en_attente: 0,
+        req_validees: 0,
+        req_a_corriger: 0,
+    }
 }: {
     requisitions?: RequisitionMP[];
     cashRegisters?: CashRegisterOption[];
     budgetLines?: BudgetLineOption[];
+    pmStats?: PmStats;
 }) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
@@ -108,8 +113,6 @@ export default function ProjectManagerDashboard({
     const [allocations, setAllocations] = useState<Record<string, string>>({});
     const [modeRejet, setModeRejet] = useState<boolean>(false);
     const [motifRejet, setMotifRejet] = useState<string>('');
-
-    // Autocomplete dropdown state
     const [activeInputId, setActiveInputId] = useState<string | null>(null);
 
     const [passwordModalOpen, setPasswordModalOpen] = useState<boolean>(false);
@@ -133,10 +136,12 @@ export default function ProjectManagerDashboard({
         setTimeout(() => setToast(null), 5000);
     };
 
-    const getBudgetLineObject = (code: string) => {
+    const getBudgetLineObject = (code: string, projectId?: string) => {
         if (!code.trim()) return null;
         const normalized = code.trim().toLowerCase();
-        return budgetLines.find((l) => l.normalizedCode === normalized) || null;
+        return budgetLines.find(
+            (l) => l.normalizedCode === normalized && (!projectId || l.project_id === projectId)
+        ) || null;
     };
 
     const demandesFiltrees = useMemo(() => {
@@ -144,6 +149,19 @@ export default function ProjectManagerDashboard({
         if (filterStatut === 'a_corriger') return demandes.filter((d) => d.needsCorrection);
         return demandes.filter((d) => d.statut === filterStatut);
     }, [demandes, filterStatut]);
+
+    const donutData = useMemo(() => {
+        const total = pmStats.req_en_attente + pmStats.req_validees + pmStats.req_a_corriger || 1;
+        const pctValidees = Math.round((pmStats.req_validees / total) * 100);
+        return { total, pctValidees, isEmpty: total === 1 && pmStats.req_validees === 0 && pmStats.req_en_attente === 0 };
+    }, [pmStats]);
+
+    const gaugeData = useMemo(() => {
+        const total = pmStats.budget_total || 1;
+        const pctConsomme = Math.min(100, Math.round((pmStats.budget_consomme / total) * 100));
+        const pctRestant = 100 - pctConsomme;
+        return { pctConsomme, pctRestant, isEmpty: pmStats.budget_total === 0 };
+    }, [pmStats]);
 
     const handleOuvrirArbitrage = (req: RequisitionMP) => {
         setSelectedReq(req);
@@ -173,10 +191,7 @@ export default function ProjectManagerDashboard({
 
         const ligneSansCode = allocationsArray.find((a) => !a.code_allocation);
         if (ligneSansCode) {
-            showToast(
-                'error',
-                'En tant que Manager de Projet, vous devez attribuer un code budgétaire valide à chaque ligne.'
-            );
+            showToast('error', 'Vous devez attribuer un code budgétaire valide à chaque ligne.');
             return;
         }
 
@@ -217,42 +232,30 @@ export default function ProjectManagerDashboard({
                                 ? {
                                       ...d,
                                       statut: 'valide_mp',
-                                        statusCode: 'visa_mp',
-                                        statusLabel: 'Transmis aux Finances',
-                                        canDecide: false,
+                                      statusCode: 'visa_mp',
+                                      statusLabel: 'Transmis aux Finances',
+                                      canDecide: false,
                                       lignes: d.lignes.map((ligne) => {
-                                          const allocation = allocationsArray.find(
-                                              (item) => item.demande_id === ligne.id
-                                          );
-                                          const matched = allocation ? getBudgetLineObject(allocation.code_allocation) : null;
-
-                                          return allocation
-                                              ? {
-                                                    ...ligne,
-                                                    code_allocation: allocation.code_allocation,
-                                                    codeAllBudget: allocation.code_allocation,
-                                                    libelleAllocation: matched?.libelle || 'code non specifie',
-                                                    budget_solde_actuel: matched ? matched.solde : null,
-                                                }
-                                              : ligne;
+                                          const allocation = allocationsArray.find((item) => item.demande_id === ligne.id);
+                                          const matched = allocation ? getBudgetLineObject(allocation.code_allocation, selectedReq.project_id) : null;
+                                          return allocation ? {
+                                              ...ligne,
+                                              code_allocation: allocation.code_allocation,
+                                              codeAllBudget: allocation.code_allocation,
+                                              libelleAllocation: matched?.libelle || 'code non specifie',
+                                              budget_solde_actuel: matched ? matched.solde : null,
+                                          } : ligne;
                                       }),
                                   }
                                 : d
                         )
                     );
-                    showToast(
-                        'success',
-                        `Visa Manager de Projet apposé avec succès sur ${selectedReq.numero}.`
-                    );
+                    showToast('success', `Visa apposé avec succès sur ${selectedReq.numero}.`);
                     setSelectedReq(null);
                     setPasswordSaisi('');
                 },
                 onError: (errors) => {
-                    const message =
-                        (errors as any).pin ||
-                        (errors as any).password ||
-                        Object.values(errors)[0] ||
-                        'Échec de la signature : Code PIN ou mot de passe incorrect.';
+                    const message = (errors as any).pin || (errors as any).password || Object.values(errors)[0] || 'Code PIN ou mot de passe incorrect.';
                     setPinError(message);
                     showToast('error', message);
                 },
@@ -304,6 +307,7 @@ export default function ProjectManagerDashboard({
         setEditingReq({
             id: req.id,
             numero: req.numero,
+            project_id: req.project_id,
             nature: req.nature,
             devise: req.devise,
             caisse: req.caisseAttribuee || req.caisseSouhaitee,
@@ -326,29 +330,16 @@ export default function ProjectManagerDashboard({
             <Head title="Validation Manager de Projet" />
 
             {toast && (
-                <div
-                    className={`fixed bottom-6 right-6 z-[90] p-4 rounded-lg shadow-modal border flex items-center gap-3 text-xs font-semibold ${
-                        toast.type === 'success'
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-red-600 text-white'
-                    }`}
-                >
-                    {toast.type === 'success' ? (
-                        <CheckCircle2 className="w-4 h-4" />
-                    ) : (
-                        <AlertCircle className="w-4 h-4" />
-                    )}
+                <div className={`fixed bottom-6 right-6 z-[90] p-4 rounded-lg shadow-modal border flex items-center gap-3 text-xs font-semibold ${toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'}`}>
+                    {toast.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
                     <p>{toast.message}</p>
-                    <button
-                        onClick={() => setToast(null)}
-                        className="ml-2 p-0.5 rounded hover:bg-white/20 transition"
-                    >
+                    <button onClick={() => setToast(null)} className="ml-2 p-0.5 rounded hover:bg-white/20 transition">
                         <X className="w-3.5 h-3.5" />
                     </button>
                 </div>
             )}
 
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-[#E2E8F0] pb-5">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-[#E2E8F0] pb-5 mb-6">
                 <div>
                     <h1 className="text-xl font-bold text-[#0B192C] flex items-center gap-2">
                         <ShieldCheck className="w-5 h-5 text-[#04326D]" />
@@ -357,7 +348,7 @@ export default function ProjectManagerDashboard({
                     </h1>
                     <p className="text-xs text-gray-500 mt-1">
                         Manager de Projet : <strong className="text-[#0B192C]">{user.name}</strong>{' '}
-                        • Contrôle des besoins, recherche analytique et imputation budgétaire certifiée.
+                        • Contrôle analytique et imputation budgétaire.
                     </p>
                 </div>
 
@@ -366,49 +357,92 @@ export default function ProjectManagerDashboard({
                     className="inline-flex items-center gap-2 bg-[#04326D] hover:bg-[#06428f] text-white px-4 py-2.5 rounded text-xs font-bold shadow-sm transition"
                 >
                     <Plus className="w-4 h-4" strokeWidth={2.5} />
-                    <span>Initier Réquisition Projet</span>
+                    <span>Initier Réquisition</span>
                 </Link>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white border-2 border-amber-300 rounded p-4 shadow-sm">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-amber-900 block mb-1">
-                        En attente de Visa MP
-                    </span>
-                    <p className="text-2xl font-black text-amber-700">
-                        {demandes.filter((d) => d.canDecide).length}{' '}
-                        <span className="text-xs font-normal text-gray-500">dossier(s)</span>
-                    </p>
-                    <p className="text-[11px] text-gray-500 mt-1">Attribution budgétaire requise</p>
+            {/* SECTIONS GRAPHIQUES */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                
+                {/* Graph 1 : Suivi des Réquisitions */}
+                <div className="bg-white border border-[#B2BED6] rounded p-5 shadow-sm space-y-3 flex items-center gap-6">
+                    <div className="flex-1">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5 border-b pb-2 mb-3">
+                            <PieChart className="w-4 h-4 text-[#04326D]" />
+                            <span>Statut des Opérations</span>
+                        </h3>
+                        <div className="space-y-2 text-[11px]">
+                            <div className="flex justify-between items-center">
+                                <span className="flex items-center gap-1.5 text-gray-600"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" />En attente (Arbitrage) :</span>
+                                <strong className="font-mono text-amber-800">{pmStats.req_en_attente}</strong>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="flex items-center gap-1.5 text-gray-600"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />Validées :</span>
+                                <strong className="font-mono text-emerald-800">{pmStats.req_validees}</strong>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="flex items-center gap-1.5 text-gray-600"><span className="w-2.5 h-2.5 rounded-full bg-red-500" />À Corriger :</span>
+                                <strong className="font-mono text-red-800">{pmStats.req_a_corriger}</strong>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
+                        <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+                            <path className={donutData.isEmpty ? "text-gray-200" : "text-amber-500"} strokeWidth="4" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                            {!donutData.isEmpty && (
+                                <path className="text-emerald-500 transition-all duration-700 ease-out" strokeDasharray={`${donutData.pctValidees}, 100`} strokeWidth="4" strokeLinecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                            )}
+                        </svg>
+                        <div className="absolute text-center">
+                            <span className="text-xs font-black font-mono text-[#0B192C] block">{donutData.isEmpty ? '-' : `${donutData.pctValidees}%`}</span>
+                            <span className="text-[7.5px] font-bold uppercase text-gray-400 block -mt-0.5">Validées</span>
+                        </div>
+                    </div>
                 </div>
 
-                <div className="bg-white border border-[#B2BED6] rounded p-4 shadow-sm">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 block mb-1">
-                        Validées (Transmises Finances)
-                    </span>
-                    <p className="text-2xl font-black text-emerald-700">
-                        {demandes.filter((d) => d.statut === 'valide_mp').length}{' '}
-                        <span className="text-xs font-normal text-gray-500">dossier(s)</span>
-                    </p>
-                    <p className="text-[11px] text-gray-500 mt-1">Signées électroniquement</p>
+                {/* Graph 2 : Exécution Budgétaire */}
+                <div className="bg-white border border-[#B2BED6] rounded p-5 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between border-b pb-2.5">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
+                            <BarChart3 className="w-4 h-4 text-emerald-700" />
+                            <span>Exécution Budgétaire du Projet</span>
+                        </h3>
+                    </div>
+                    <div className="space-y-3 pt-1 text-xs">
+                        <div className="flex justify-between items-center text-[11px]">
+                            <span className="text-gray-600">Taux de consommation :</span>
+                            <strong className="font-mono text-sm text-[#04326D]">{gaugeData.pctConsomme}%</strong>
+                        </div>
+
+                        <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden flex relative">
+                            <div className={`${gaugeData.isEmpty ? 'bg-gray-300' : 'bg-emerald-500'} transition-all duration-700`} style={{ width: `${gaugeData.pctConsomme}%` }} title={`Consommé: ${gaugeData.pctConsomme}%`} />
+                            <div className={`${gaugeData.isEmpty ? 'bg-gray-200' : 'bg-[#04326D]'} transition-all duration-700`} style={{ width: `${gaugeData.pctRestant}%` }} title={`Reste: ${gaugeData.pctRestant}%`} />
+                        </div>
+
+                        <div className="flex items-center gap-4 text-[11px]">
+                            <div className="flex-1 p-2 bg-gray-50 border border-gray-100 rounded text-center">
+                                <span className="block text-gray-500 mb-0.5">Budget Initial</span>
+                                <strong className="font-mono text-[#04326D]">${pmStats.budget_total.toLocaleString()}</strong>
+                            </div>
+                            <div className="flex-1 p-2 bg-emerald-50 border border-emerald-100 rounded text-center">
+                                <span className="block text-emerald-700 mb-0.5">Consommé</span>
+                                <strong className="font-mono text-emerald-900">${pmStats.budget_consomme.toLocaleString()}</strong>
+                            </div>
+                            <div className="flex-1 p-2 bg-blue-50 border border-blue-100 rounded text-center">
+                                <span className="block text-[#04326D] mb-0.5">Solde Dispo.</span>
+                                <strong className="font-mono text-[#04326D]">${pmStats.budget_solde.toLocaleString()}</strong>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <div className="bg-white border border-[#B2BED6] rounded p-4 shadow-sm">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 block mb-1">
-                        À corriger
-                    </span>
-                    <p className="text-2xl font-black text-red-700">
-                        {demandes.filter((d) => d.needsCorrection).length}{' '}
-                        <span className="text-xs font-normal text-gray-500">dossier(s)</span>
-                    </p>
-                    <p className="text-[11px] text-gray-500 mt-1">Nécessite révision</p>
-                </div>
             </div>
 
             <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-[#E2E8F0] flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-gray-50/50">
                     <h2 className="text-xs font-bold text-[#0B192C] uppercase tracking-wider">
-                        Demandes du Projet : {user.project?.name}
+                        Liste des Réquisitions
                     </h2>
 
                     <div className="flex items-center gap-2 text-xs">
@@ -416,7 +450,7 @@ export default function ProjectManagerDashboard({
                         <select
                             value={filterStatut}
                             onChange={(e) => setFilterStatut(e.target.value)}
-                            className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C]"
+                            className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold focus:outline-none"
                         >
                             <option value="all">Toutes</option>
                             <option value="en_attente_mp">À arbitrer (Visa MP)</option>
@@ -450,81 +484,86 @@ export default function ProjectManagerDashboard({
                                     </td>
                                 </tr>
                             ) : (
-                                demandesFiltrees.map((req) => (
-                                    <tr key={req.id} className="hover:bg-[#F9F9FF] transition">
-                                        <td className="py-3.5 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
-                                            {req.numero}
-                                        </td>
-                                        <td className="py-3.5 px-4 whitespace-nowrap text-gray-600">
-                                            {req.dateSoumission}
-                                        </td>
-                                        <td className="py-3.5 px-4 whitespace-nowrap">
-                                            <p className="font-bold text-[#0B192C]">{req.initiateurNom}</p>
-                                            <p className="text-[10px] text-gray-400">{req.initiateurRole}</p>
-                                        </td>
-                                        <td className="py-3.5 px-4 whitespace-nowrap font-semibold">
-                                            {req.nature}
-                                        </td>
-                                        <td className="py-3.5 px-4 max-w-xs truncate" title={req.observation}>
-                                            {req.observation || '—'}
-                                        </td>
-                                        <td className="py-3.5 px-4 text-right font-mono font-bold text-sm text-[#0B192C] whitespace-nowrap">
-                                            {req.montantTotal.toLocaleString()} {req.devise}
-                                        </td>
-                                        <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                                            {req.is_urgent ? (
-                                                <span className="bg-red-100 text-red-800 px-2 py-0.5 rounded font-black text-[9px] uppercase">
-                                                    URGENT
+                                demandesFiltrees.map((req) => {
+                                    // SECURITE : Le bouton Arbitrer doit s'afficher si c'est "en_attente_mp"
+                                    const isDecidable = req.canDecide || req.statut === 'en_attente_mp';
+
+                                    return (
+                                        <tr key={req.id} className="hover:bg-[#F9F9FF] transition">
+                                            <td className="py-3.5 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
+                                                {req.numero}
+                                            </td>
+                                            <td className="py-3.5 px-4 whitespace-nowrap text-gray-600">
+                                                {req.dateSoumission}
+                                            </td>
+                                            <td className="py-3.5 px-4 whitespace-nowrap">
+                                                <p className="font-bold text-[#0B192C]">{req.initiateurNom}</p>
+                                                <p className="text-[10px] text-gray-400">{req.initiateurRole}</p>
+                                            </td>
+                                            <td className="py-3.5 px-4 whitespace-nowrap font-semibold">
+                                                {req.nature}
+                                            </td>
+                                            <td className="py-3.5 px-4 max-w-xs truncate" title={req.observation}>
+                                                {req.observation || '—'}
+                                            </td>
+                                            <td className="py-3.5 px-4 text-right font-mono font-bold text-sm text-[#0B192C] whitespace-nowrap">
+                                                {req.montantTotal.toLocaleString()} {req.devise}
+                                            </td>
+                                            <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                                                {req.is_urgent ? (
+                                                    <span className="bg-red-100 text-red-800 px-2 py-0.5 rounded font-black text-[9px] uppercase">
+                                                        URGENT
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-gray-400 text-[10px]">Normal</span>
+                                                )}
+                                            </td>
+                                            <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                                    req.statut === 'a_corriger'
+                                                        ? 'bg-red-50 text-red-800'
+                                                        : req.statut === 'en_attente_mp'
+                                                          ? 'bg-amber-50 text-amber-800'
+                                                          : ['decaisse', 'cloture'].includes(req.statusCode)
+                                                            ? 'bg-emerald-50 text-emerald-800'
+                                                            : 'bg-blue-50 text-[#04326D]'
+                                                }`}>
+                                                    {req.statusLabel}
                                                 </span>
-                                            ) : (
-                                                <span className="text-gray-400 text-[10px]">Normal</span>
-                                            )}
-                                        </td>
-                                        <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                                req.statut === 'a_corriger'
-                                                    ? 'bg-red-50 text-red-800'
-                                                    : req.statut === 'en_attente_mp'
-                                                      ? 'bg-amber-50 text-amber-800'
-                                                      : ['decaisse', 'cloture'].includes(req.statusCode)
-                                                        ? 'bg-emerald-50 text-emerald-800'
-                                                        : 'bg-blue-50 text-[#04326D]'
-                                            }`}>
-                                                {req.statusLabel}
-                                            </span>
-                                        </td>
-                                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                                            <div className="flex items-center justify-end gap-1">
-                                                {req.canEdit && (
+                                            </td>
+                                            <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                                                <div className="flex items-center justify-end gap-1">
+                                                    {req.canEdit && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => openEditModal(req)}
+                                                            className="px-2.5 py-1.5 border border-[#04326D] text-[#04326D] rounded font-semibold text-xs hover:bg-blue-50 transition"
+                                                        >
+                                                            Corriger
+                                                        </button>
+                                                    )}
                                                     <button
                                                         type="button"
-                                                        onClick={() => openEditModal(req)}
-                                                        className="px-2.5 py-1.5 border border-[#04326D] text-[#04326D] rounded font-semibold text-xs hover:bg-blue-50 transition"
+                                                        onClick={() => handleOuvrirArbitrage(req)}
+                                                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs transition"
                                                     >
-                                                        Corriger
+                                                        {isDecidable ? (
+                                                            <>
+                                                                <ShieldCheck className="w-3.5 h-3.5" />
+                                                                <span>Arbitrer & Viser</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Eye className="w-3.5 h-3.5" />
+                                                                <span>Détails</span>
+                                                            </>
+                                                        )}
                                                     </button>
-                                                )}
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleOuvrirArbitrage(req)}
-                                                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs transition"
-                                                >
-                                                    {req.canDecide ? (
-                                                        <>
-                                                            <ShieldCheck className="w-3.5 h-3.5" />
-                                                            <span>Arbitrer & Viser</span>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <Eye className="w-3.5 h-3.5" />
-                                                            <span>Détails</span>
-                                                        </>
-                                                    )}
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
                             )}
                         </tbody>
                     </table>
@@ -534,8 +573,8 @@ export default function ProjectManagerDashboard({
             {/* MODALE D'ARBITRAGE AVEC AUTOCOMPLÉTION & SOLDE DYNAMIQUE */}
             {selectedReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
-                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-4xl w-full p-6 space-y-4 max-h-[92vh] overflow-y-auto animate-slide-down">
-                        <header className="flex items-start justify-between border-b pb-3">
+                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-5xl w-full p-6 space-y-4 max-h-[95vh] flex flex-col animate-slide-down">
+                        <header className="flex items-start justify-between border-b pb-3 shrink-0">
                             <div>
                                 <span className="text-[10px] text-amber-700 font-bold uppercase tracking-wider">
                                     Contrôle Opérationnel & Attribution Budgétaire
@@ -560,22 +599,24 @@ export default function ProjectManagerDashboard({
                         </header>
 
                         {selectedReq.motifRejet && (
-                            <div className="rounded border border-red-200 bg-red-50 p-3 text-xs text-red-900">
+                            <div className="rounded border border-red-200 bg-red-50 p-3 text-xs text-red-900 shrink-0">
                                 <strong>Motif du dernier retour :</strong>
                                 <p className="mt-1 whitespace-pre-wrap">{selectedReq.motifRejet}</p>
                             </div>
                         )}
 
-                        <div>
-                            <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
+                        <div className="flex-1 overflow-visible min-h-0 flex flex-col">
+                            <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 shrink-0">
                                 Imputation des Lignes de Dépenses
                             </h3>
-                            <div className="overflow-x-auto border border-[#B2BED6] rounded">
+                            {/* OVERFLOW-VISIBLE ICI POUR NE PAS COUPER LA LISTE DEROULANTE */}
+                            <div className="border border-[#B2BED6] rounded flex-1 overflow-visible">
                                 <table className="w-full text-left text-xs">
                                     <thead className="bg-[#0B192C] text-white font-bold">
                                         <tr>
                                             <th className="p-2.5">Désignation</th>
-                                            <th className="p-2.5 w-72">Code Allocation & Recherche</th>
+                                            {/* Colonne de 500px pour laisser de la place au dropdown */}
+                                            <th className="p-2.5 w-[500px]">Code Allocation & Recherche</th>
                                             <th className="p-2.5 text-right">Solde Actuel</th>
                                             <th className="p-2.5 text-right">Total Ligne</th>
                                             <th className="p-2.5 text-center">Faisabilité</th>
@@ -585,63 +626,66 @@ export default function ProjectManagerDashboard({
                                     <tbody className="divide-y text-gray-700">
                                         {selectedReq.lignes.map((ligne) => {
                                             const currentCode = allocations[ligne.id] || '';
-                                            const matchedLine = getBudgetLineObject(currentCode);
+                                            const matchedLine = getBudgetLineObject(currentCode, selectedReq.project_id);
                                             const soldeDispo = matchedLine ? matchedLine.solde : ligne.budget_solde_actuel;
                                             const depassement = soldeDispo !== null && soldeDispo !== undefined && ligne.total > soldeDispo;
 
+                                            // FILTRE STRICT PAR PROJECT_ID
                                             const filteredSuggestions = budgetLines.filter((b) => {
+                                                if (selectedReq.project_id && b.project_id && b.project_id !== selectedReq.project_id) {
+                                                    return false;
+                                                }
                                                 const q = currentCode.trim().toLowerCase();
                                                 if (!q) return false;
                                                 return b.code.toLowerCase().includes(q) || b.libelle.toLowerCase().includes(q);
                                             });
 
+                                            // Vérification Front-End
+                                            const isDecidable = selectedReq.canDecide || selectedReq.statut === 'en_attente_mp';
+
                                             return (
                                                 <tr key={ligne.id} className={depassement ? 'bg-red-50/60' : ''}>
-                                                    <td className="p-2.5 font-medium max-w-xs">{ligne.activite}</td>
+                                                    <td className="p-2.5 font-medium max-w-[200px] truncate" title={ligne.activite}>{ligne.activite}</td>
                                                     <td className="p-2.5 relative">
-                                                        {selectedReq.canDecide ? (
+                                                        {isDecidable ? (
                                                             <div className="relative">
+                                                                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2 top-2 pointer-events-none" />
                                                                 <input
                                                                     type="text"
                                                                     placeholder="Tapez (ex: 2.2)..."
                                                                     value={currentCode}
                                                                     onFocus={() => setActiveInputId(ligne.id)}
                                                                     onChange={(e) => {
-                                                                        setAllocations({
-                                                                            ...allocations,
-                                                                            [ligne.id]: e.target.value,
-                                                                        });
+                                                                        setAllocations({ ...allocations, [ligne.id]: e.target.value });
                                                                         setActiveInputId(ligne.id);
                                                                     }}
-                                                                    className="w-full border border-[#04326D] rounded p-1.5 text-xs font-mono font-bold text-[#04326D] bg-white focus:outline-none"
+                                                                    className="w-full pl-7 pr-2 border border-[#04326D] rounded p-1.5 text-xs font-mono font-bold text-[#04326D] bg-white focus:outline-none"
                                                                     required
                                                                 />
 
-                                                                {/* Dropdown autocomplétion dynamique */}
+                                                                {/* LISTE DÉROULANTE GÉANTE OVERFLOW VISIBLE */}
                                                                 {activeInputId === ligne.id && filteredSuggestions.length > 0 && (
-                                                                    <div className="absolute left-0 top-full mt-1 w-80 bg-white border border-[#04326D] rounded shadow-xl z-30 max-h-48 overflow-y-auto divide-y text-xs">
+                                                                    <div className="absolute left-0 top-full mt-1 w-[500px] bg-white border-2 border-[#04326D] rounded shadow-2xl z-[200] max-h-72 overflow-y-auto divide-y text-xs">
                                                                         {filteredSuggestions.map((sug) => (
                                                                             <button
                                                                                 key={sug.id}
                                                                                 type="button"
                                                                                 onClick={() => {
-                                                                                    setAllocations({
-                                                                                        ...allocations,
-                                                                                        [ligne.id]: sug.code,
-                                                                                    });
+                                                                                    setAllocations({ ...allocations, [ligne.id]: sug.code });
                                                                                     setActiveInputId(null);
                                                                                 }}
-                                                                                className="w-full p-2 text-left hover:bg-blue-50 flex flex-col justify-between"
+                                                                                className="w-full p-2.5 text-left hover:bg-blue-50 flex flex-col justify-between transition"
                                                                             >
-                                                                                <div className="flex items-center justify-between">
-                                                                                    <span className="font-mono font-black text-[#04326D]">
-                                                                                        {sug.code}
-                                                                                    </span>
-                                                                                    <span className="font-mono text-[10px] font-bold text-emerald-700">
+                                                                                <div className="flex items-center justify-between mb-1">
+                                                                                    <div className="flex items-center gap-1.5">
+                                                                                        <span className="font-mono font-black text-[#04326D] text-[13px]">{sug.code}</span>
+                                                                                        {sug.code === currentCode && <Check className="w-3 h-3 text-[#04326D]" />}
+                                                                                    </div>
+                                                                                    <span className="font-mono text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
                                                                                         Solde: {sug.solde.toLocaleString()} {sug.devise}
                                                                                     </span>
                                                                                 </div>
-                                                                                <span className="text-[10px] text-gray-600 truncate mt-0.5">
+                                                                                <span className="text-[11px] text-gray-700 font-medium break-words">
                                                                                     {sug.libelle}
                                                                                 </span>
                                                                             </button>
@@ -649,8 +693,8 @@ export default function ProjectManagerDashboard({
                                                                     </div>
                                                                 )}
 
-                                                                <span className="text-[10px] text-gray-500 block truncate mt-1">
-                                                                    {matchedLine ? matchedLine.libelle : (ligne.libelleAllocation || 'Aucune ligne sélectionnée')}
+                                                                <span className="text-[10px] text-gray-500 block truncate mt-1" title={matchedLine ? matchedLine.libelle : (ligne.libelleAllocation || '')}>
+                                                                    {matchedLine ? <span className="text-emerald-700">✓ {matchedLine.libelle}</span> : (ligne.libelleAllocation || 'Aucune ligne sélectionnée')}
                                                                 </span>
                                                             </div>
                                                         ) : (
@@ -658,7 +702,7 @@ export default function ProjectManagerDashboard({
                                                                 <span className="font-mono font-bold text-[#04326D] block">
                                                                     {ligne.code_allocation || ligne.codeAllBudget}
                                                                 </span>
-                                                                <span className="text-[10px] text-gray-500 block truncate">
+                                                                <span className="text-[10px] text-gray-500 block truncate" title={ligne.libelleAllocation}>
                                                                     {ligne.libelleAllocation}
                                                                 </span>
                                                             </div>
@@ -700,13 +744,10 @@ export default function ProjectManagerDashboard({
                                                                                 className="inline-flex items-center gap-1 font-semibold text-[#04326D] underline hover:text-blue-800"
                                                                             >
                                                                                 <Paperclip className="h-3 w-3 shrink-0" />
-                                                                                <span>{file.scan}</span>
+                                                                                <span className="truncate max-w-[100px]">{file.scan}</span>
                                                                             </a>
                                                                         ) : (
-                                                                            <span className="text-gray-500">{file.scan}</span>
-                                                                        )}
-                                                                        {file.description && file.description !== file.scan && (
-                                                                            <span className="block text-gray-500">{file.description}</span>
+                                                                            <span className="text-gray-500 truncate max-w-[100px] block">{file.scan}</span>
                                                                         )}
                                                                     </li>
                                                                 ))}
@@ -734,8 +775,8 @@ export default function ProjectManagerDashboard({
                             </div>
                         </div>
 
-                        {selectedReq.canDecide && (
-                            <div className="border-t border-[#E2E8F0] pt-4 space-y-4">
+                        {(selectedReq.canDecide || selectedReq.statut === 'en_attente_mp') && (
+                            <div className="border-t border-[#E2E8F0] pt-4 space-y-4 shrink-0">
                                 {!modeRejet ? (
                                     <>
                                         <div className="p-3 bg-blue-50 border border-blue-200 rounded text-xs space-y-1">
@@ -760,7 +801,7 @@ export default function ProjectManagerDashboard({
                                             <button
                                                 type="button"
                                                 onClick={() => setModeRejet(true)}
-                                                className="px-3 py-2 border border-red-300 text-red-600 rounded text-xs font-bold hover:bg-red-50"
+                                                className="px-3 py-2 border border-red-300 text-red-600 rounded text-xs font-bold hover:bg-red-50 transition"
                                             >
                                                 Rejeter la demande
                                             </button>
@@ -777,7 +818,7 @@ export default function ProjectManagerDashboard({
                                                     type="button"
                                                     onClick={handleDeclencherApprobation}
                                                     disabled={!caisseChoisie}
-                                                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow"
+                                                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition"
                                                 >
                                                     <ShieldCheck className="w-4 h-4" />
                                                     <span>Valider & Signer (Visa MP)</span>
@@ -827,17 +868,17 @@ export default function ProjectManagerDashboard({
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in">
                     <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
                         <div className="text-center border-b pb-3">
-                            <Lock className="w-8 h-8 text-[#04326D] mx-auto mb-1" />
+                            <ShieldCheck className="w-8 h-8 text-[#04326D] mx-auto mb-1" />
                             <h3 className="text-sm font-bold uppercase text-[#0B192C]">
                                 Signature Certifiée du Visa MP
                             </h3>
                             <p className="text-[11px] text-gray-500">
-                                Signataire : <strong>{user.name}</strong> (Manager de Projet)
+                                Signataire : <strong>{user.name}</strong>
                             </p>
                         </div>
 
                         {pinError && (
-                            <div className="p-2 bg-red-50 border border-red-300 text-red-800 rounded text-xs">
+                            <div className="p-2 bg-red-50 border border-red-300 text-red-800 rounded text-xs font-bold text-center">
                                 {pinError}
                             </div>
                         )}
@@ -849,10 +890,10 @@ export default function ProjectManagerDashboard({
                                 </label>
                                 <input
                                     type="password"
-                                    placeholder="Code PIN"
+                                    placeholder="••••"
                                     value={passwordSaisi}
                                     onChange={(e) => setPasswordSaisi(e.target.value)}
-                                    className="w-full border border-[#B2BED6] rounded p-2 text-xs font-mono text-center tracking-widest focus:outline-none focus:border-[#04326D]"
+                                    className="w-full border border-[#B2BED6] rounded p-2 text-xl font-mono text-center tracking-widest focus:outline-none focus:border-[#04326D]"
                                     autoFocus
                                     required
                                 />
@@ -871,7 +912,7 @@ export default function ProjectManagerDashboard({
                                     disabled={signingLoading}
                                     className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow"
                                 >
-                                    {signingLoading ? 'Signature…' : 'Signer & Valider'}
+                                    {signingLoading ? 'Signature en cours…' : 'Signer & Valider'}
                                 </button>
                             </div>
                         </form>
@@ -879,14 +920,17 @@ export default function ProjectManagerDashboard({
                 </div>
             )}
 
+            {/* FORMULAIRE DE CORRECTION INTEGRE */}
             {editingReq && (
                 <RequisitionCorrectionForm
                     key={editingReq.id}
                     requisition={editingReq}
+                    budgetLines={budgetLines}
                     onClose={() => setEditingReq(null)}
                     onSuccess={() => {
-                        showToast('success', `Réquisition ${editingReq.numero} corrigée et transmise aux Finances.`);
+                        showToast('success', `Réquisition corrigée et re-soumise.`);
                         setEditingReq(null);
+                        router.reload();
                     }}
                 />
             )}

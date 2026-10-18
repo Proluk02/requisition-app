@@ -225,10 +225,10 @@ function BudgetLineSearchPicker({
                 )}
             </div>
 
-            {/* Menu d'autocomplétion filtré en direct */}
+            {/* Menu d'autocomplétion GÉANT (Z-Index + Width) */}
             {isOpen && (
-                <div className="absolute left-0 top-full mt-1 w-96 bg-white border border-[#04326D] rounded-lg shadow-2xl z-50 max-h-56 overflow-y-auto divide-y divide-gray-100 text-xs">
-                    <div className="p-2 bg-gray-50 text-[10px] text-gray-500 font-bold uppercase tracking-wider flex justify-between">
+                <div className="absolute left-0 top-full mt-1 w-[500px] bg-white border-2 border-[#04326D] rounded-lg shadow-2xl z-[200] max-h-72 overflow-y-auto divide-y divide-gray-100 text-xs">
+                    <div className="p-2 bg-gray-50 text-[10px] text-gray-500 font-bold uppercase tracking-wider flex justify-between sticky top-0 z-10">
                         <span>Lignes trouvées ({matchingLines.length})</span>
                         <span>Solde disponible</span>
                     </div>
@@ -249,30 +249,30 @@ function BudgetLineSearchPicker({
                                         onSelectCode(line.code);
                                         setIsOpen(false);
                                     }}
-                                    className={`w-full p-2.5 text-left transition flex flex-col gap-0.5 ${
+                                    className={`w-full p-2.5 text-left transition flex flex-col gap-1 ${
                                         isSelected ? 'bg-blue-50/80' : 'hover:bg-slate-50'
                                     }`}
                                 >
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-1.5">
-                                            <span className="font-mono font-bold text-[#04326D]">
+                                            <span className="font-mono font-black text-[#04326D] text-[13px]">
                                                 {line.code}
                                             </span>
-                                            {isSelected && <Check className="w-3 h-3 text-[#04326D]" />}
+                                            {isSelected && <Check className="w-3.5 h-3.5 text-[#04326D]" />}
                                         </div>
                                         <span
-                                            className={`font-mono text-[11px] font-bold ${
-                                                isEnough ? 'text-emerald-700' : 'text-red-600'
+                                            className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded ${
+                                                isEnough ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
                                             }`}
                                         >
                                             {money(line.solde, line.devise || devise)}
                                         </span>
                                     </div>
-                                    <p className="text-[11px] text-gray-600 line-clamp-1">
+                                    <p className="text-[11px] text-gray-700 whitespace-normal">
                                         {line.libelle}
                                     </p>
-                                    <div className="flex justify-between items-center text-[10px] pt-0.5">
-                                        <span className="text-gray-400">
+                                    <div className="flex justify-between items-center text-[10px] pt-1">
+                                        <span className="text-gray-500">
                                             Initial : {money(line.budget_initial, line.devise || devise)}
                                         </span>
                                         {isEnough ? (
@@ -294,12 +294,12 @@ function BudgetLineSearchPicker({
 
             {/* Fiche d'impact financier temps réel sous l'input */}
             {activeLine ? (
-                <div className="p-1.5 rounded bg-gray-50 border border-gray-200 text-[10.5px] space-y-0.5">
+                <div className="p-1.5 rounded bg-gray-50 border border-gray-200 text-[10.5px] space-y-0.5 mt-1">
                     <p className="font-semibold text-gray-800 line-clamp-1" title={activeLine.libelle}>
                         {activeLine.libelle}
                     </p>
                     <div className="flex items-center justify-between text-gray-600 pt-0.5 border-t border-gray-200">
-                        <span>Solde actuel : <strong className="font-mono">{money(activeLine.solde, devise)}</strong></span>
+                        <span>Solde actuel : <strong className="font-mono text-[#0B192C]">{money(activeLine.solde, devise)}</strong></span>
                         <span className={isOverdraft ? 'text-red-700 font-bold' : 'text-emerald-700 font-bold'}>
                             {isOverdraft
                                 ? `⚠️ Déficit : ${money(Math.abs(soldeRestant!), devise)}`
@@ -308,7 +308,7 @@ function BudgetLineSearchPicker({
                     </div>
                 </div>
             ) : (
-                <span className="text-[10px] text-gray-400 italic block">
+                <span className="text-[10px] text-gray-400 italic block mt-1">
                     Aucune ligne valide sélectionnée
                 </span>
             )}
@@ -380,6 +380,7 @@ export default function FinanceDashboard({
         setCorrecting({
             id: item.id,
             numero: item.numero,
+            project_id: item.project_id,
             nature: item.nature,
             devise: item.devise,
             caisse: item.caisseAttribuee || 'Caisse principale',
@@ -1159,8 +1160,8 @@ export default function FinanceDashboard({
             {/* MODALE D'EXAMEN & D'IMPUTATION AVEC FILTRAGE REACT INSTANTANÉ */}
             {selected && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
-                    <div className="w-full max-w-5xl max-h-[92vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-4 animate-slide-down">
-                        <header className="flex items-start justify-between border-b pb-3">
+                    <div className="w-full max-w-6xl max-h-[92vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-4 animate-slide-down flex flex-col">
+                        <header className="flex items-start justify-between border-b pb-3 shrink-0">
                             <div>
                                 <span className="text-[10px] uppercase font-bold text-[#F58F20] tracking-wider">
                                     Contrôle Budgétaire & Visa Financier (Étape 2)
@@ -1183,7 +1184,7 @@ export default function FinanceDashboard({
 
                         {/* Choix et Modification directe de la Caisse par le MF */}
                         {selected.canDecide && (
-                            <div className="p-3 bg-blue-50 border border-blue-200 rounded flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                            <div className="p-3 bg-blue-50 border border-blue-200 rounded flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shrink-0">
                                 <div>
                                     <strong className="text-[#04326D] block">Caisse d'imputation et de décaissement</strong>
                                     <span className="text-gray-600 text-[11px]">
@@ -1205,14 +1206,14 @@ export default function FinanceDashboard({
                         )}
 
                         {selected.observation && (
-                            <div className="p-3 bg-amber-50 border-l-4 border-[#F58F20] text-xs text-gray-800 rounded-r">
+                            <div className="p-3 bg-amber-50 border-l-4 border-[#F58F20] text-xs text-gray-800 rounded-r shrink-0">
                                 <strong>Observation :</strong> {selected.observation}
                             </div>
                         )}
 
                         {/* Tableau des lignes avec autocomplétion & filtrage dynamique */}
-                        <div>
-                            <div className="flex items-center justify-between mb-2">
+                        <div className="flex-1 overflow-visible min-h-0 flex flex-col">
+                            <div className="flex items-center justify-between mb-2 shrink-0">
                                 <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
                                     Contrôle et Ajustement des Imputations Budgétaires
                                 </h3>
@@ -1224,12 +1225,13 @@ export default function FinanceDashboard({
                                 )}
                             </div>
 
-                            <div className="overflow-x-auto border border-gray-200 rounded">
+                            <div className="border border-[#B2BED6] rounded flex-1 overflow-visible">
                                 <table className="w-full text-left text-xs">
                                     <thead className="bg-[#0B192C] text-white font-bold">
                                         <tr>
                                             <th className="p-2.5">Désignation</th>
-                                            <th className="p-2.5 w-80">Code Imputé & Recherche Front-End</th>
+                                            {/* Colonne de 500px pour laisser place à la liste déroulante */}
+                                            <th className="p-2.5 w-[500px]">Code Imputé & Recherche Front-End</th>
                                             <th className="p-2.5 text-right">Solde Disponible</th>
                                             <th className="p-2.5 text-right">Total Ligne</th>
                                             <th className="p-2.5 text-center">Faisabilité</th>
@@ -1245,8 +1247,8 @@ export default function FinanceDashboard({
 
                                             return (
                                                 <tr key={line.id} className={depassement ? 'bg-red-50/60' : ''}>
-                                                    <td className="p-2.5 font-medium max-w-xs">{line.activite}</td>
-                                                    <td className="p-2.5">
+                                                    <td className="p-2.5 font-medium max-w-[200px] truncate" title={line.activite}>{line.activite}</td>
+                                                    <td className="p-2.5 relative">
                                                         {selected.canDecide ? (
                                                             <BudgetLineSearchPicker
                                                                 currentCode={currentCode}
@@ -1266,7 +1268,7 @@ export default function FinanceDashboard({
                                                                 <span className="font-mono font-bold text-[#04326D] block">
                                                                     {line.codeAllocation || line.codeBudget || 'Non attribué'}
                                                                 </span>
-                                                                <span className="text-[10px] text-gray-500 block truncate">
+                                                                <span className="text-[10px] text-gray-500 block truncate" title={line.libelleAllocation || ''}>
                                                                     {line.libelleAllocation || 'Non assigné'}
                                                                 </span>
                                                             </div>
@@ -1279,7 +1281,7 @@ export default function FinanceDashboard({
                                                             <span className="text-gray-400 font-normal">Non défini</span>
                                                         )}
                                                     </td>
-                                                    <td className="p-2.5 text-right font-mono font-bold whitespace-nowrap">
+                                                    <td className="p-2.5 text-right font-mono font-bold whitespace-nowrap text-[#0B192C]">
                                                         {money(line.total, selected.devise)}
                                                     </td>
                                                     <td className="p-2.5 text-center whitespace-nowrap">
@@ -1331,7 +1333,7 @@ export default function FinanceDashboard({
                         </div>
 
                         {selected.canDecide && (
-                            <div className="border-t pt-4 space-y-3">
+                            <div className="border-t pt-4 space-y-3 shrink-0">
                                 {!rejecting ? (
                                     <div className="flex items-center justify-between">
                                         <button
@@ -1541,6 +1543,7 @@ export default function FinanceDashboard({
                 <RequisitionCorrectionForm
                     key={correcting.id}
                     requisition={correcting}
+                    budgetLines={allBudgetLines}
                     onClose={() => setCorrecting(null)}
                     onSuccess={() => {
                         setRequisitions((items) => items.filter((item) => item.id !== correcting.id));

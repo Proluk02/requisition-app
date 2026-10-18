@@ -17,6 +17,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\Support\Facades\Storage;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Endroid\QrCode\QrCode;
+use Endroid\QrCode\Writer\PngWriter;
+use Endroid\QrCode\Encoding\Encoding;
+use Endroid\QrCode\ErrorCorrectionLevel;
+use Endroid\QrCode\RoundBlockSizeMode;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 
@@ -1100,5 +1106,45 @@ class RequisitionController extends Controller
             'cloture' => 'cloture',
             default => 'brouillon',
         };
+    }
+
+    /**
+     * Génère un QR code PNG en base64 contenant l'URL de vérification.
+     * Compatible DomPDF (image inline data URI).
+     */
+    protected function generateQrDataUri(string $hash): string
+    {
+        $verificationUrl = route('signature.verify', ['hash' => $hash]);
+
+        $qrCode = new QrCode(
+            data: $verificationUrl,
+            encoding: new Encoding('UTF-8'),
+            errorCorrectionLevel: ErrorCorrectionLevel::Medium,
+            size: 140,
+            margin: 2,
+            roundBlockSizeMode: RoundBlockSizeMode::Margin,
+        );
+
+        $writer = new PngWriter();
+        $result = $writer->write($qrCode);
+
+        return $result->getDataUri();
+    }
+
+    public function generatePdf(Requisition $requisition)
+    {
+        $requisition->load([
+            'demandes.justificatifs',
+            'signatures.user',
+            'project',
+            'user',
+        ]);
+
+        $pdf = Pdf::loadView('pdf.requisition', compact('requisition'))
+            ->setPaper('a4', 'landscape'); 
+
+        $nomFichier = 'Requisition_' . str_replace('/', '-', $requisition->numero_requisition) . '.pdf';
+
+        return $pdf->download($nomFichier);
     }
 }

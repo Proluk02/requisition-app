@@ -8,7 +8,6 @@ use App\Models\CashRegisterSession;
 use App\Models\Demande;
 use App\Models\Project;
 use App\Models\Requisition;
-use App\Models\RequisitionSignature;
 use App\Models\Site;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -38,7 +37,7 @@ class DashboardController extends Controller
         }
 
         if ($user->hasRole('project_manager')) {
-            $requisitionsQuery = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
+            $requisitionsQuery = clone Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
                 ->where('project_id', $user->project_id)
                 ->orderByDesc('created_at');
 
@@ -46,15 +45,32 @@ class DashboardController extends Controller
                 $requisitionsQuery->whereRaw('1 = 0');
             }
 
-            $budgetLines = BudgetLine::query()
+            $requisitions = $requisitionsQuery->get();
+
+            // Strictement filtré sur le projet du Manager
+            $budgetLines = clone BudgetLine::query()
                 ->where('project_id', $user->project_id)
-                ->get(['id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
+                ->get(['id', 'project_id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
                 ->keyBy(fn (BudgetLine $line) => BudgetLine::normalizeCode($line->code));
 
+            $budgetTotal = $budgetLines->sum('budget_initial');
+            $budgetSolde = $budgetLines->sum('solde');
+            $budgetConsomme = $budgetTotal - $budgetSolde;
+
+            $pmStats = [
+                'budget_total' => $budgetTotal,
+                'budget_solde' => $budgetSolde,
+                'budget_consomme' => $budgetConsomme,
+                'req_en_attente' => $requisitions->whereIn('status', ['draft', 'returned_to_project_manager'])->count(),
+                'req_validees' => $requisitions->whereNotIn('status', ['draft', 'returned_to_project_manager', 'rejetee', 'returned_to_beneficiary', 'returned_to_urgent_initiator'])->count(),
+                'req_a_corriger' => $requisitions->whereIn('status', ['returned_to_beneficiary', 'returned_to_urgent_initiator'])->count(),
+            ];
+
             return Inertia::render('ProjectManager/Dashboard', [
-                'requisitions' => $this->buildProjectManagerRequisitionList($requisitionsQuery->get(), $user->id, $budgetLines),
+                'requisitions' => $this->buildProjectManagerRequisitionList($requisitions, $user->id, $budgetLines),
                 'budgetLines' => $budgetLines->values()->map(fn (BudgetLine $line) => [
                     'id' => $line->id,
+                    'project_id' => $line->project_id, // ID DU PROJET AJOUTÉ ICI
                     'code' => $line->code,
                     'libelle' => $line->libelle,
                     'normalizedCode' => BudgetLine::normalizeCode($line->code),
@@ -66,6 +82,7 @@ class DashboardController extends Controller
                     ->where('is_active', true)
                     ->orderBy('name')
                     ->get(['id', 'name', 'devise']),
+                'pmStats' => $pmStats,
             ]);
         }
 
@@ -155,6 +172,7 @@ class DashboardController extends Controller
                 'id' => (string) $r->id,
                 'numero' => $r->numero_requisition,
                 'projet' => $r->projet,
+                'project_id' => $r->project_id,
                 'initiateurNom' => $r->user?->name ?? 'Inconnu',
                 'initiateurRole' => $r->user?->role ?? 'Staff',
                 'nature' => $r->nature_requisition,
@@ -268,6 +286,7 @@ class DashboardController extends Controller
                 'id' => (string) $r->id,
                 'numero' => $r->numero_requisition,
                 'projet' => $r->projet,
+                'project_id' => $r->project_id,
                 'demandeurNom' => $r->user?->name ?? 'Agent',
                 'nature' => $r->nature_requisition,
                 'montantTotal' => (float) $r->montant_total,
@@ -289,9 +308,6 @@ class DashboardController extends Controller
         return $this->renderFinanceDashboard($request->user());
     }
 
-    /**
-     * Dashboard Manager Finance enrichi : contrôle budgétaire absolu et gestion des attributions.
-     */
     private function renderFinanceDashboard(User $user)
     {
         $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
@@ -300,7 +316,6 @@ class DashboardController extends Controller
 
         $budgetLines = BudgetLine::all()->keyBy(fn ($b) => $b->project_id . '_' . $b->code);
 
-        // Transmission intégrale de toutes les lignes budgétaires avec soldes réels pour le Front-End
         $allBudgetLines = BudgetLine::query()
             ->orderBy('code')
             ->get(['id', 'project_id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
@@ -447,6 +462,7 @@ class DashboardController extends Controller
                 'id' => (string) $r->id,
                 'numero' => $r->numero_requisition,
                 'projet' => $r->projet,
+                'project_id' => $r->project_id,
                 'initiateurNom' => $r->user?->name ?? 'Inconnu',
                 'nature' => $r->nature_requisition,
                 'devise' => $r->devise,
@@ -469,6 +485,7 @@ class DashboardController extends Controller
                 'id' => (string) $r->id,
                 'numero' => $r->numero_requisition,
                 'projet' => $r->projet,
+                'project_id' => $r->project_id,
                 'initiateurNom' => $r->user?->name ?? 'Inconnu',
                 'initiateurRole' => $r->user?->role ?? 'Staff',
                 'nature' => $r->nature_requisition,
@@ -564,6 +581,7 @@ class DashboardController extends Controller
                 'code' => $r->numero_requisition,
                 'motif' => $r->observation ?: 'Aucun motif',
                 'projet' => $r->projet,
+                'project_id' => $r->project_id,
                 'is_urgent' => (bool) $r->is_urgent,
                 'dateSoumission' => $r->created_at?->format('d M Y') ?? '',
                 'montant' => number_format($r->montant_total, 2, '.', ' ') . ' ' . $r->devise,
@@ -598,6 +616,7 @@ class DashboardController extends Controller
                 'id' => (string) $r->id,
                 'numero' => $r->numero_requisition,
                 'projet' => $r->projet,
+                'project_id' => $r->project_id,
                 'initiateurNom' => $r->user?->name ?? 'Inconnu',
                 'initiateurRole' => $r->user?->role ?? 'Staff',
                 'nature' => $r->nature_requisition,

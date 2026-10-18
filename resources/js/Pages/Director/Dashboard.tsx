@@ -12,7 +12,7 @@ import RequisitionDetailModal from '@/Components/Director/RequisitionDetailModal
 import type { RequisitionSuivi } from '@/types/requisitionsList';
 import { numberToWordsFR } from '@/lib/numberToWords';
 import { openPrintPreview } from '@/lib/printPreview';
-import { Calendar, Eye, Printer, ShieldCheck, PieChart, BarChart3, Activity } from 'lucide-react';
+import { Calendar, Eye, Printer, Download, ShieldCheck, PieChart, BarChart3, Activity } from 'lucide-react';
 
 interface WorkflowLevel {
     step: number;
@@ -157,7 +157,7 @@ export default function DirectorDashboard({
         const decaisseUSD = caissesStats.reduce((sum, c) => sum + c.decaisse_usd, 0);
         const pctDecaisse = volumeUSD > 0 ? Math.min(100, Math.round((decaisseUSD / totalUSD) * 100)) : 0;
         const pctRestant = volumeUSD > 0 ? 100 - pctDecaisse : 100;
-        
+
         return { totalUSD, decaisseUSD, pctDecaisse, pctRestant, isEmpty: volumeUSD === 0 };
     }, [volumeUSD, caissesStats]);
 
@@ -207,17 +207,6 @@ export default function DirectorDashboard({
         );
     };
 
-    const handlePrint = (req: RequisitionDirectrice) => {
-        setPrintReq(req);
-    };
-
-    useEffect(() => {
-        if (!printReq) return;
-
-        void openPrintPreview('bon-pasteur-print-zone')
-            .then(() => setPrintReq(null));
-    }, [printReq]);
-
     const handleReject = (event: React.FormEvent) => {
         event.preventDefault();
         if (!rejectReq || !rejectionReason.trim()) return;
@@ -244,6 +233,31 @@ export default function DirectorDashboard({
             },
         );
     };
+
+    // 1. Ouvre le composant HTML pour l'aperçu du navigateur
+    const handlePrintPreview = (req: RequisitionDirectrice) => {
+        setPrintReq(req);
+    };
+
+    // 2. Téléchargement direct du PDF sans page blanche intermédiaire
+    const handleDownloadPdf = (req: RequisitionDirectrice) => {
+        // On crée un lien <a> invisible avec l'attribut download pour forcer le téléchargement
+        const url = route('requisitions.pdf', req.id);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `requisition-${req.numero}.pdf`;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    // Lance l'aperçu quand les données sont prêtes dans le DOM
+    useEffect(() => {
+        if (!printReq) return;
+        void openPrintPreview('bon-pasteur-print-zone')
+            .then(() => setPrintReq(null));
+    }, [printReq]);
 
     const printRequisition = printReq ? {
         id: printReq.id,
@@ -513,7 +527,7 @@ export default function DirectorDashboard({
                             ) : (
                                 timelineReqs.map((req) => {
                                     const heightPct = Math.max((req.montantTotal / maxTimelineAmount) * 100, 2);
-                                    
+
                                     // Code couleur selon le statut
                                     let barColor = 'bg-gray-400';
                                     if (req.is_decaissee) barColor = 'bg-emerald-500';
@@ -532,7 +546,7 @@ export default function DirectorDashboard({
                                                 </span>
                                                 <span className="text-gray-300 block mt-1 truncate">{req.projet}</span>
                                             </div>
-                                            
+
                                             {/* La Barre */}
                                             <div
                                                 className={`w-full max-w-[2rem] rounded-t-sm transition-all duration-700 ease-out hover:opacity-80 cursor-pointer ${barColor}`}
@@ -771,9 +785,14 @@ export default function DirectorDashboard({
                                                         icon={<Eye className="w-4 h-4" />}
                                                     />
                                                     <IconButton
-                                                        title="Imprimer"
-                                                        onClick={() => handlePrint(req)}
+                                                        title="Aperçu avant impression"
+                                                        onClick={() => handlePrintPreview(req)}
                                                         icon={<Printer className="w-4 h-4" />}
+                                                    />
+                                                    <IconButton
+                                                        title="Télécharger le PDF"
+                                                        onClick={() => handleDownloadPdf(req)}
+                                                        icon={<Download className="w-4 h-4" />}
                                                     />
                                                 </div>
                                             </td>
@@ -790,7 +809,7 @@ export default function DirectorDashboard({
                 open={!!detailReq}
                 requisition={detailReq}
                 onClose={() => setDetailReq(null)}
-                onPrint={(req) => handlePrint(req as RequisitionDirectrice)}
+                onPrint={(req) => handlePrintPreview(req as RequisitionDirectrice)}
             />
 
             <PinSignatureModal

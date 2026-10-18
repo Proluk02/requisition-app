@@ -30,6 +30,8 @@
         "esbuild@0.25.12": true
     },
     "dependencies": {
-        "lucide-react": "^1.48.0"
+        "html2pdf.js": "^0.14.0",
+        "lucide-react": "^1.48.0",
+        "qrcode.react": "^4.2.0"
     }
 }
