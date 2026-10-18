@@ -371,7 +371,10 @@ class RequisitionController extends Controller
         $numeroChronologique = sprintf('%s/%s/%03d', $initialesProjet, $moisCourant, $ordre);
 
         $isUrgent = $request->boolean('is_urgent');
-        $initialStatus = $isUrgent ? 'urgent_direction' : ($user->hasRole('project_manager') ? 'visa_mp' : 'draft');
+        
+        // MODIFICATION ICI : On force le cursus normal pour les urgences
+        // On ne l'envoie plus en 'urgent_direction'.
+        $initialStatus = $user->hasRole('project_manager') ? 'visa_mp' : 'draft';
 
         $requisition = Requisition::create([
             'user_id' => $user->id,
@@ -395,7 +398,7 @@ class RequisitionController extends Controller
             $user,
             'initiateur',
             'submitted',
-            $isUrgent ? 'Soumission URGENTE' : 'Soumission initiale'
+            $isUrgent ? 'Soumission URGENTE (Circuit normal prioritaire)' : 'Soumission initiale'
         );
 
         $this->notifierUtilisateur(
@@ -551,8 +554,9 @@ class RequisitionController extends Controller
                 $this->notifierRole(
                     roleCible: 'finance',
                     projectId: null,
-                    titre: 'Nouvelle réquisition pour contrôle budgétaire',
-                    message: "La réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->projet}) est en attente de visa financier."
+                    titre: (bool) $lockedRequisition->is_urgent ? 'URGENT : Réquisition pour contrôle' : 'Nouvelle réquisition pour contrôle budgétaire',
+                    message: "La réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->projet}) est en attente de visa financier.",
+                    urgent: (bool) $lockedRequisition->is_urgent
                 );
 
                 return;
@@ -622,12 +626,10 @@ class RequisitionController extends Controller
             abort_unless($lockedRequisition->status === 'visa_mp', 403, 'Cette réquisition n’est plus en attente de visa financier.');
 
             if ($validated['decision'] === 'approve') {
-                // 1. Mise à jour de la caisse si modifiée par le Manager Finance
                 if (! empty($validated['caisse_decaissement'])) {
                     $lockedRequisition->caisse_decaissement = $validated['caisse_decaissement'];
                 }
 
-                // 2. Mise à jour ou correction des lignes budgétaires par le Manager Finance
                 if (! empty($validated['allocations'])) {
                     $demandes = $lockedRequisition->demandes()->lockForUpdate()->get()->keyBy('id');
                     foreach ($validated['allocations'] as $allocation) {
@@ -674,8 +676,9 @@ class RequisitionController extends Controller
                 $this->notifierRole(
                     roleCible: 'admin_manager',
                     projectId: null,
-                    titre: 'Dossier en attente de visa administratif',
-                    message: "La réquisition {$lockedRequisition->numero_requisition} est prête pour visa administratif."
+                    titre: (bool) $lockedRequisition->is_urgent ? 'URGENT : Dossier en attente de visa' : 'Dossier en attente de visa administratif',
+                    message: "La réquisition {$lockedRequisition->numero_requisition} est prête pour visa administratif.",
+                    urgent: (bool) $lockedRequisition->is_urgent
                 );
 
                 return;
@@ -767,8 +770,9 @@ class RequisitionController extends Controller
                 $this->notifierRole(
                     roleCible: 'director',
                     projectId: null,
-                    titre: 'Dossier en attente d\'approbation finale (Directrice)',
-                    message: "La réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->montant_total} {$lockedRequisition->devise}) est prête pour votre approbation finale."
+                    titre: (bool) $lockedRequisition->is_urgent ? 'URGENT : Dossier en attente d\'approbation finale' : 'Dossier en attente d\'approbation finale (Directrice)',
+                    message: "La réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->montant_total} {$lockedRequisition->devise}) est prête pour votre approbation finale.",
+                    urgent: (bool) $lockedRequisition->is_urgent
                 );
 
                 return;
@@ -867,8 +871,9 @@ class RequisitionController extends Controller
                 $this->notifierRole(
                     roleCible: 'cashier',
                     projectId: null,
-                    titre: 'Nouveau bon à payer (Caisse)',
-                    message: "La réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->montant_total} {$lockedRequisition->devise}) a été approuvée par {$mentionAuteur}. Décaissement autorisé au guichet."
+                    titre: (bool) $lockedRequisition->is_urgent ? 'URGENT : Nouveau bon à payer' : 'Nouveau bon à payer (Caisse)',
+                    message: "La réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->montant_total} {$lockedRequisition->devise}) a été approuvée par {$mentionAuteur}. Décaissement autorisé au guichet.",
+                    urgent: (bool) $lockedRequisition->is_urgent
                 );
 
                 $this->notifierUtilisateur(
@@ -918,6 +923,9 @@ class RequisitionController extends Controller
         );
     }
 
+    /**
+     * CONSERVÉ POUR LA RÉTROCOMPATIBILITÉ (Dossiers déjà existants)
+     */
     public function urgentDirectorApproval(Request $request, Requisition $requisition)
     {
         $user = $request->user();

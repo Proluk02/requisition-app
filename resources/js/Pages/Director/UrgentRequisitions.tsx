@@ -18,6 +18,8 @@ interface UrgenceItem {
     dateSoumission: string;
     observation: string | null;
     needsWaiver: boolean;
+    canApprove: boolean;
+    statusLabel: string;
 }
 
 interface Props {
@@ -37,7 +39,7 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
     const graphData = useMemo(() => {
         const totalUrgences = urgences.length || 1;
         const countAttente = urgences.filter(u => u.needsWaiver).length;
-        const countAccorde = urgences.filter(u => !u.needsWaiver).length;
+        const countAccorde = urgences.filter(u => !u.needsWaiver).length; // Ici ça représente ceux qui suivent le circuit normal
         const pctAttente = urgences.length > 0 ? Math.round((countAttente / totalUrgences) * 100) : 0;
         const maxVol = urgences.length > 0 ? Math.max(...urgences.map(u => u.montantTotal)) : 1;
 
@@ -94,7 +96,7 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
 
     return (
         <AppLayout>
-            <Head title="Dérogations urgentes" />
+            <Head title="Suivi des Urgences" />
 
             <div className="space-y-6">
                 <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
@@ -102,19 +104,19 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
                         <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1.5">
                             <span>Direction Générale</span>
                             <span className="mx-1.5">/</span>
-                            <span className="text-[#04326D]">Dérogations urgentes</span>
+                            <span className="text-[#04326D]">Suivi des Urgences</span>
                         </nav>
                         <div className="flex items-center gap-2 flex-wrap">
                             <h1 className="text-xl font-bold text-[#0B192C]">
-                                Réquisitions urgentes
+                                Tableau de suivi des urgences
                             </h1>
                             <span className="inline-flex items-center gap-1.5 text-[10.5px] font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full uppercase tracking-wide">
                                 <span className="w-1.5 h-1.5 rounded-full bg-[#DC2626] animate-pulse" />
-                                Circuit prioritaire
+                                Tracker prioritaire
                             </span>
                         </div>
                         <p className="text-[12px] text-gray-500 mt-1">
-                            Dossiers de terrain nécessitant un accord de principe immédiat.
+                            Vue globale des dossiers de terrain annotés comme urgents.
                         </p>
                     </div>
 
@@ -144,7 +146,7 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
                             <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
                                 <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
                                     <path
-                                        className={graphData.isEmpty ? "text-gray-200" : "text-emerald-500"}
+                                        className={graphData.isEmpty ? "text-gray-200" : "text-blue-500"}
                                         strokeWidth="4" stroke="currentColor" fill="none"
                                         d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                                     />
@@ -161,23 +163,23 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
                                     <span className="text-xs font-black font-mono text-[#0B192C] block">
                                         {graphData.isEmpty ? '-' : `${graphData.pctAttente}%`}
                                     </span>
-                                    <span className="text-[8px] font-bold uppercase text-gray-400 block -mt-0.5">En attente</span>
+                                    <span className="text-[8px] font-bold uppercase text-gray-400 block -mt-0.5">Dérogation</span>
                                 </div>
                             </div>
                             <div className="space-y-1.5 text-[11px] flex-1">
                                 <div className="flex items-center justify-between">
                                     <span className="flex items-center gap-1.5 text-gray-600">
                                         <span className={`w-2.5 h-2.5 rounded-full ${graphData.isEmpty ? 'bg-gray-300' : 'bg-red-600 animate-pulse'}`} />
-                                        Nécessite accord :
+                                        Dérogation directe :
                                     </span>
                                     <strong className="font-mono text-red-700">{graphData.countAttente}</strong>
                                 </div>
                                 <div className="flex items-center justify-between pt-1 border-t border-gray-100">
                                     <span className="flex items-center gap-1.5 text-gray-600">
-                                        <span className={`w-2.5 h-2.5 rounded-full ${graphData.isEmpty ? 'bg-gray-300' : 'bg-emerald-500'}`} />
-                                        Déjà accordées :
+                                        <span className={`w-2.5 h-2.5 rounded-full ${graphData.isEmpty ? 'bg-gray-300' : 'bg-blue-500'}`} />
+                                        Circuit normal priorisé :
                                     </span>
-                                    <strong className="font-mono text-emerald-700">{graphData.countAccorde}</strong>
+                                    <strong className="font-mono text-blue-700">{graphData.countAccorde}</strong>
                                 </div>
                             </div>
                         </div>
@@ -198,12 +200,12 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
                             </div>
                             {urgences.length === 0 ? (
                                 <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs italic pb-5">
-                                    Aucune dérogation urgente enregistrée.
+                                    Aucune urgence enregistrée.
                                 </div>
                             ) : (
                                 [...urgences].reverse().slice(0, 10).map((u) => {
                                     const heightPct = Math.max((u.montantTotal / graphData.maxVol) * 100, 2);
-                                    const color = u.needsWaiver ? 'bg-red-600' : 'bg-emerald-500';
+                                    const color = u.needsWaiver ? 'bg-red-600' : 'bg-blue-500';
                                     return (
                                         <div key={u.id} className="relative group flex-1 flex flex-col items-center justify-end h-full">
                                             <div className="absolute bottom-[calc(100%+0.5rem)] mb-0 hidden group-hover:block z-10 w-max max-w-[160px] bg-gray-900 text-white text-[10px] p-2.5 rounded shadow-lg text-center animate-fade-in">
@@ -231,7 +233,7 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
                     {urgences.length === 0 ? (
                         <EmptyState
                             title="Aucune réquisition urgente"
-                            description="Les dossiers urgents en attente de dérogation apparaîtront ici."
+                            description="Les dossiers urgents en cours apparaîtront ici."
                             icon={
                                 <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
                                     <path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" strokeLinecap="round" strokeLinejoin="round" />
@@ -247,10 +249,9 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
                                         <th className="py-2.5 px-4">Date</th>
                                         <th className="py-2.5 px-4">Projet</th>
                                         <th className="py-2.5 px-4">Demandeur</th>
-                                        <th className="py-2.5 px-4">Motif</th>
                                         <th className="py-2.5 px-4 text-right">Montant</th>
-                                        <th className="py-2.5 px-4 text-center">Statut</th>
-                                        <th className="py-2.5 px-4 text-right">Action</th>
+                                        <th className="py-2.5 px-4 text-center">Étape Actuelle</th>
+                                        <th className="py-2.5 px-4 text-right">Action (Raccourci)</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
@@ -260,20 +261,17 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
                                             <td className="py-3 px-4 text-gray-600 whitespace-nowrap">{u.dateSoumission}</td>
                                             <td className="py-3 px-4 font-bold text-[#0B192C]">{u.projet}</td>
                                             <td className="py-3 px-4 text-gray-700">{u.demandeurNom}</td>
-                                            <td className="py-3 px-4 max-w-xs">
-                                                <p className="truncate text-gray-700" title={u.observation || ''}>{u.observation || '—'}</p>
-                                            </td>
                                             <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-[#0B192C] whitespace-nowrap">
                                                 {fmt(u.montantTotal, u.devise)}
                                             </td>
                                             <td className="py-3 px-4 text-center whitespace-nowrap">
                                                 {u.needsWaiver ? (
                                                     <span className="inline-flex items-center text-[10px] font-bold text-red-800 bg-red-100 border border-red-200 px-2 py-0.5 rounded uppercase tracking-wide animate-pulse">
-                                                        Accord requis
+                                                        Dérogation requise
                                                     </span>
                                                 ) : (
-                                                    <span className="inline-flex items-center text-[10px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded uppercase tracking-wide">
-                                                        Accordé
+                                                    <span className="inline-flex items-center text-[10px] font-bold text-blue-800 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded uppercase tracking-wide">
+                                                        {u.statusLabel || 'En traitement'}
                                                     </span>
                                                 )}
                                             </td>
@@ -281,7 +279,7 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
                                                 {u.needsWaiver ? (
                                                     <div className="inline-flex gap-2">
                                                         <button type="button" onClick={() => setTarget(u)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11.5px] font-bold bg-[#DC2626] text-white rounded hover:bg-[#b91c1c] transition">
-                                                            Accorder
+                                                            Accorder (Exception)
                                                             <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
                                                                 <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
                                                             </svg>
@@ -290,8 +288,12 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
                                                             Refuser
                                                         </button>
                                                     </div>
+                                                ) : u.canApprove ? (
+                                                    <Link href={route('dashboard')} className="text-[11.5px] font-bold text-[#04326D] hover:underline">
+                                                        Prêt pour approbation finale &rarr;
+                                                    </Link>
                                                 ) : (
-                                                    <span className="text-[11.5px] text-gray-400 italic">Priorité active</span>
+                                                    <span className="text-[11.5px] text-gray-400 italic">Dans la file d'attente normale</span>
                                                 )}
                                             </td>
                                         </tr>
@@ -306,7 +308,7 @@ export default function UrgentRequisitions({ urgences = [] }: Props) {
             <ConfirmDialog
                 open={!!target}
                 title="Accorder la dérogation urgente ?"
-                description={target ? `La réquisition ${target.numero} (${fmt(target.montantTotal, target.devise)}) sera transmise directement à la Caisse.` : ''}
+                description={target ? `ATTENTION: Ceci contourne les vérifications normales. La réquisition ${target.numero} (${fmt(target.montantTotal, target.devise)}) sera transmise directement à la Caisse.` : ''}
                 confirmLabel="Accorder la dérogation"
                 tone="danger"
                 loading={submitting}

@@ -70,7 +70,7 @@ class DashboardController extends Controller
                 'requisitions' => $this->buildProjectManagerRequisitionList($requisitions, $user->id, $budgetLines),
                 'budgetLines' => $budgetLines->values()->map(fn (BudgetLine $line) => [
                     'id' => $line->id,
-                    'project_id' => $line->project_id, // ID DU PROJET AJOUTÉ ICI
+                    'project_id' => $line->project_id,
                     'code' => $line->code,
                     'libelle' => $line->libelle,
                     'normalizedCode' => BudgetLine::normalizeCode($line->code),
@@ -277,9 +277,10 @@ class DashboardController extends Controller
     {
         abort_unless($request->user()?->canApproveAsDirector(), 403);
 
+        // MODIFICATION : On récupère TOUTES les urgences non clôturées/rejetées pour le Tracker.
         $urgences = Requisition::with(['user', 'demandes.justificatifs', 'project'])
             ->where('is_urgent', true)
-            ->where('status', 'urgent_direction')
+            ->whereNotIn('status', ['decaisse', 'cloture', 'rejetee'])
             ->orderByDesc('created_at')
             ->get()
             ->map(fn ($r) => [
@@ -294,7 +295,9 @@ class DashboardController extends Controller
                 'status' => $r->status,
                 'dateSoumission' => $r->created_at?->format('d/m/Y H:i') ?? '',
                 'observation' => $r->observation,
-                'needsWaiver' => $r->status === 'urgent_direction',
+                'needsWaiver' => $r->status === 'urgent_direction', // Maintenu pour compatibilité
+                'canApprove' => $r->status === 'visa_admin', // La Directrice ne peut valider que si le dossier est arrivé chez elle
+                'statusLabel' => $this->mapWorkflowLevel($r->status)['label']
             ]);
 
         return Inertia::render('Director/UrgentRequisitions', [
