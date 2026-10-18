@@ -6,7 +6,7 @@
     <style>
         @page {
             size: A4 landscape;
-            margin: 20px 30px 25px 30px;
+            margin: 30px 40px 40px 40px; /* Marges confortables */
         }
 
         body {
@@ -35,7 +35,7 @@
 
         /* --- INFO BOX --- */
         .info-box {
-            margin-bottom: 12px;
+            margin-bottom: 15px;
             font-size: 10px;
         }
         .info-box td {
@@ -69,19 +69,20 @@
             border: 1px solid #000;
             background-color: #f9fafb;
             padding: 10px;
-            margin-top: 12px;
+            margin-top: 15px;
             font-size: 11px;
         }
 
-        /* --- ESPACE FLEXIBLE (pousse les signatures en bas) --- */
+        /* --- ESPACE FLEXIBLE : empêche de coller les signatures direct après le total --- */
         .flex-spacer {
-            height: 30px;
+            height: 40px; 
         }
 
         /* --- SIGNATURES --- */
         .signatures-wrapper {
             width: 100%;
-            page-break-inside: avoid;
+            page-break-inside: avoid; /* Cette règle DomPDF empêche les signatures de se couper sur 2 pages */
+            margin-top: 10px;
         }
         .signatures-box {
             table-layout: fixed;
@@ -91,7 +92,7 @@
             border: 1px solid #000;
             padding: 8px;
             vertical-align: top;
-            height: 140px;
+            height: 110px; /* Hauteur ajustée pour un meilleur rendu paysage */
             width: 25%;
         }
         .sig-header {
@@ -148,8 +149,7 @@
     $sigDirectrice = $requisition->signatures->where('role_signataire', 'director')->where('action', 'approved')->first();
 
     // ---------------------------------------------------------------------
-    // GÉNÉRATION D'UN VRAI QR CODE (endroid/qr-code) — taille augmentée paysage
-    // Retourne un data URI base64, compatible DomPDF.
+    // GÉNÉRATION D'UN VRAI QR CODE (endroid/qr-code)
     // ---------------------------------------------------------------------
     if (!function_exists('renderRealQr')) {
         function renderRealQr(string $hash): string {
@@ -190,8 +190,8 @@
             $qrDataUri = renderRealQr($sig->signature_hash);
 
             $qrHtml = $qrDataUri
-                ? '<img src="' . $qrDataUri . '" width="50" height="50" alt="QR" style="display:block;" />'
-                : '<div style="width:50px;height:50px;background:#eee;border:1px solid #999;"></div>';
+                ? '<img src="' . $qrDataUri . '" width="40" height="40" alt="QR" style="display:block;" />'
+                : '<div style="width:40px;height:40px;background:#eee;border:1px solid #999;"></div>';
 
             return '
             <div class="sig-approved">
@@ -205,7 +205,7 @@
                             <div style="color: #4b5563; font-size: 7.5px; margin-top: 1px;">' . $date . '</div>
                             <div style="color: #6b7280; font-family: monospace; font-size: 6px; margin-top: 1px;">SHA: ' . $hashShort . '</div>
                         </td>
-                        <td style="border: none; padding: 0; width: 50px; vertical-align: top; text-align: right;">
+                        <td style="border: none; padding: 0; width: 45px; vertical-align: top; text-align: right;">
                             <div style="border: 1px solid #000; background: #fff; padding: 2px; text-align: center; display: inline-block;">
                                 ' . $qrHtml . '
                                 <div style="font-size: 5px; font-weight: bold; font-family: monospace; margin-top: 1px; letter-spacing: -0.5px;">CERTIFIÉ</div>
@@ -345,7 +345,7 @@
     <em class="font-bold italic" style="margin-left: 5px; font-family: serif; font-size: 12px;">{{ $montantEnLettres }}</em>
 </div>
 
-<!-- 5. ESPACE FLEXIBLE (pousse les signatures vers le bas) -->
+<!-- 5. ESPACE FLEXIBLE (pousse les signatures vers le bas de page en évitant les coupures) -->
 <div class="flex-spacer"></div>
 
 <!-- 6. SIGNATURES -->
@@ -356,36 +356,24 @@
             <td class="sig-cell">
                 <div class="sig-header">Manager projet</div>
                 {!! renderSignature($sigMP, "Manager de Projet", "En attente de visa MP") !!}
-                <div class="sig-footer">
-                    Date : {{ $sigMP ? \Carbon\Carbon::parse($sigMP->signed_at)->format('d/m/Y') : '..../..../202..' }}
-                </div>
             </td>
 
             <!-- VISA FINANCE -->
             <td class="sig-cell">
                 <div class="sig-header">Manager chargé de finance</div>
                 {!! renderSignature($sigFinance, "Manager des Finances", "En attente de visa financier") !!}
-                <div class="sig-footer">
-                    Date : {{ $sigFinance ? \Carbon\Carbon::parse($sigFinance->signed_at)->format('d/m/Y') : '..../..../202..' }}
-                </div>
             </td>
 
             <!-- VISA ADMIN -->
             <td class="sig-cell">
                 <div class="sig-header">Manager d'Administration</div>
                 {!! renderSignature($sigAdmin, "Manager d'Administration (PAM)", "En attente de visa administratif") !!}
-                <div class="sig-footer">
-                    Date : {{ $sigAdmin ? \Carbon\Carbon::parse($sigAdmin->signed_at)->format('d/m/Y') : '..../..../202..' }}
-                </div>
             </td>
 
             <!-- VISA DIRECTRICE -->
             <td class="sig-cell">
                 <div class="sig-header">Directrice</div>
                 {!! renderSignature($sigDirectrice, "Directrice Générale", "En attente d'approbation finale") !!}
-                <div class="sig-footer">
-                    Date : {{ $sigDirectrice ? \Carbon\Carbon::parse($sigDirectrice->signed_at)->format('d/m/Y') : '..../..../202..' }}
-                </div>
             </td>
         </tr>
     </table>

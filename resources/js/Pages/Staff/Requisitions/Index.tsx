@@ -15,14 +15,13 @@ import {
     Eye,
     Printer,
     Pencil,
-    Trash2,
     X,
     FileText,
     RotateCcw,
     ChevronRight,
     Paperclip,
     Download,
-    AlertCircle,
+    AlertCircle
 } from 'lucide-react';
 
 interface CaisseOption {
@@ -84,35 +83,29 @@ export default function RequisitionsIndex({
         });
     }, [requisitions, search, filterEtape, filterDevise, filterNature]);
 
-    // SUPPRESSION
-    const handleDelete = (id: string, numero: string) => {
-        if (confirm(`Confirmez-vous la suppression irréversible de la réquisition ${numero} ?`)) {
-            router.delete(route('requisitions.destroy', id), {
-                preserveScroll: true,
-                onSuccess: () => {
-                    setRequisitions((prev) => prev.filter((r) => r.id !== id));
-                    if (viewReq?.id === id) setViewReq(null);
-                    if (editReq?.id === id) setEditReq(null);
-                    if (printReq?.id === id) setPrintReq(null);
-                }
-            });
-        }
-    };
-
-    // APERÇU IMPRESSION (VIA COMPOSANT REACT)
-    const handleTriggerPrint = (req: RequisitionSuivi) => {
+    // 1. Ouvre le composant HTML pour l'aperçu du navigateur
+    const handlePrintPreview = (req: RequisitionSuivi) => {
         setPrintReq(req);
     };
 
-    // TÉLÉCHARGEMENT PDF (VIA BACKEND LARAVEL DOMPDF)
-    const handleDownloadPdf = (req: RequisitionSuivi) => {
-        window.open(route('requisitions.pdf', req.id), '_blank');
-    };
-
+    // Lance l'aperçu quand les données sont prêtes dans le DOM
     useEffect(() => {
         if (!printReq) return;
-        void openPrintPreview('bon-pasteur-print-zone').then(() => setPrintReq(null));
+        void openPrintPreview('bon-pasteur-print-zone')
+            .then(() => setPrintReq(null));
     }, [printReq]);
+
+    // 2. TÉLÉCHARGEMENT DIRECT DU PDF (ZÉRO PAGE BLANCHE)
+    const handleDownloadPdf = (req: RequisitionSuivi) => {
+        const url = route('requisitions.pdf', req.id);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `requisition-${req.numero}.pdf`;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
 
     // SAUVEGARDE CORRECTION
     const handleSaveEdit = (e: React.FormEvent) => {
@@ -210,7 +203,15 @@ export default function RequisitionsIndex({
         return 'bg-gray-100 text-gray-400 border-gray-200';
     };
 
-    const renderEtapeBadge = (etape: string) => {
+    const renderEtapeBadge = (etape: string, isUrgent: boolean, statusCode?: string) => {
+        if (statusCode?.startsWith('returned_to_')) {
+            return (
+                <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">
+                    À Corriger
+                </span>
+            );
+        }
+        
         const badges: Record<string, string> = {
             brouillon: 'bg-gray-100 text-gray-700',
             visa_mp: 'bg-blue-50 text-[#04326D] border border-blue-200',
@@ -221,7 +222,7 @@ export default function RequisitionsIndex({
             cloture: 'bg-gray-800 text-white border border-gray-800',
         };
         const labels: Record<string, string> = {
-            brouillon: 'Brouillon / À corriger',
+            brouillon: 'Brouillon',
             visa_mp: 'Visa Chef Projet',
             controle_finance: 'Contrôle Finances',
             visa_admin: 'Administration',
@@ -230,9 +231,7 @@ export default function RequisitionsIndex({
             cloture: 'Clôturé',
         };
         return (
-            <span
-                className={`${badges[etape] || 'bg-gray-100 text-gray-700'} px-2.5 py-0.5 rounded text-[10px] font-bold`}
-            >
+            <span className={`${badges[etape] || 'bg-gray-100 text-gray-700'} px-2.5 py-0.5 rounded text-[10px] font-bold`}>
                 {labels[etape] || etape}
             </span>
         );
@@ -242,26 +241,26 @@ export default function RequisitionsIndex({
         <AppLayout>
             <Head title="Mes Réquisitions" />
             
-            {/* CSS pour gérer le comportement de la modale d'impression d'aperçu */}
             <style>{`
                 @media screen {
                     #bon-pasteur-print-zone { display: none; }
                 }
                 @media print {
-                    body * { visibility: hidden; }
-                    #bon-pasteur-print-zone, #bon-pasteur-print-zone * { visibility: visible; }
+                    body * { visibility: hidden !important; }
+                    #bon-pasteur-print-zone,
+                    #bon-pasteur-print-zone * { visibility: visible !important; }
                     #bon-pasteur-print-zone {
-                        position: absolute;
-                        left: 0;
-                        top: 0;
-                        width: 100%;
-                        margin: 0;
-                        padding: 0;
+                        display: block !important;
+                        position: absolute !important;
+                        left: 0 !important;
+                        top: 0 !important;
+                        width: 100% !important;
+                        background: white !important;
+                        z-index: 2147483647 !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
                     }
-                    @page { 
-                        size: A4 landscape; 
-                        margin: 8mm 10mm; 
-                    }
+                    @page { size: A4 landscape; margin: 8mm 10mm; }
                 }
             `}</style>
 
@@ -390,8 +389,11 @@ export default function RequisitionsIndex({
                                     </tr>
                                 ) : (
                                     filteredList.map((req) => {
-                                        // Vérification de l'autorisation de modification/suppression
-                                        const canEditOrDelete = req.statusCode === 'draft' || (req.statusCode?.startsWith('returned_to_') ?? false);
+                                        const canEdit = req.statusCode === 'draft' || req.statusCode?.startsWith('returned_to_') === true;
+
+                                        function handleTriggerPrint(req: RequisitionSuivi): void {
+                                            handlePrintPreview(req);
+                                        }
 
                                         return (
                                             <tr key={req.id} className="hover:bg-[#F9F9FF] transition-colors">
@@ -433,41 +435,25 @@ export default function RequisitionsIndex({
                                                     {req.montantTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} {req.devise}
                                                 </td>
                                                 <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                                                    {req.statusCode?.startsWith('returned_to_') ? (
-                                                        <span className="inline-block rounded px-2 py-0.5 text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">
-                                                            À Corriger
-                                                        </span>
-                                                    ) : renderEtapeBadge(req.etapeActuelle)}
+                                                    {renderEtapeBadge(req.etapeActuelle, req.is_urgent ?? false, req.statusCode)}
                                                 </td>
                                                 <td className="py-3.5 px-4 text-right whitespace-nowrap">
                                                     <div className="inline-flex items-center gap-1 justify-end">
-                                                        {/* Boutons d'Action Conditionnels */}
-                                                        {canEditOrDelete && (
-                                                            <>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        setEditReq(JSON.parse(JSON.stringify(req)));
-                                                                        setEditAttachments({});
-                                                                        setEditError(null);
-                                                                    }}
-                                                                    className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded transition"
-                                                                    title="Corriger la demande"
-                                                                >
-                                                                    <Pencil className="w-4 h-4" />
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => handleDelete(req.id, req.numero)}
-                                                                    className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded transition"
-                                                                    title="Supprimer la demande"
-                                                                >
-                                                                    <Trash2 className="w-4 h-4" />
-                                                                </button>
-                                                            </>
+                                                        {canEdit && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setEditReq(JSON.parse(JSON.stringify(req)));
+                                                                    setEditAttachments({});
+                                                                    setEditError(null);
+                                                                }}
+                                                                className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded transition"
+                                                                title="Corriger la demande"
+                                                            >
+                                                                <Pencil className="w-4 h-4" />
+                                                            </button>
                                                         )}
                                                         
-                                                        {/* Boutons d'Action Permanents */}
                                                         <button
                                                             type="button"
                                                             onClick={() => setViewReq(req)}
@@ -890,6 +876,7 @@ export default function RequisitionsIndex({
                 </div>
             )}
 
+            {/* ZONE D'IMPRESSION CACHÉE (UTILISÉE PAR LE COMPOSANT D'APERÇU) */}
             {printReq && (
                 <div id="bon-pasteur-print-zone">
                     <OfficialPrintSheet requisition={printReq as any} />
