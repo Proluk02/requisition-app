@@ -39,9 +39,8 @@ const requiredColumns = [
 export default function ImportBudgetLines({ projects = [] }: Props) {
     const { flash } = usePage<PageProps>().props;
 
-    // Passage en tableau pour supporter le Many-to-Many
-    const form = useForm<{ project_ids: string[]; file: File | null }>({
-        project_ids: projects.length > 0 ? [projects[0].id] : [],
+    const form = useForm<{ project_id: string; file: File | null }>({
+        project_id: projects.length > 0 ? projects[0].id : '',
         file: null,
     });
 
@@ -54,23 +53,11 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
         });
     };
 
-    const toggleProject = (projectId: string, isChecked: boolean) => {
-        const ids = [...form.data.project_ids];
-        if (isChecked) {
-            if (!ids.includes(projectId)) ids.push(projectId);
-        } else {
-            const idx = ids.indexOf(projectId);
-            if (idx > -1) ids.splice(idx, 1);
-        }
-        form.setData('project_ids', ids);
-    };
-
     return (
         <AppLayout>
             <Head title="Importer la Maquette Budgétaire" />
 
             <div className="space-y-6">
-                {/* Header aligné sur Index */}
                 <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
                     <div>
                         <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1.5 flex items-center gap-1.5">
@@ -105,7 +92,6 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
                     </div>
                 </header>
 
-                {/* Messages Flash */}
                 {flash?.success && (
                     <div className="p-3.5 rounded bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
@@ -119,7 +105,6 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
                     </div>
                 )}
 
-                {/* KPI contextuels */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex items-center justify-between">
                         <div>
@@ -166,9 +151,7 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
                     </div>
                 </div>
 
-                {/* Formulaire & Spécifications */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-                    {/* Colonne Formulaire */}
                     <div className="lg:col-span-7 bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                         <div className="border-b border-[#E2E8F0] px-4 py-3 bg-[#F9F9FF] flex items-center justify-between">
                             <div className="flex items-center gap-2">
@@ -185,28 +168,18 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
                         <form onSubmit={handleSubmit} className="p-5 space-y-5 text-xs">
                             <div>
                                 <label className="block font-bold text-gray-700 mb-1.5">
-                                    Projet(s) de Rattachement (Cochez) *
+                                    Projet de Rattachement *
                                 </label>
-                                <div className="border border-[#B2BED6] bg-gray-50 rounded-md p-2 max-h-40 overflow-y-auto space-y-1 shadow-inner">
-                                    {projects.length === 0 && (
-                                        <span className="text-gray-400 italic">Aucun projet enregistré</span>
-                                    )}
-                                    {projects.map((p) => (
-                                        <label key={p.id} className="flex items-center gap-2.5 cursor-pointer p-1.5 hover:bg-white rounded transition">
-                                            <input
-                                                type="checkbox"
-                                                checked={form.data.project_ids.includes(p.id)}
-                                                onChange={(e) => toggleProject(p.id, e.target.checked)}
-                                                className="w-4 h-4 text-[#04326D] rounded border-gray-300 focus:ring-[#04326D]"
-                                            />
-                                            <span className="font-semibold text-gray-800">
-                                                {p.name} {p.full_name ? `— ${p.full_name}` : ''}
-                                            </span>
-                                        </label>
-                                    ))}
-                                </div>
-                                {form.errors.project_ids && (
-                                    <p className="text-[11px] text-red-600 mt-1">{form.errors.project_ids}</p>
+                                <select 
+                                    value={form.data.project_id} 
+                                    onChange={(e) => form.setData('project_id', e.target.value)}
+                                    className="w-full border border-[#B2BED6] rounded p-2 text-xs font-semibold bg-white focus:outline-none focus:border-[#04326D]"
+                                >
+                                    {projects.length === 0 && <option value="">Aucun projet disponible</option>}
+                                    {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                </select>
+                                {form.errors.project_id && (
+                                    <p className="text-[11px] text-red-600 mt-1">{form.errors.project_id}</p>
                                 )}
                             </div>
 
@@ -261,7 +234,7 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
 
                                 <button
                                     type="submit"
-                                    disabled={form.processing || form.data.project_ids.length === 0}
+                                    disabled={form.processing || !form.data.project_id}
                                     className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#04326D] hover:bg-[#06428f] disabled:opacity-50 text-white rounded text-xs font-bold shadow-sm transition"
                                 >
                                     <Upload className="w-4 h-4" />
@@ -271,7 +244,6 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
                         </form>
                     </div>
 
-                    {/* Colonne Spécifications Techniques */}
                     <div className="lg:col-span-5 bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                         <div className="border-b border-[#E2E8F0] px-4 py-3 bg-[#F9F9FF] flex items-center justify-between">
                             <div className="flex items-center gap-2">

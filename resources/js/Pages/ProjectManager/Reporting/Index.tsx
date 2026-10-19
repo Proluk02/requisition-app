@@ -123,12 +123,12 @@ export default function ReportingIndex({
                     }
                     #pm-reporting-print-sheet {
                         display: block !important;
-                        position: fixed;
+                        position: relative !important;
                         left: 0;
                         top: 0;
-                        width: 100vw;
+                        width: 100%;
                         height: auto;
-                        padding: 20px;
+                        padding: 0;
                         background: white !important;
                         color: black !important;
                     }
@@ -148,7 +148,7 @@ export default function ReportingIndex({
                             <span className="text-[#04326D]">Rapports Périodiques</span>
                         </nav>
                         <h1 className="text-xl font-bold text-[#0B192C]">
-                            Rapport d'Engagement & Décaissements — {project?.name ?? 'Projet'}
+                            Rapport d'Engagement & Décaissements — {project?.name ?? 'Projet Général'}
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
                             Synthèse consolidée des réquisitions pour la période : <strong className="text-[#0B192C]">{filters.labelPeriode}</strong>.
@@ -165,6 +165,7 @@ export default function ReportingIndex({
                                 }}
                                 className="border border-[#B2BED6] rounded px-2.5 py-1.5 text-xs bg-white text-[#0B192C] font-semibold"
                             >
+                                <option value="">Tous les projets</option>
                                 {availableProjects.map((p) => (
                                     <option key={p.id} value={p.id}>
                                         {p.name}
@@ -184,7 +185,6 @@ export default function ReportingIndex({
                     </div>
                 </header>
 
-                {/* Filtres de Périodicité */}
                 <div className="bg-white border border-[#B2BED6] rounded p-4 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs">
                     <div className="flex items-center gap-2">
                         <span className="font-bold text-gray-700 flex items-center gap-1">
@@ -288,14 +288,13 @@ export default function ReportingIndex({
                     </div>
                 </div>
 
-                {/* Synthèse chiffrée */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
                             Total Réquisitions Soumises
                         </span>
                         <p className="text-2xl font-black text-[#0B192C] mt-1 font-mono">
-                            {money(stats.totalSoumisUSD, '$')}
+                            {money(stats.totalSoumisUSD, 'USD')}
                         </p>
                         <span className="text-[10px] text-gray-400 mt-1">
                             {stats.countTotal} dossier(s) • + {money(stats.totalSoumisFC, 'FC')}
@@ -307,7 +306,7 @@ export default function ReportingIndex({
                             Décaissements Effectifs (Caisse)
                         </span>
                         <p className="text-2xl font-black text-emerald-700 mt-1 font-mono">
-                            {money(stats.totalDecaisseUSD, '$')}
+                            {money(stats.totalDecaisseUSD, 'USD')}
                         </p>
                         <span className="text-[10px] text-emerald-700 mt-1">
                             {stats.countDecaissees} dossier(s) décaissé(s)
@@ -319,7 +318,7 @@ export default function ReportingIndex({
                             En Circuit d'Approbation
                         </span>
                         <p className="text-2xl font-black text-[#F58F20] mt-1 font-mono">
-                            {money(stats.totalEnCoursUSD, '$')}
+                            {money(stats.totalEnCoursUSD, 'USD')}
                         </p>
                         <span className="text-[10px] text-gray-400 mt-1">
                             {stats.countEnCours} dossier(s) en attente
@@ -333,17 +332,16 @@ export default function ReportingIndex({
                         <div className="mt-1 space-y-0.5 text-xs font-mono">
                             <p className="flex justify-between">
                                 <span className="text-gray-500">Achats :</span>
-                                <strong className="text-[#04326D]">{money(stats.totalAchatsUSD, '$')} ({stats.countAchats})</strong>
+                                <strong className="text-[#04326D]">{money(stats.totalAchatsUSD, 'USD')} ({stats.countAchats})</strong>
                             </p>
                             <p className="flex justify-between">
                                 <span className="text-gray-500">Services :</span>
-                                <strong className="text-[#F58F20]">{money(stats.totalServicesUSD, '$')} ({stats.countServices})</strong>
+                                <strong className="text-[#F58F20]">{money(stats.totalServicesUSD, 'USD')} ({stats.countServices})</strong>
                             </p>
                         </div>
                     </div>
                 </div>
 
-                {/* Ventilation analytique par code budgétaire */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <header className="p-4 border-b bg-gray-50 flex items-center justify-between">
                         <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
@@ -361,7 +359,7 @@ export default function ReportingIndex({
                                     <th className="py-2.5 px-4">Code Imputation</th>
                                     <th className="py-2.5 px-4">Activités / Désignations Concernées</th>
                                     <th className="py-2.5 px-4 text-center">Nombre Lignes</th>
-                                    <th className="py-2.5 px-4 text-right">Volume Financier</th>
+                                    <th className="py-2.5 px-4 text-right">Volume Financier (Eq. USD)</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200 text-gray-700">
@@ -394,7 +392,6 @@ export default function ReportingIndex({
                     </div>
                 </div>
 
-                {/* Liste détaillée des réquisitions */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <header className="p-4 border-b bg-gray-50">
                         <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C]">
@@ -472,7 +469,6 @@ export default function ReportingIndex({
                 </div>
             </div>
 
-            {/* FEUILLE OFFICIELLE D'IMPRESSION A4 DU RAPPORT */}
             <div id="pm-reporting-print-sheet" className="p-8 font-sans text-black space-y-6">
                 <div className="flex items-start justify-between border-b-2 border-black pb-4">
                     <div className="space-y-1">
@@ -511,7 +507,7 @@ export default function ReportingIndex({
 
                 <div>
                     <h3 className="text-xs font-bold uppercase tracking-wider border-b border-black pb-1 mb-2">
-                        Ventilation Analytique des Dépenses par Code Budgétaire
+                        Ventilation Analytique des Dépenses par Code Budgétaire (USD)
                     </h3>
                     <table className="w-full text-left border border-black text-xs border-collapse">
                         <thead>

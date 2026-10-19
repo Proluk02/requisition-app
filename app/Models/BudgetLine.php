@@ -6,7 +6,6 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class BudgetLine extends Model
@@ -18,6 +17,7 @@ class BudgetLine extends Model
     protected $keyType = 'string';
 
     protected $fillable = [
+        'project_id', 
         'donor_id',
         'code',
         'category_code',
@@ -42,9 +42,9 @@ class BudgetLine extends Model
         ];
     }
 
-    public function projects(): BelongsToMany
+    public function project(): BelongsTo
     {
-        return $this->belongsToMany(Project::class, 'budget_line_project');
+        return $this->belongsTo(Project::class);
     }
 
     public function donor(): BelongsTo
@@ -57,9 +57,6 @@ class BudgetLine extends Model
         return $this->hasMany(CashMovement::class);
     }
 
-    /**
-     * Taux de consommation budgétaire réel en pourcentage.
-     */
     public function getTauxConsommationAttribute(): float
     {
         if ($this->budget_initial <= 0) {
@@ -69,9 +66,6 @@ class BudgetLine extends Model
         return round(($this->montant_decaisse / $this->budget_initial) * 100, 2);
     }
 
-    /**
-     * Reconstitue le code complet à partir des segments selon la formule Excel.
-     */
     public static function buildCode(?string $cat, ?string $subcat, ?string $desc, ?string $split): string
     {
         $parts = array_map(

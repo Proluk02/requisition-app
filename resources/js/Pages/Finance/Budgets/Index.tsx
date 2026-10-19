@@ -59,7 +59,7 @@ interface BudgetLineItem {
     split_code?: string | null;
     libelle: string;
     devise: string;
-    project_ids: string[];
+    project_id: string;
     project_name: string;
     donor_id: string | null;
     donor_name: string;
@@ -104,31 +104,25 @@ export default function BudgetIndex({
 
     const [activeTab, setActiveTab] = useState<'lignes' | 'donateurs'>('lignes');
 
-    // États de filtrage 100% Front-End React
     const [projectFilter, setProjectFilter] = useState('all');
     const [donorFilter, setDonorFilter] = useState('all');
     const [search, setSearch] = useState('');
 
-    // Sélection multiple de lignes
     const [selectedLineIds, setSelectedLineIds] = useState<string[]>([]);
 
-    // États des Modales
     const [importModalOpen, setImportModalOpen] = useState(false);
     const [donorModalOpen, setDonorModalOpen] = useState(false);
     const [lineModalOpen, setLineModalOpen] = useState(false);
 
-    // Modale de suppression
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
 
-    // États d'édition
     const [editingLine, setEditingLine] = useState<BudgetLineItem | null>(null);
     const [editingDonor, setEditingDonor] = useState<DonorSummary | DonorOption | null>(null);
 
-    // Formulaire d'import rapide
-    const importForm = useForm<{ project_ids: string[]; file: File | null; }>({
-        project_ids: projects.length > 0 ? [projects[0].id] : [],
+    const importForm = useForm<{ project_id: string; file: File | null; }>({
+        project_id: projects.length > 0 ? projects[0].id : '',
         file: null,
     });
 
@@ -139,7 +133,7 @@ export default function BudgetIndex({
     });
 
     const lineForm = useForm({
-        project_ids: projects.length > 0 ? [projects[0].id] : [] as string[],
+        project_id: projects.length > 0 ? projects[0].id : '',
         donor_id: '',
         category_code: '',
         subcategory_code: '',
@@ -151,9 +145,6 @@ export default function BudgetIndex({
         budget_initial: '',
     });
 
-    /* =========================================================================
-     *  SYNCHRONISATION INTELLIGENTE DU CODE BUDGETAIRE
-     * ========================================================================= */
     const handleFullCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = e.target.value;
         const parts = val.split('.');
@@ -181,15 +172,11 @@ export default function BudgetIndex({
         });
     };
 
-    /* =========================================================================
-     *  FILTRAGE DIRECT CÔTÉ FRONT-END (REACT USEMEMO)
-     * ========================================================================= */
     const filteredBudgetLines = useMemo(() => {
         const q = search.trim().toLowerCase();
 
         return budgetLines.filter((line) => {
-            // Support de la relation N-to-N
-            if (projectFilter !== 'all' && !line.project_ids.includes(projectFilter)) return false;
+            if (projectFilter !== 'all' && line.project_id !== projectFilter) return false;
             if (donorFilter !== 'all' && line.donor_id !== donorFilter) return false;
             if (q) {
                 const matchCode = line.code.toLowerCase().includes(q);
@@ -230,9 +217,6 @@ export default function BudgetIndex({
         setSearch('');
     };
 
-    /* =========================================================================
-     *  SÉLECTION MULTIPLE
-     * ========================================================================= */
     const isAllSelected = filteredBudgetLines.length > 0 && filteredBudgetLines.every((l) => selectedLineIds.includes(l.id));
     const isSomeSelected = selectedLineIds.length > 0 && !isAllSelected;
 
@@ -249,9 +233,6 @@ export default function BudgetIndex({
         return filteredBudgetLines.filter((l) => selectedLineIds.includes(l.id));
     }, [filteredBudgetLines, selectedLineIds]);
 
-    /* =========================================================================
-     *  SUPPRESSION
-     * ========================================================================= */
     const triggerDeleteSingleLine = (line: BudgetLineItem) => { setDeleteTarget({ type: 'single_line', line }); setDeleteModalOpen(true); };
     const triggerDeleteBulkLines = () => { if (selectedLinesObjects.length === 0) return; setDeleteTarget({ type: 'bulk_lines', lines: selectedLinesObjects }); setDeleteModalOpen(true); };
     const triggerDeleteDonor = (donor: DonorSummary) => { setDeleteTarget({ type: 'donor', donor }); setDeleteModalOpen(true); };
@@ -291,9 +272,6 @@ export default function BudgetIndex({
         }
     };
 
-    /* =========================================================================
-     *  SOUMISSION FORMULAIRES (POST / PUT)
-     * ========================================================================= */
     const handleImportSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         importForm.post(route('finance.budgets.import'), {
@@ -320,7 +298,7 @@ export default function BudgetIndex({
     const openCreateLineModal = () => {
         setEditingLine(null); lineForm.reset(); lineForm.clearErrors();
         lineForm.setData({
-            project_ids: projects.length > 0 ? [projects[0].id] : [], donor_id: '', category_code: '', subcategory_code: '',
+            project_id: projects.length > 0 ? projects[0].id : '', donor_id: '', category_code: '', subcategory_code: '',
             descript_code: '', split_code: '', code: '', libelle: '', devise: 'USD', budget_initial: '',
         });
         setLineModalOpen(true);
@@ -329,7 +307,7 @@ export default function BudgetIndex({
     const openEditLineModal = (line: BudgetLineItem) => {
         setEditingLine(line); lineForm.clearErrors();
         lineForm.setData({
-            project_ids: line.project_ids, donor_id: line.donor_id ?? '', category_code: line.category_code ?? '',
+            project_id: line.project_id, donor_id: line.donor_id ?? '', category_code: line.category_code ?? '',
             subcategory_code: line.subcategory_code ?? '', descript_code: line.descript_code ?? '', split_code: line.split_code ?? '',
             code: line.code, libelle: line.libelle, devise: line.devise, budget_initial: line.budget_initial.toString(),
         });
@@ -345,25 +323,11 @@ export default function BudgetIndex({
         }
     };
 
-    // Helper unique pour gérer le cochage/décochage des projets
-    const toggleProjectForm = (formToUpdate: typeof lineForm | typeof importForm, projectId: string, isChecked: boolean) => {
-        const ids = [...formToUpdate.data.project_ids];
-        if (isChecked) {
-            if (!ids.includes(projectId)) ids.push(projectId);
-        } else {
-            const idx = ids.indexOf(projectId);
-            if (idx > -1) ids.splice(idx, 1);
-        }
-        // @ts-ignore : TypeScript contournement (les deux forms partagent project_ids)
-        formToUpdate.setData('project_ids', ids);
-    };
-
     return (
         <AppLayout>
             <Head title="Centre Budgétaire & Suivi Donateurs" />
 
             <div className="space-y-6">
-                {/* Header Institutionnel */}
                 <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
                     <div>
                         <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1.5 flex items-center gap-1.5">
@@ -398,7 +362,6 @@ export default function BudgetIndex({
                     </div>
                 </header>
 
-                {/* Notifications Flash */}
                 {flash?.success && (
                     <div className="p-3.5 rounded bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
@@ -412,7 +375,6 @@ export default function BudgetIndex({
                     </div>
                 )}
 
-                {/* KPI Cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between">
                         <span className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">Budget Alloué</span>
@@ -436,7 +398,6 @@ export default function BudgetIndex({
                     </div>
                 </div>
 
-                {/* Barre d'action sélection groupée */}
                 {selectedLineIds.length > 0 && activeTab === 'lignes' && (
                     <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between shadow-sm animate-fade-in">
                         <div className="flex items-center gap-2">
@@ -457,7 +418,6 @@ export default function BudgetIndex({
                     </div>
                 )}
 
-                {/* Zone Centrale : Onglets & Filtrage Front-End */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="border-b border-[#E2E8F0] px-4 pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white">
                         <div className="flex gap-2">
@@ -474,7 +434,6 @@ export default function BudgetIndex({
                             </button>
                         </div>
 
-                        {/* Filtres 100% Front-End */}
                         <div className="flex flex-wrap items-center gap-2 pb-2 sm:pb-0">
                             <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold focus:outline-none focus:border-[#04326D]">
                                 <option value="all">Tous les projets</option>
@@ -500,7 +459,6 @@ export default function BudgetIndex({
                         </div>
                     </div>
 
-                    {/* Tableau des Lignes Budgétaires */}
                     {activeTab === 'lignes' && (
                         <div className="overflow-x-auto">
                             <table className="w-full text-left text-xs border-collapse">
@@ -513,7 +471,7 @@ export default function BudgetIndex({
                                         </th>
                                         <th className="py-3 px-4">Code Ligne</th>
                                         <th className="py-3 px-4">Libellé / Activité</th>
-                                        <th className="py-3 px-4">Projet(s) & Donateur</th>
+                                        <th className="py-3 px-4">Projet & Donateur</th>
                                         <th className="py-3 px-4 text-right">Budget Initial</th>
                                         <th className="py-3 px-4 text-right">Engagé</th>
                                         <th className="py-3 px-4 text-right">Décaissé</th>
@@ -574,7 +532,6 @@ export default function BudgetIndex({
                         </div>
                     )}
 
-                    {/* Grille des Donateurs */}
                     {activeTab === 'donateurs' && (
                         <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             {filteredDonorsSummary.length === 0 ? (
@@ -617,7 +574,6 @@ export default function BudgetIndex({
                 </div>
             </div>
 
-            {/* Modale de Suppression */}
             {deleteModalOpen && deleteTarget && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
                     <div className="bg-white rounded-xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-4 animate-scale-in">
@@ -676,7 +632,6 @@ export default function BudgetIndex({
                 </div>
             )}
 
-            {/* Modal Import Excel depuis Index.tsx */}
             {importModalOpen && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-md w-full p-6 space-y-4 animate-slide-down">
@@ -689,22 +644,16 @@ export default function BudgetIndex({
                         </header>
                         <form onSubmit={handleImportSubmit} className="space-y-4 text-xs">
                             <div>
-                                <label className="block font-bold text-gray-700 mb-1.5">Projet(s) de Rattachement (Cochez) *</label>
-                                <div className="max-h-32 overflow-y-auto border border-[#B2BED6] rounded p-2 bg-gray-50 space-y-1 shadow-inner">
-                                    {projects.length === 0 && <span className="text-gray-400 italic">Aucun projet</span>}
-                                    {projects.map((p) => (
-                                        <label key={p.id} className="flex items-center gap-2 cursor-pointer p-1.5 hover:bg-white rounded transition">
-                                            <input 
-                                                type="checkbox" 
-                                                checked={importForm.data.project_ids.includes(p.id)}
-                                                onChange={(e) => toggleProjectForm(importForm, p.id, e.target.checked)}
-                                                className="w-3.5 h-3.5 rounded border-gray-300 text-[#04326D] focus:ring-[#04326D]" 
-                                            />
-                                            <span className="font-semibold text-gray-700 truncate">{p.name} {p.full_name ? `— ${p.full_name}` : ''}</span>
-                                        </label>
-                                    ))}
-                                </div>
-                                {importForm.errors.project_ids && <p className="text-[11px] text-red-600 mt-1">{importForm.errors.project_ids}</p>}
+                                <label className="block font-bold text-gray-700 mb-1.5">Projet de Rattachement *</label>
+                                <select 
+                                    value={importForm.data.project_id} 
+                                    onChange={(e) => importForm.setData('project_id', e.target.value)}
+                                    className="w-full border border-[#B2BED6] rounded p-2 text-xs font-semibold bg-white focus:outline-none focus:border-[#04326D]"
+                                >
+                                    {projects.length === 0 && <option value="">Aucun projet disponible</option>}
+                                    {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                </select>
+                                {importForm.errors.project_id && <p className="text-[11px] text-red-600 mt-1">{importForm.errors.project_id}</p>}
                             </div>
                             <div>
                                 <label className="block font-bold text-gray-700 mb-1">Fichier Excel (.xlsx, .xls) ou CSV (.csv) *</label>
@@ -719,7 +668,7 @@ export default function BudgetIndex({
                             </div>
                             <div className="flex justify-end gap-2 pt-2 border-t">
                                 <button type="button" onClick={() => setImportModalOpen(false)} className="px-3.5 py-1.5 border border-[#B2BED6] rounded text-xs font-semibold text-gray-600 hover:bg-gray-50">Annuler</button>
-                                <button type="submit" disabled={importForm.processing || importForm.data.project_ids.length === 0} className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] disabled:opacity-50 text-white rounded text-xs font-bold shadow transition">
+                                <button type="submit" disabled={importForm.processing || !importForm.data.project_id} className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] disabled:opacity-50 text-white rounded text-xs font-bold shadow transition">
                                     <Upload className="w-4 h-4" /><span>{importForm.processing ? 'Importation...' : 'Lancer l’importation'}</span>
                                 </button>
                             </div>
@@ -728,7 +677,6 @@ export default function BudgetIndex({
                 </div>
             )}
 
-            {/* Modal Création / Édition Donateur */}
             {donorModalOpen && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
@@ -765,7 +713,6 @@ export default function BudgetIndex({
                 </div>
             )}
 
-            {/* Modal Création / Édition Ligne Budgétaire */}
             {lineModalOpen && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 animate-fade-in">
                     <div className="bg-white rounded-xl border border-slate-200 shadow-2xl max-w-2xl w-full flex flex-col max-h-[90vh] animate-slide-down">
@@ -789,25 +736,18 @@ export default function BudgetIndex({
                         <div className="p-6 overflow-y-auto space-y-6 flex-1">
                             <form id="line-form" onSubmit={handleLineSubmit} className="space-y-6 text-xs">
                                 
-                                {/* Section 1 : Affectation */}
                                 <div className="grid grid-cols-2 gap-5">
                                     <div>
-                                        <label className="block font-bold text-slate-700 mb-1.5">Projet(s) de rattachement (Cochez) *</label>
-                                        <div className="max-h-24 overflow-y-auto border border-slate-300 rounded-md p-1.5 bg-slate-50 space-y-1 shadow-inner">
-                                            {projects.length === 0 && <span className="text-slate-400 text-xs px-1">Aucun projet</span>}
-                                            {projects.map((p) => (
-                                                <label key={p.id} className="flex items-center gap-2 cursor-pointer p-1.5 hover:bg-white rounded transition">
-                                                    <input 
-                                                        type="checkbox" 
-                                                        checked={lineForm.data.project_ids.includes(p.id)}
-                                                        onChange={(e) => toggleProjectForm(lineForm, p.id, e.target.checked)}
-                                                        className="w-3.5 h-3.5 rounded border-slate-300 text-[#04326D] focus:ring-[#04326D]" 
-                                                    />
-                                                    <span className="font-semibold text-slate-700 truncate">{p.name}</span>
-                                                </label>
-                                            ))}
-                                        </div>
-                                        {lineForm.errors.project_ids && <p className="text-[11px] text-red-600 mt-1">{lineForm.errors.project_ids}</p>}
+                                        <label className="block font-bold text-slate-700 mb-1.5">Projet de rattachement *</label>
+                                        <select 
+                                            value={lineForm.data.project_id}
+                                            onChange={(e) => lineForm.setData('project_id', e.target.value)}
+                                            className="w-full border border-slate-300 rounded-md p-2.5 text-xs font-semibold focus:outline-none focus:border-[#04326D] focus:ring-1 focus:ring-[#04326D]"
+                                        >
+                                            {projects.length === 0 && <option value="">Aucun projet disponible</option>}
+                                            {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                        </select>
+                                        {lineForm.errors.project_id && <p className="text-[11px] text-red-600 mt-1">{lineForm.errors.project_id}</p>}
                                     </div>
                                     <div>
                                         <label className="block font-bold text-slate-700 mb-1.5">Bailleur de fonds (Donateur)</label>
@@ -822,7 +762,6 @@ export default function BudgetIndex({
                                     </div>
                                 </div>
 
-                                {/* Section 2 : Codification Intelligente */}
                                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-4">
                                     <div>
                                         <label className="block font-bold text-[#04326D] mb-1.5 text-[11px] uppercase tracking-wider">
@@ -884,7 +823,6 @@ export default function BudgetIndex({
                                     </div>
                                 </div>
 
-                                {/* Section 3 : Informations Financement */}
                                 <div>
                                     <label className="block font-bold text-slate-700 mb-1.5">Libellé / Désignation de la ligne *</label>
                                     <input
@@ -931,7 +869,6 @@ export default function BudgetIndex({
                             </form>
                         </div>
 
-                        {/* Footer Modale */}
                         <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3 shrink-0 rounded-b-xl">
                             <button
                                 type="button"
@@ -943,7 +880,7 @@ export default function BudgetIndex({
                             <button
                                 type="submit"
                                 form="line-form"
-                                disabled={lineForm.processing || lineForm.data.project_ids.length === 0}
+                                disabled={lineForm.processing || !lineForm.data.project_id}
                                 className="px-6 py-2 bg-[#04326D] text-white rounded-md text-xs font-bold shadow-md hover:bg-[#06428f] transition disabled:opacity-50"
                             >
                                 {editingLine ? 'Enregistrer les modifications' : 'Créer la ligne budgétaire'}

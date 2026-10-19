@@ -24,12 +24,10 @@ class BudgetController extends Controller
         $selectedDonor = $request->input('donor_id', 'all');
         $search = $request->input('search', '');
 
-        $linesQuery = BudgetLine::with(['projects', 'donor'])->orderBy('code');
+        $linesQuery = BudgetLine::with(['project', 'donor'])->orderBy('code');
 
         if ($selectedProject !== 'all') {
-            $linesQuery->whereHas('projects', function ($query) use ($selectedProject) {
-                $query->where('projects.id', $selectedProject);
-            });
+            $linesQuery->where('project_id', $selectedProject);
         }
 
         if ($selectedDonor !== 'all') {
@@ -53,8 +51,8 @@ class BudgetController extends Controller
                 'split_code' => $line->split_code,
                 'libelle' => $line->libelle,
                 'devise' => $line->devise,
-                'project_ids' => $line->projects->pluck('id')->toArray(),
-                'project_name' => $line->projects->pluck('name')->join(', ') ?: 'Général',
+                'project_id' => $line->project_id,
+                'project_name' => $line->project?->name ?? 'Non spécifié',
                 'donor_id' => $line->donor_id,
                 'donor_name' => $line->donor?->name ?? 'Fonds Propres',
                 'budget_initial' => (float) $line->budget_initial,
@@ -122,16 +120,15 @@ class BudgetController extends Controller
         abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
 
         $validated = $request->validate([
-            'project_ids' => ['required', 'array', 'min:1'],
-            'project_ids.*' => ['exists:projects,id'],
+            'project_id' => ['required', 'exists:projects,id'],
             'file' => ['required', 'file', 'mimes:xlsx,xls,csv,txt', 'max:10240'],
         ], [
-            'project_ids.required' => 'Veuillez sélectionner au moins un projet de rattachement pour ce budget.',
+            'project_id.required' => 'Veuillez sélectionner un projet de rattachement pour ce budget.',
             'file.required' => 'Veuillez sélectionner un fichier Excel ou CSV.',
             'file.mimes' => 'Le fichier doit être au format Excel (.xlsx, .xls) ou CSV (.csv).',
         ]);
 
-        $result = $importService->import($validated['file'], $validated['project_ids']);
+        $result = $importService->import($validated['file'], $validated['project_id']);
 
         if (! $result['success']) {
             return Redirect::back()->with('error', $result['message']);
@@ -139,14 +136,14 @@ class BudgetController extends Controller
 
         return Redirect::back()->with('success', $result['message']);
     }
+
     public function storeBudgetLine(Request $request): RedirectResponse
     {
         $user = $request->user();
         abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
 
         $validated = $request->validate([
-            'project_ids' => ['required', 'array', 'min:1'],
-            'project_ids.*' => ['exists:projects,id'],
+            'project_id' => ['required', 'exists:projects,id'],
             'donor_id' => ['nullable', 'exists:donors,id'],
             'code' => ['nullable', 'string', 'max:100'],
             'category_code' => ['nullable', 'string', 'max:50'],
@@ -170,7 +167,7 @@ class BudgetController extends Controller
 
         $budgetInitial = (float) $validated['budget_initial'];
 
-        $existing = BudgetLine::where('code', $code)->first();
+        $existing = BudgetLine::where('code', $code)->where('project_id', $validated['project_id'])->first();
 
         if ($existing) {
             $solde = max(0, $budgetInitial - (float) $existing->montant_engage);
@@ -186,12 +183,11 @@ class BudgetController extends Controller
                 'solde' => $solde,
             ]);
 
-            $existing->projects()->syncWithoutDetaching($validated['project_ids']);
-
             return Redirect::back()->with('success', "Ligne budgétaire {$code} mise à jour.");
         }
 
-        $newLine = BudgetLine::create([
+        BudgetLine::create([
+            'project_id' => $validated['project_id'],
             'donor_id' => $validated['donor_id'] ?? null,
             'code' => $code,
             'category_code' => $validated['category_code'] ?? null,
@@ -206,8 +202,6 @@ class BudgetController extends Controller
             'solde' => $budgetInitial,
         ]);
 
-        $newLine->projects()->sync($validated['project_ids']);
-
         return Redirect::back()->with('success', "Ligne budgétaire {$code} enregistrée avec succès.");
     }
 
@@ -217,8 +211,7 @@ class BudgetController extends Controller
         abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
 
         $validated = $request->validate([
-            'project_ids' => ['required', 'array', 'min:1'],
-            'project_ids.*' => ['exists:projects,id'],
+            'project_id' => ['required', 'exists:projects,id'],
             'donor_id' => ['nullable', 'exists:donors,id'],
             'code' => ['nullable', 'string', 'max:100'],
             'category_code' => ['nullable', 'string', 'max:50'],
@@ -239,18 +232,22 @@ class BudgetController extends Controller
                 $validated['split_code'] ?? null
             );
         }
+        
+        // On vérifie qu'il n'y a pas déjà ce code pour CE projet
         $duplicate = BudgetLine::where('code', $code)
+            ->where('project_id', $validated['project_id'])
             ->where('id', '!=', $budgetLine->id)
             ->exists();
 
         if ($duplicate) {
-            return Redirect::back()->with('error', "Une autre ligne avec le code {$code} existe déjà dans le système.");
+            return Redirect::back()->with('error', "Une autre ligne avec le code {$code} existe déjà pour ce projet.");
         }
 
         $budgetInitial = (float) $validated['budget_initial'];
         $solde = max(0, $budgetInitial - (float) $budgetLine->montant_engage);
 
         $budgetLine->update([
+            'project_id' => $validated['project_id'],
             'donor_id' => $validated['donor_id'] ?? null,
             'code' => $code,
             'category_code' => $validated['category_code'] ?? null,
@@ -262,8 +259,6 @@ class BudgetController extends Controller
             'budget_initial' => $budgetInitial,
             'solde' => $solde,
         ]);
-
-        $budgetLine->projects()->sync($validated['project_ids']);
 
         return Redirect::back()->with('success', "Ligne budgétaire {$code} modifiée avec succès.");
     }
@@ -288,11 +283,11 @@ class BudgetController extends Controller
         }
 
         $code = $budgetLine->code;
-        $budgetLine->projects()->detach();
         $budgetLine->delete();
 
         return Redirect::back()->with('success', "Ligne budgétaire {$code} supprimée.");
     }
+
     public function storeDonor(Request $request): RedirectResponse
     {
         $user = $request->user();

@@ -77,6 +77,7 @@ class RequisitionController extends Controller
                             'date' => $sig->signed_at->format('d/m/Y à H:i'),
                             'hash' => $sig->signature_hash,
                             'hashShort' => substr($sig->signature_hash, 0, 16) . '...',
+                             'commentaire' => $sig->commentaire, 
                         ];
                     })->values()->all(),
 
@@ -303,9 +304,8 @@ class RequisitionController extends Controller
             return 'controle_finance';
         }
 
-        if ($user->hasRole('admin_manager') && $requisition->status === 'returned_to_admin_manager') {
-            return 'visa_admin';
-        }
+        // CORRECTION: Le PAM ne corrige plus, c'est le rôle de la finance
+        // if ($user->hasRole('admin_manager') && $requisition->status === 'returned_to_admin_manager') { ... }
 
         if ($isOwner
             && ($user->hasRole('beneficiary') || $user->hasRole('coordinator'))
@@ -372,7 +372,8 @@ class RequisitionController extends Controller
 
         $isUrgent = $request->boolean('is_urgent');
         
-        $initialStatus = $user->hasRole('project_manager') ? 'visa_mp' : 'draft';
+        // CORRECTION: Tout le monde commence en 'draft', y compris le PM, pour forcer l'arbitrage
+        $initialStatus = 'draft';
 
         $requisition = Requisition::create([
             'user_id' => $user->id,
@@ -460,137 +461,135 @@ class RequisitionController extends Controller
     }
 
     public function managerDecision(Request $request, Requisition $requisition)
-{
-    $user = $request->user();
+    {
+        $user = $request->user();
 
-    abort_unless($user?->hasRole('project_manager'), 403, 'Action réservée au Manager de Projet.');
-    abort_unless($user->project_id !== null && $user->project_id === $requisition->project_id, 403, 'Cette réquisition appartient à un autre projet.');
-    
-    // CORRECTION : On accepte "draft" (Bénéficiaire) OU "visa_mp" (Coordinateur ou MP lui-même)
-    abort_unless(in_array($requisition->status, ['draft', 'visa_mp']), 403,
-        'La réquisition n\'est pas dans un statut en attente de l\'arbitrage du Manager de Projet.');
-
-    $validated = $request->validate([
-        'decision' => ['required', 'in:approve,reject'],
-        'pin' => ['nullable', 'string'],
-        'password' => ['nullable', 'string'],
-        'caisse_decaissement' => [
-            'required_if:decision,approve',
-            'nullable',
-            'string',
-            'max:255',
-            Rule::exists('cash_registers', 'name')->where('is_active', true),
-        ],
-        'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
-        'allocations' => ['required_if:decision,approve', 'array', 'min:1'],
-        'allocations.*.demande_id' => ['required', 'string', 'distinct'],
-        'allocations.*.code_allocation' => ['required', 'string', 'max:255'],
-    ]);
-
-    if ($validated['decision'] === 'approve') {
-        $secret = $validated['pin'] ?? $validated['password'] ?? $request->input('pin') ?? $request->input('password');
-
-        if (! $this->verifierSecretSignature($user, $secret)) {
-            return Redirect::back()->withErrors([
-                'pin' => 'Signature refusée : Code PIN (ou mot de passe) incorrect.',
-                'password' => 'Signature refusée : Code PIN (ou mot de passe) incorrect.',
-            ]);
-        }
-    }
-
-    DB::transaction(function () use ($validated, $requisition, $user) {
-        $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
+        abort_unless($user?->hasRole('project_manager'), 403, 'Action réservée au Manager de Projet.');
+        abort_unless($user->project_id !== null && $user->project_id === $requisition->project_id, 403, 'Cette réquisition appartient à un autre projet.');
         
-        // CORRECTION : Même vérification ici à l'intérieur de la transaction
-        abort_unless(
-            $lockedRequisition->project_id === $user->project_id
-                && in_array($lockedRequisition->status, ['draft', 'visa_mp']),
-            403,
-            'La réquisition n\'est pas dans un statut en attente de l\'arbitrage du Manager de Projet.'
-        );
+        abort_unless(in_array($requisition->status, ['draft', 'visa_mp']), 403,
+            'La réquisition n\'est pas dans un statut en attente de l\'arbitrage du Manager de Projet.');
+
+        $validated = $request->validate([
+            'decision' => ['required', 'in:approve,reject'],
+            'pin' => ['nullable', 'string'],
+            'password' => ['nullable', 'string'],
+            'caisse_decaissement' => [
+                'required_if:decision,approve',
+                'nullable',
+                'string',
+                'max:255',
+                Rule::exists('cash_registers', 'name')->where('is_active', true),
+            ],
+            'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
+            'allocations' => ['required_if:decision,approve', 'array', 'min:1'],
+            'allocations.*.demande_id' => ['required', 'string', 'distinct'],
+            'allocations.*.code_allocation' => ['required', 'string', 'max:255'],
+        ]);
 
         if ($validated['decision'] === 'approve') {
-            $demandes = $lockedRequisition->demandes()->lockForUpdate()->get()->keyBy('id');
-            foreach ($validated['allocations'] as $allocation) {
-                $demande = $demandes->get($allocation['demande_id']);
-                if ($demande) {
-                    $demande->update([
-                        'code_allocation' => trim($allocation['code_allocation']),
-                        'code_all_budget' => trim($allocation['code_allocation']),
-                        'libelle_allocation' => BudgetLine::query()
-                            ->whereHas('projects', function ($q) use ($lockedRequisition) {
-                                $q->where('projects.id', $lockedRequisition->project_id);
-                            })
-                            ->whereRaw('LOWER(TRIM(code)) = ?', [
-                                BudgetLine::normalizeCode($allocation['code_allocation']),
-                            ])
-                            ->value('libelle') ?? 'code non specifie',
-                    ]);
+            $secret = $validated['pin'] ?? $validated['password'] ?? $request->input('pin') ?? $request->input('password');
+
+            if (! $this->verifierSecretSignature($user, $secret)) {
+                return Redirect::back()->withErrors([
+                    'pin' => 'Signature refusée : Code PIN (ou mot de passe) incorrect.',
+                    'password' => 'Signature refusée : Code PIN (ou mot de passe) incorrect.',
+                ]);
+            }
+        }
+
+        DB::transaction(function () use ($validated, $requisition, $user) {
+            $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
+            
+            abort_unless(
+                $lockedRequisition->project_id === $user->project_id
+                    && in_array($lockedRequisition->status, ['draft', 'visa_mp']),
+                403,
+                'La réquisition n\'est pas dans un statut en attente de l\'arbitrage du Manager de Projet.'
+            );
+
+            if ($validated['decision'] === 'approve') {
+                $demandes = $lockedRequisition->demandes()->lockForUpdate()->get()->keyBy('id');
+                foreach ($validated['allocations'] as $allocation) {
+                    $demande = $demandes->get($allocation['demande_id']);
+                    if ($demande) {
+                        // CORRECTION: where('project_id', ...)
+                        $demande->update([
+                            'code_allocation' => trim($allocation['code_allocation']),
+                            'code_all_budget' => trim($allocation['code_allocation']),
+                            'libelle_allocation' => BudgetLine::query()
+                                ->where('project_id', $lockedRequisition->project_id)
+                                ->whereRaw('LOWER(TRIM(code)) = ?', [
+                                    BudgetLine::normalizeCode($allocation['code_allocation']),
+                                ])
+                                ->value('libelle') ?? 'code non specifie',
+                        ]);
+                    }
                 }
+
+                $lockedRequisition->update([
+                    'status' => 'visa_mp', 
+                    'caisse_decaissement' => $validated['caisse_decaissement'],
+                ]);
+
+                $this->enregistrerSignature(
+                    $lockedRequisition,
+                    $user,
+                    'project_manager',
+                    'approved',
+                    "Visa MP accordé. Caisse : {$validated['caisse_decaissement']}"
+                );
+
+                $this->notifierUtilisateur(
+                    userId: $user->id,
+                    titre: 'Visa MP accordé',
+                    message: "Vous avez apposé votre signature certifiée sur la réquisition {$lockedRequisition->numero_requisition}."
+                );
+
+                if ($lockedRequisition->user_id !== $user->id) {
+                    $this->notifierUtilisateur(
+                        userId: $lockedRequisition->user_id,
+                        titre: 'Visa Manager de Projet accordé',
+                        message: "Votre réquisition {$lockedRequisition->numero_requisition} a été visée par le MP et transmise aux Finances."
+                    );
+                }
+
+                $this->notifierRole(
+                    roleCible: 'finance',
+                    projectId: null,
+                    titre: (bool) $lockedRequisition->is_urgent ? 'URGENT : Réquisition pour contrôle' : 'Nouvelle réquisition pour contrôle budgétaire',
+                    message: "La réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->projet}) est en attente de visa financier.",
+                    urgent: (bool) $lockedRequisition->is_urgent
+                );
+
+                return;
             }
 
-            $lockedRequisition->update([
-                'status' => 'visa_mp', // On le passe en "visa_mp" qui est l'étape terminée pour le MP
-                'caisse_decaissement' => $validated['caisse_decaissement'],
-            ]);
+            $lockedRequisition->update(['status' => 'returned_to_beneficiary']);
 
             $this->enregistrerSignature(
                 $lockedRequisition,
                 $user,
                 'project_manager',
-                'approved',
-                "Visa MP accordé. Caisse : {$validated['caisse_decaissement']}"
+                'rejected',
+                $validated['motif_rejet']
             );
 
             $this->notifierUtilisateur(
-                userId: $user->id,
-                titre: 'Visa MP accordé',
-                message: "Vous avez apposé votre signature certifiée sur la réquisition {$lockedRequisition->numero_requisition}."
+                userId: $lockedRequisition->user_id,
+                titre: 'Réquisition rejetée par le MP',
+                message: "Votre réquisition {$lockedRequisition->numero_requisition} a été rejetée : {$validated['motif_rejet']}"
             );
+        });
 
-            if ($lockedRequisition->user_id !== $user->id) {
-                $this->notifierUtilisateur(
-                    userId: $lockedRequisition->user_id,
-                    titre: 'Visa Manager de Projet accordé',
-                    message: "Votre réquisition {$lockedRequisition->numero_requisition} a été visée par le MP et transmise aux Finances."
-                );
-            }
-
-            $this->notifierRole(
-                roleCible: 'finance',
-                projectId: null,
-                titre: (bool) $lockedRequisition->is_urgent ? 'URGENT : Réquisition pour contrôle' : 'Nouvelle réquisition pour contrôle budgétaire',
-                message: "La réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->projet}) est en attente de visa financier.",
-                urgent: (bool) $lockedRequisition->is_urgent
-            );
-
-            return;
-        }
-
-        $lockedRequisition->update(['status' => 'returned_to_beneficiary']);
-
-        $this->enregistrerSignature(
-            $lockedRequisition,
-            $user,
-            'project_manager',
-            'rejected',
-            $validated['motif_rejet']
+        return Redirect::back()->with(
+            $validated['decision'] === 'approve' ? 'success' : 'error',
+            $validated['decision'] === 'approve'
+                ? 'Visa Manager de Projet accordé avec certificat cryptographique.'
+                : 'Réquisition rejetée par le Manager de Projet.'
         );
+    }
 
-        $this->notifierUtilisateur(
-            userId: $lockedRequisition->user_id,
-            titre: 'Réquisition rejetée par le MP',
-            message: "Votre réquisition {$lockedRequisition->numero_requisition} a été rejetée : {$validated['motif_rejet']}"
-        );
-    });
-
-    return Redirect::back()->with(
-        $validated['decision'] === 'approve' ? 'success' : 'error',
-        $validated['decision'] === 'approve'
-            ? 'Visa Manager de Projet accordé avec certificat cryptographique.'
-            : 'Réquisition rejetée par le Manager de Projet.'
-    );
-}
     public function financeDecision(Request $request, Requisition $requisition)
     {
         $user = $request->user();
@@ -640,10 +639,9 @@ class RequisitionController extends Controller
                         $demande = $demandes->get($allocation['demande_id']);
                         if ($demande) {
                             $code = trim($allocation['code_allocation']);
+                            // CORRECTION: where('project_id', ...)
                             $libelle = BudgetLine::query()
-                                ->whereHas('projects', function ($q) use ($lockedRequisition) {
-                                    $q->where('projects.id', $lockedRequisition->project_id);
-                                })
+                                ->where('project_id', $lockedRequisition->project_id)
                                 ->whereRaw('LOWER(TRIM(code)) = ?', [BudgetLine::normalizeCode($code)])
                                 ->value('libelle') ?? 'code non specifie';
 
@@ -891,8 +889,9 @@ class RequisitionController extends Controller
                 return;
             }
 
+            // CORRECTION: Le rejet de la directrice retourne aux finances
             $lockedRequisition->update([
-                'status' => 'returned_to_admin_manager',
+                'status' => 'returned_to_finance',
             ]);
 
             $this->enregistrerSignature(
@@ -910,10 +909,10 @@ class RequisitionController extends Controller
                 message: "Votre réquisition {$lockedRequisition->numero_requisition} a été refusée : {$validated['motif_rejet']}"
             );
             $this->notifierRole(
-                roleCible: 'admin_manager',
+                roleCible: 'finance', // CORRECTION: Notification envoyée aux finances
                 projectId: null,
                 titre: 'Réquisition à corriger après refus de la Direction',
-                message: "La réquisition {$lockedRequisition->numero_requisition} doit être corrigée par le PAM avant une nouvelle soumission à la Direction."
+                message: "La réquisition {$lockedRequisition->numero_requisition} doit être corrigée par les Finances avant une nouvelle soumission à la Direction."
             );
         });
 

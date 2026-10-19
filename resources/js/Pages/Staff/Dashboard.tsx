@@ -11,12 +11,23 @@ import {
     Truck,
     ChevronRight,
     Filter,
+    AlertCircle,
+    Eye
 } from 'lucide-react';
 
 interface EtapeWorkflow {
     nom: string;
     statut: string;
     validateurActuel: string;
+}
+
+interface Signature {
+    role: string;
+    nom: string;
+    action: string;
+    commentaire?: string | null;
+    date: string;
+    hash: string;
 }
 
 interface RequisitionItem {
@@ -30,6 +41,10 @@ interface RequisitionItem {
     devise: string;
     articlesCount: number;
     etapeWorkflow: EtapeWorkflow;
+    statusCode: string;
+    statusLabel: string;
+    motifRejet?: string | null;
+    signatures: Signature[];
 }
 
 interface StaffStats {
@@ -43,7 +58,7 @@ interface StaffStats {
     dechargeRef: string;
 }
 
-interface StaffDashboardProps {
+interface StaffDashboardProps extends PageProps {
     stats?: StaffStats;
     requisitions?: RequisitionItem[];
 }
@@ -85,15 +100,14 @@ export default function StaffDashboard({
                         <span>Espace Opérationnel</span>
                         <ChevronRight className="w-3 h-3" />
                         <span className="text-on-surface font-semibold">
-                            {user.project?.name || 'Projets Kolwezi'}
+                            {user.project?.name || 'Projets Généraux'}
                         </span>
                     </nav>
                     <h1 className="text-xl font-bold text-on-surface tracking-tight">
                         Espace Collaborateur — Mes Demandes & Activités
                     </h1>
                     <p className="text-xs text-gray-600 mt-1">
-                        Suivi rigoureux des décaissements, engagements d'activités et apurements de
-                        fonds sur site.
+                        Suivi rigoureux des décaissements, engagements d'activités et apurements de fonds sur site.
                     </p>
                 </div>
 
@@ -116,7 +130,7 @@ export default function StaffDashboard({
             </div>
 
             {/* KPI */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
                 <div className="bg-white border border-outline-soft rounded-lg p-5 shadow-card hover:shadow-md transition-shadow flex flex-col justify-between">
                     <div className="flex items-center justify-between mb-3">
                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
@@ -197,15 +211,14 @@ export default function StaffDashboard({
             </div>
 
             {/* Tableau */}
-            <div className="bg-white border border-outline-soft rounded-lg shadow-card overflow-hidden">
+            <div className="bg-white border border-outline-soft rounded-lg shadow-card overflow-hidden mt-6">
                 <div className="p-4 border-b border-outline-soft flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white">
                     <div>
                         <h2 className="text-sm font-bold text-on-surface">
-                            Historique de mes réquisitions et suivi en temps réel
+                            Aperçu de mes réquisitions récentes
                         </h2>
                         <p className="text-[11px] text-gray-500 mt-0.5">
-                            Tracez chaque signature hiérarchique avant déblocage par le caissier
-                            principal.
+                            Tracez chaque signature hiérarchique avant le déblocage des fonds.
                         </p>
                     </div>
 
@@ -217,8 +230,10 @@ export default function StaffDashboard({
                             className="text-xs border border-outline-variant rounded-md px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                         >
                             <option value="all">Toutes les étapes</option>
-                            <option value="chef_projet">Visa Manager Projet</option>
-                            <option value="finance_budget">Finance & Budget</option>
+                            <option value="brouillon">Brouillon / À corriger</option>
+                            <option value="visa_mp">Visa Manager Projet</option>
+                            <option value="controle_finance">Contrôle Finances</option>
+                            <option value="visa_admin">Contrôle Administratif</option>
                             <option value="caisse_pret">Caisse (Prêt)</option>
                         </select>
                     </div>
@@ -231,9 +246,9 @@ export default function StaffDashboard({
                                 <th className="py-3 px-4">Code Réquisition</th>
                                 <th className="py-3 px-4">Motif / Contexte</th>
                                 <th className="py-3 px-4">Date Soumission</th>
-                                <th className="py-3 px-4">Montant</th>
-                                <th className="py-3 px-4 text-center">Demandes</th>
+                                <th className="py-3 px-4 text-right">Montant</th>
                                 <th className="py-3 px-4">Étape Actuelle (Workflow)</th>
+                                <th className="py-3 px-4 text-center">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-outline-soft text-gray-700">
@@ -245,56 +260,73 @@ export default function StaffDashboard({
                                             strokeWidth={1.5}
                                         />
                                         <p className="text-gray-500 font-medium text-sm">
-                                            Aucune réquisition enregistrée
-                                        </p>
-                                        <p className="text-gray-400 text-[11px] mt-1">
-                                            Créez votre première demande pour démarrer.
+                                            Aucune réquisition trouvée pour ce filtre.
                                         </p>
                                     </td>
                                 </tr>
                             ) : (
-                                filteredReqs.map((req) => (
-                                    <tr key={req.id} className="hover:bg-primary-soft/40 transition-colors">
-                                        <td className="py-4 px-4 font-mono font-bold text-primary whitespace-nowrap">
-                                            {req.code}
-                                            {req.is_urgent && (
-                                                <span className="ml-2 bg-error-soft text-error-dark text-[9px] px-1.5 py-0.5 rounded font-black uppercase">
-                                                    URGENT
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="py-4 px-4 max-w-xs">
-                                            <p className="font-semibold text-on-surface leading-snug">
-                                                {req.motif}
-                                            </p>
-                                            <p className="text-[10px] text-gray-500 mt-0.5">
-                                                {req.projet}
-                                            </p>
-                                        </td>
-                                        <td className="py-4 px-4 whitespace-nowrap text-gray-600">
-                                            {req.dateSoumission}
-                                        </td>
-                                        <td className="py-4 px-4 font-bold text-on-surface whitespace-nowrap font-mono">
-                                            {req.montant}
-                                        </td>
-                                        <td className="py-4 px-4 text-center whitespace-nowrap">
-                                            <span className="bg-primary-soft text-primary font-bold px-2 py-0.5 rounded text-[10px]">
-                                                {req.articlesCount} ligne(s)
-                                            </span>
-                                        </td>
-                                        <td className="py-4 px-4 whitespace-nowrap">
-                                            <div>
-                                                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-primary">
-                                                    <span className="w-2 h-2 rounded-full bg-primary" />
-                                                    {req.etapeWorkflow.nom}
-                                                </span>
-                                                <p className="text-[10px] text-gray-400 mt-0.5">
-                                                    {req.etapeWorkflow.validateurActuel}
+                                filteredReqs.map((req) => {
+                                    const isRejected = req.statusCode?.startsWith('returned_');
+                                    
+                                    return (
+                                        <tr key={req.id} className="hover:bg-primary-soft/40 transition-colors">
+                                            <td className="py-4 px-4 font-mono font-bold text-primary whitespace-nowrap">
+                                                {req.code}
+                                                {req.is_urgent && (
+                                                    <span className="ml-2 bg-error-soft text-error-dark text-[9px] px-1.5 py-0.5 rounded font-black uppercase">
+                                                        URGENT
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="py-4 px-4 max-w-xs">
+                                                <p className="font-semibold text-on-surface leading-snug">
+                                                    {req.motif}
                                                 </p>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))
+                                                <p className="text-[10px] text-gray-500 mt-0.5">
+                                                    {req.projet} • {req.articlesCount} ligne(s)
+                                                </p>
+                                            </td>
+                                            <td className="py-4 px-4 whitespace-nowrap text-gray-600">
+                                                {req.dateSoumission}
+                                            </td>
+                                            <td className="py-4 px-4 font-bold text-on-surface whitespace-nowrap font-mono text-right">
+                                                {req.montant}
+                                            </td>
+                                            <td className="py-4 px-4">
+                                                {isRejected ? (
+                                                    <div className="bg-red-50 border border-red-200 text-red-800 p-2 rounded max-w-xs shadow-sm">
+                                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-red-700 mb-0.5">
+                                                            <AlertCircle className="w-3 h-3" />
+                                                            À CORRIGER
+                                                        </span>
+                                                        <p className="text-[10px] font-medium leading-tight">
+                                                            {req.motifRejet || 'Veuillez corriger votre demande et la resoumettre.'}
+                                                        </p>
+                                                    </div>
+                                                ) : (
+                                                    <div>
+                                                        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-primary bg-primary-soft px-2 py-0.5 rounded">
+                                                            {req.etapeWorkflow.nom}
+                                                        </span>
+                                                        <p className="text-[10px] text-gray-400 mt-1 uppercase tracking-wide">
+                                                            En attente : {req.etapeWorkflow.validateurActuel}
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="py-4 px-4 text-center">
+                                                <Link 
+                                                    href={route('requisitions.index')}
+                                                    className="inline-flex items-center gap-1 text-primary hover:text-primary-dark hover:bg-primary-soft px-2 py-1 rounded transition"
+                                                    title="Ouvrir dans Mes Réquisitions pour corriger ou suivre"
+                                                >
+                                                    <Eye className="w-4 h-4" />
+                                                    <span className="text-[10px] font-bold uppercase">Gérer</span>
+                                                </Link>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
                             )}
                         </tbody>
                     </table>

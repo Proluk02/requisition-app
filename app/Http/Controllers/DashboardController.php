@@ -47,11 +47,9 @@ class DashboardController extends Controller
 
             $requisitions = $requisitionsQuery->get();
 
-            // Strictement filtré sur le projet du Manager via la table pivot
+            // CORRECTION: Utilisation de project_id directement au lieu de whereHas('projects')
             $budgetLines = clone BudgetLine::query()
-                ->whereHas('projects', function ($q) use ($user) {
-                    $q->where('projects.id', $user->project_id);
-                })
+                ->where('project_id', $user->project_id)
                 ->get(['id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
                 ->keyBy(fn (BudgetLine $line) => BudgetLine::normalizeCode($line->code));
 
@@ -317,13 +315,15 @@ class DashboardController extends Controller
             ->orderByDesc('created_at')
             ->get();
 
-        $budgetLines = BudgetLine::with('projects')->get()->keyBy('code');
+        // CORRECTION: project() au singulier
+        $budgetLines = BudgetLine::with('project')->get()->keyBy('code');
 
         $allBudgetLines = BudgetLine::query()
             ->orderBy('code')
-            ->get(['id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
+            ->get(['id', 'project_id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
             ->map(fn (BudgetLine $b) => [
                 'id' => $b->id,
+                'project_id' => $b->project_id,
                 'code' => $b->code,
                 'libelle' => $b->libelle,
                 'normalizedCode' => BudgetLine::normalizeCode($b->code),
@@ -406,7 +406,6 @@ class DashboardController extends Controller
                     'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
                     'lignes' => $r->demandes->map(function (Demande $d) use ($budgetLines) {
                         $codeAlloc = trim((string) ($d->code_allocation ?: $d->code_all_budget));
-                        // La recherche se fait désormais sur le code global
                         $lineModel = $budgetLines->get($codeAlloc);
 
                         return [
@@ -449,7 +448,8 @@ class DashboardController extends Controller
 
         $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user'])
             ->where(function ($query) use ($user) {
-                $query->whereIn('status', ['controle_finance', 'returned_to_admin_manager'])
+                // CORRECTION: Le PAM ne voit plus les 'returned_to_admin_manager'
+                $query->whereIn('status', ['controle_finance'])
                     ->orWhere(function ($urgentQuery) use ($user) {
                         $urgentQuery->where('status', 'returned_to_urgent_initiator')
                             ->where('user_id', $user->id);
@@ -498,13 +498,12 @@ class DashboardController extends Controller
                 'is_urgent' => (bool) $r->is_urgent,
                 'statusCode' => $r->status,
                 'statusLabel' => match ($r->status) {
-                    'returned_to_admin_manager' => 'À corriger après refus de la Direction',
                     'returned_to_urgent_initiator' => 'Urgence à corriger par son initiateur',
                     default => 'Contrôle Administratif',
                 },
                 'canDecide' => $r->status === 'controle_finance',
-                'canCorrect' => $r->status === 'returned_to_admin_manager'
-                    || ($r->status === 'returned_to_urgent_initiator' && (string) $r->user_id === (string) $user->id),
+                // CORRECTION: PAM ne corrige que ses propres urgences
+                'canCorrect' => ($r->status === 'returned_to_urgent_initiator' && (string) $r->user_id === (string) $user->id),
                 'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
                 'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
                 'lignes' => $r->demandes->map(fn ($d) => [
@@ -589,6 +588,16 @@ class DashboardController extends Controller
                 'montant' => number_format($r->montant_total, 2, '.', ' ') . ' ' . $r->devise,
                 'devise' => $r->devise,
                 'articlesCount' => $r->demandes->count(),
+                // CORRECTIONS: On ajoute ces champs manquants pour le staff
+                'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
+                'signatures' => $r->signatures->map(fn ($s) => [
+                    'role' => $s->role_signataire,
+                    'nom' => $s->nom_signataire,
+                    'action' => $s->action,
+                    'commentaire' => $s->commentaire,
+                    'date' => $s->signed_at->format('d/m/Y H:i'),
+                    'hash' => $s->signature_hash,
+                ])->values()->all(),
                 'etapeWorkflow' => [
                     'nom' => $status['label'],
                     'statut' => $status['key'],
@@ -648,8 +657,8 @@ class DashboardController extends Controller
                     'rejetee' => 'Rejetée',
                     default => 'Validé MP',
                 },
-                'canDecide' => $r->status === 'draft'
-                    && ($r->user?->hasRole('beneficiary') ?? false),
+                // CORRECTION: PM peut arbitrer toutes les requêtes en draft de son projet
+                'canDecide' => $r->status === 'draft',
                 'canEdit' => ((string) $r->user_id === $managerId
                     && in_array($r->status, ['draft', 'visa_mp', 'returned_to_urgent_initiator'], true))
                     || $r->status === 'returned_to_project_manager',

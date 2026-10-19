@@ -1,13 +1,11 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Head, Link, router } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
-import {
-    RequisitionSuivi,
-    WorkflowStep,
-    DetailArticle,
-} from '@/types/requisitionsList';
+import { RequisitionSuivi, WorkflowStep, DetailArticle } from '@/types/requisitionsList';
 import { numberToWordsFR } from '@/lib/numberToWords';
 import OfficialPrintSheet from '@/Components/OfficialPrintSheet';
+import SignatureHistory from '@/Components/Director/SignatureHistory';
+import WorkflowStepper from '@/Components/Director/WorkflowStepper';
 import { openPrintPreview } from '@/lib/printPreview';
 import {
     Search,
@@ -34,16 +32,6 @@ interface RequisitionIndexProps {
     requisitions?: RequisitionSuivi[];
     caisses?: CaisseOption[];
 }
-
-const WORKFLOW_STEPS: { key: WorkflowStep; label: string; role: string }[] = [
-    { key: 'brouillon', label: 'Brouillon', role: 'Staff' },
-    { key: 'visa_mp', label: 'Visa MP', role: 'Manager Projet' },
-    { key: 'controle_finance', label: 'Finances', role: 'Manager Finances' },
-    { key: 'visa_admin', label: 'Administration', role: 'Manager Admin' },
-    { key: 'approbation_direction', label: 'Direction', role: 'Directrice' },
-    { key: 'decaissement_caisse', label: 'Caisse', role: 'Caisse / Banque' },
-    { key: 'cloture', label: 'Clôture', role: 'Return Form' },
-];
 
 export default function RequisitionsIndex({
     requisitions: initialRequisitions,
@@ -177,29 +165,6 @@ export default function RequisitionsIndex({
         });
     };
 
-    const getStepClasses = (currentStep: WorkflowStep, stepIndex: number, isUrgent = false, isFinal = false) => {
-        const order: WorkflowStep[] = [
-            'brouillon',
-            'visa_mp',
-            'controle_finance',
-            'visa_admin',
-            'approbation_direction',
-            'decaissement_caisse',
-            'cloture',
-        ];
-        const currentIndex = order.indexOf(currentStep);
-        const urgentRoute = isUrgent && ['approbation_direction', 'decaissement_caisse', 'cloture'].includes(currentStep);
-
-        if (urgentRoute && stepIndex < 4) return 'bg-gray-100 text-gray-400 border-gray-200';
-        if (isFinal) return 'bg-emerald-500 text-white border-emerald-500';
-
-        if (stepIndex < currentIndex) return 'bg-emerald-500 text-white border-emerald-500';
-        if (stepIndex === currentIndex)
-            // Orange clair pour l'étape en attente (et non bleu)
-            return 'bg-amber-50 text-[#F58F20] border-amber-200 ring-4 ring-amber-100';
-        return 'bg-gray-100 text-gray-400 border-gray-200';
-    };
-
     const renderEtapeBadge = (etape: string, isUrgent: boolean, statusCode?: string) => {
         if (statusCode?.startsWith('returned_to_')) {
             return (
@@ -212,9 +177,9 @@ export default function RequisitionsIndex({
         const badges: Record<string, string> = {
             brouillon: 'bg-gray-100 text-gray-700 border-gray-200',
             visa_mp: 'bg-amber-50 text-[#F58F20] border-amber-200',
-            controle_finance: 'bg-amber-50 text-[#F58F20] border-amber-200',
-            visa_admin: 'bg-amber-50 text-[#F58F20] border-amber-200',
-            approbation_direction: 'bg-amber-50 text-[#F58F20] border-amber-200',
+            controle_finance: 'bg-purple-50 text-purple-700 border-purple-200',
+            visa_admin: 'bg-amber-50 text-amber-600 border-amber-200',
+            approbation_direction: 'bg-blue-50 text-blue-700 border-blue-200',
             decaissement_caisse: 'bg-emerald-50 text-emerald-800 border border-emerald-200',
             cloture: 'bg-gray-800 text-white border border-gray-800',
         };
@@ -228,7 +193,7 @@ export default function RequisitionsIndex({
             cloture: 'Clôturé',
         };
         return (
-            <span className={`inline-block border px-2.5 py-0.5 rounded text-[10px] font-bold ${badges[etape] || 'bg-gray-100 text-gray-700'}`}>
+            <span className={`inline-block border px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${badges[etape] || 'bg-gray-100 text-gray-700'}`}>
                 {labels[etape] || etape}
             </span>
         );
@@ -444,7 +409,7 @@ export default function RequisitionsIndex({
                                                                     setEditAttachments({});
                                                                     setEditError(null);
                                                                 }}
-                                                                className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded transition"
+                                                                className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded transition border border-transparent hover:border-amber-200"
                                                                 title="Corriger la demande"
                                                             >
                                                                 <Pencil className="w-4 h-4" />
@@ -455,7 +420,7 @@ export default function RequisitionsIndex({
                                                             type="button"
                                                             onClick={() => setViewReq(req)}
                                                             className="p-1.5 text-gray-500 hover:text-[#04326D] hover:bg-blue-50 rounded transition"
-                                                            title="Consulter"
+                                                            title="Consulter l'historique et les signatures"
                                                         >
                                                             <Eye className="w-4 h-4" />
                                                         </button>
@@ -489,8 +454,8 @@ export default function RequisitionsIndex({
 
             {/* MODALE VIEW */}
             {viewReq && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 no-print-zone animate-fade-in">
-                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-3xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto animate-slide-down">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 no-print-zone animate-fade-in" onClick={() => setViewReq(null)}>
+                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-3xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto animate-slide-down" onClick={e => e.stopPropagation()}>
                         <div className="flex items-start justify-between border-b border-[#E2E8F0] pb-3">
                             <div>
                                 <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">
@@ -523,52 +488,44 @@ export default function RequisitionsIndex({
                             </div>
                         </div>
 
-                        <div>
-                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">
-                                Circuit d'approbation actuel
-                            </h3>
-                            <div className="flex items-center justify-between relative px-2">
-                                <div className="absolute left-0 top-3.5 h-0.5 w-full bg-gray-200 -z-0" />
-                                {WORKFLOW_STEPS.map((step, idx) => (
-                                    <div
-                                        key={step.key}
-                                        className="flex flex-col items-center text-center z-10 w-16"
-                                    >
-                                        <div
-                                            className={`w-7 h-7 rounded flex items-center justify-center font-bold text-xs border transition ${getStepClasses(
-                                                viewReq.etapeActuelle,
-                                                idx,
-                                                viewReq.is_urgent,
-                                                viewReq.statusCode === 'decaisse' || viewReq.statusCode === 'cloture',
-                                            )}`}
-                                        >
-                                            {idx + 1}
-                                        </div>
-                                        <span className="text-[9px] font-bold text-[#0B192C] mt-2 leading-tight">
-                                            {step.label}
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        {viewReq.statusLabel?.toLowerCase().includes('corriger') && (
-                            <div className="p-3 bg-red-50 border border-red-200 rounded text-xs text-red-900 flex items-start gap-2">
-                                <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                        {/* Motif de rejet affiché dans la consultation si applicable */}
+                        {viewReq.statusCode?.startsWith('returned_') && (
+                            <div className="bg-red-50 border border-red-200 p-3.5 rounded flex gap-3 items-start shadow-sm">
+                                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
                                 <div>
-                                    <strong className="block uppercase text-[10px] mb-0.5">Motif de rejet :</strong>
-                                    <span className="font-semibold">{viewReq.statusLabel}</span> - Veuillez modifier la demande pour la resoumettre.
+                                    <strong className="block uppercase tracking-wider text-[11px] mb-1 font-black text-red-800">
+                                        Dossier renvoyé pour correction
+                                    </strong>
+                                    <p className="font-medium text-sm text-red-900 whitespace-pre-wrap">
+                                        {(viewReq as any).motifRejet || viewReq.signatures?.filter(s => s.action === 'rejected').pop()?.commentaire || 'Aucun motif spécifié. Veuillez revoir votre demande.'}
+                                    </p>
                                 </div>
                             </div>
                         )}
 
                         <div>
+                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">
+                                Circuit d'approbation actuel
+                            </h3>
+                            <WorkflowStepper statusCode={viewReq.statusCode ?? ''} isUrgent={!!viewReq.is_urgent} />
+                        </div>
+
+                        <div>
+                            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                                Historique des Signatures & Visas
+                            </h3>
+                            <div className="bg-gray-50 rounded border border-gray-200 p-3 shadow-inner">
+                                <SignatureHistory signatures={viewReq.signatures} />
+                            </div>
+                        </div>
+
+                        <div>
                             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                                 Articles Demandés
                             </h3>
-                            <div className="border border-[#B2BED6] rounded overflow-hidden">
+                            <div className="border border-[#B2BED6] rounded overflow-hidden shadow-sm">
                                 <table className="w-full text-left text-xs">
-                                    <thead className="bg-[#0B192C] text-white font-bold">
+                                    <thead className="bg-[#0B192C] text-white font-bold uppercase tracking-wider text-[10px]">
                                         <tr>
                                             <th className="p-2.5">Désignation</th>
                                             <th className="p-2.5">Code Budget</th>
@@ -581,7 +538,7 @@ export default function RequisitionsIndex({
                                     </thead>
                                     <tbody className="divide-y text-gray-700 bg-white">
                                         {viewReq.articles.map((art) => (
-                                            <tr key={art.id}>
+                                            <tr key={art.id} className="hover:bg-gray-50 transition">
                                                 <td className="p-2.5 font-medium">{art.activite}</td>
                                                 <td className="p-2.5 font-mono text-gray-500">
                                                     {art.codeBudget || '—'}
@@ -677,7 +634,7 @@ export default function RequisitionsIndex({
                 </div>
             )}
 
-            {/* MODALE EDIT */}
+            {/* MODALE EDIT (FORMULAIRE DE CORRECTION) */}
             {editReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 no-print-zone animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-4xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto animate-slide-down">
@@ -704,6 +661,21 @@ export default function RequisitionsIndex({
                                     {editError}
                                 </div>
                             )}
+
+                            {/* AFFICHAGE EXPLICITE DU MOTIF DE REJET DANS LE FORMULAIRE */}
+                            {editReq.statusCode?.startsWith('returned_') && (
+                                <div className="bg-red-50 border border-red-200 p-3.5 rounded flex gap-3 items-start shadow-sm">
+                                    <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
+                                    <div>
+                                        <strong className="block uppercase tracking-wider text-[11px] mb-1 font-black text-red-800">
+                                            Motif du renvoi pour correction :
+                                        </strong>
+                                        <p className="font-medium text-sm text-red-900 whitespace-pre-wrap">
+                                            {(editReq as any).motifRejet || editReq.signatures?.filter(s => s.action === 'rejected').pop()?.commentaire || 'Aucun motif spécifié. Veuillez revoir votre demande et la resoumettre.'}
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 border border-[#E2E8F0] rounded">
                                 <div>
@@ -715,7 +687,7 @@ export default function RequisitionsIndex({
                                         onChange={(e) =>
                                             setEditReq({ ...editReq, caisse: e.target.value })
                                         }
-                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs font-semibold focus:outline-none focus:border-[#04326D] bg-white"
+                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs font-semibold focus:outline-none focus:border-[#04326D] bg-white shadow-sm"
                                         required
                                     >
                                         {caisses.map((c) => (
@@ -734,7 +706,7 @@ export default function RequisitionsIndex({
                                         onChange={(e) =>
                                             setEditReq({ ...editReq, devise: e.target.value as any })
                                         }
-                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs font-semibold focus:outline-none focus:border-[#04326D] bg-white"
+                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs font-semibold focus:outline-none focus:border-[#04326D] bg-white shadow-sm"
                                     >
                                         <option value="USD">USD ($)</option>
                                         <option value="FC">Francs Congolais (FC)</option>
@@ -752,7 +724,7 @@ export default function RequisitionsIndex({
                                             setEditReq({ ...editReq, observation: e.target.value })
                                         }
                                         placeholder="Note ou justification générale..."
-                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D] bg-white"
+                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D] bg-white shadow-sm"
                                     />
                                 </div>
                             </div>
@@ -765,7 +737,7 @@ export default function RequisitionsIndex({
                                     {editReq.articles.map((art) => (
                                         <div
                                             key={art.id}
-                                            className="p-3 border border-[#B2BED6] rounded bg-white shadow-sm grid grid-cols-1 md:grid-cols-12 gap-3 items-center"
+                                            className="p-3 border border-[#B2BED6] rounded bg-white shadow-sm grid grid-cols-1 md:grid-cols-12 gap-3 items-center hover:shadow-md transition"
                                         >
                                             <div className="md:col-span-12">
                                                 <label className="block text-[10px] font-bold text-gray-500 mb-1">Désignation *</label>
@@ -822,8 +794,8 @@ export default function RequisitionsIndex({
                                                     {art.total.toLocaleString()} {editReq.devise}
                                                 </span>
                                             </div>
-                                            <label className="block text-xs font-semibold text-gray-700 md:col-span-12 border-t pt-2 mt-1">
-                                                Ajouter / Remplacer les justificatifs (PDF/IMG, 10 Mo max)
+                                            <label className="block text-xs font-semibold text-gray-700 md:col-span-12 border-t pt-2 mt-1 cursor-pointer group">
+                                                <span className="group-hover:text-[#04326D] transition">Ajouter / Remplacer les justificatifs (PDF/IMG, 10 Mo max)</span>
                                                 <input
                                                     type="file"
                                                     accept=".pdf,.jpg,.jpeg,.png"
@@ -832,7 +804,7 @@ export default function RequisitionsIndex({
                                                         ...current,
                                                         [art.id]: Array.from(event.target.files ?? []),
                                                     }))}
-                                                    className="mt-1 block w-full rounded border border-gray-300 bg-gray-50 p-2 font-normal focus:outline-none focus:border-[#04326D]"
+                                                    className="mt-1 block w-full rounded border border-gray-300 bg-gray-50 p-2 font-normal focus:outline-none focus:border-[#04326D] cursor-pointer"
                                                 />
                                                 {(editAttachments[art.id] ?? []).length > 0 && (
                                                     <span className="mt-1.5 block font-bold text-[#04326D] bg-blue-50 px-2 py-1 rounded border border-blue-200">
@@ -845,9 +817,9 @@ export default function RequisitionsIndex({
                                 </div>
                             </div>
 
-                            <div className="flex justify-between items-center bg-gray-50 p-3 border border-[#E2E8F0] rounded mt-4">
-                                <span className="font-bold text-gray-600 uppercase">Total de la Réquisition :</span>
-                                <span className="text-lg font-mono font-black text-[#04326D]">
+                            <div className="flex justify-between items-center bg-gray-50 p-4 border border-[#E2E8F0] rounded mt-4 shadow-sm">
+                                <span className="font-bold text-gray-600 uppercase tracking-widest text-[11px]">Total de la Réquisition :</span>
+                                <span className="text-xl font-mono font-black text-[#04326D]">
                                     {editReq.montantTotal.toLocaleString()} {editReq.devise}
                                 </span>
                             </div>
@@ -865,7 +837,7 @@ export default function RequisitionsIndex({
                                     disabled={savingEdit}
                                     className="px-6 py-2 bg-[#04326D] text-white rounded text-xs font-bold shadow hover:bg-[#06428f] disabled:opacity-60 transition"
                                 >
-                                    {savingEdit ? 'Enregistrement en cours…' : 'Enregistrer les Modifications'}
+                                    {savingEdit ? 'Enregistrement en cours…' : 'Enregistrer les Modifications et Resoumettre'}
                                 </button>
                             </div>
                         </form>
@@ -873,7 +845,7 @@ export default function RequisitionsIndex({
                 </div>
             )}
 
-            {/* ZONE D'IMPRESSION CACHÉE (UTILISÉE PAR LE COMPOSANT D'APERÇU) */}
+            {/* ZONE D'IMPRESSION CACHÉE */}
             {printReq && (
                 <div id="bon-pasteur-print-zone">
                     <OfficialPrintSheet requisition={printReq as any} />

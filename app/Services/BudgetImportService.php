@@ -11,12 +11,12 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class BudgetImportService
 {
-    public function import(UploadedFile $file, array $projectIds): array
+    public function import(UploadedFile $file, string $projectId): array
     {
-        // Vérification de l'existence des projets
-        $projectsCount = Project::whereIn('id', $projectIds)->count();
-        if ($projectsCount !== count($projectIds)) {
-            throw new \Exception("Certains projets sélectionnés sont introuvables.");
+        // Vérification de l'existence du projet
+        $project = Project::find($projectId);
+        if (!$project) {
+            throw new \Exception("Le projet sélectionné est introuvable.");
         }
 
         $extension = strtolower($file->getClientOriginalExtension());
@@ -156,8 +156,8 @@ class BudgetImportService
                     $donorId = $donor->id;
                 }
 
-                // Recherche si la ligne existe déjà GLOBALEMENT
-                $existingLine = BudgetLine::where('code', $code)->first();
+                // Recherche si la ligne existe déjà pour CE PROJET SPECIFIQUE
+                $existingLine = BudgetLine::where('code', $code)->where('project_id', $projectId)->first();
 
                 if ($existingLine) {
                     $existingLine->update([
@@ -171,11 +171,10 @@ class BudgetImportService
                         'budget_initial' => $budgetInitial,
                         'solde' => round($budgetInitial - (float) $existingLine->montant_engage, 2),
                     ]);
-                    // On attache la ligne aux nouveaux projets sans la détacher de ses anciens projets
-                    $existingLine->projects()->syncWithoutDetaching($projectIds);
                     $updatedCount++;
                 } else {
-                    $newLine = BudgetLine::create([
+                    BudgetLine::create([
+                        'project_id' => $projectId,
                         'donor_id' => $donorId,
                         'code' => $code,
                         'category_code' => $cat,
@@ -189,7 +188,6 @@ class BudgetImportService
                         'montant_decaisse' => 0,
                         'solde' => $budgetInitial,
                     ]);
-                    $newLine->projects()->sync($projectIds);
                     $importedCount++;
                 }
             }
