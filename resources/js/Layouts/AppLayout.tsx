@@ -138,9 +138,13 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
         handleMarkSingleAsRead(notif.id);
     };
 
+    // Tolérance d'accès à l'attribut urgent, peu importe la syntaxe de la BDD
+    const getIsUrgent = (n: NotificationItem) => Boolean(n.urgent || (n as any).is_urgent || (n as any).isUrgent);
+
     const filteredNotifications = useMemo(() => {
-        return notifications.filter((n) => {
-            if (notifTab === 'urgent' && !n.urgent) return false;
+        let result = notifications.filter((n) => {
+            const isUrg = getIsUrgent(n);
+            if (notifTab === 'urgent' && !isUrg) return false;
             if (notifSearch.trim()) {
                 const q = notifSearch.toLowerCase().trim();
                 const matchTitre = n.titre.toLowerCase().includes(q);
@@ -149,9 +153,18 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
             }
             return true;
         });
+
+        // On trie pour TOUJOURS placer les notifications urgentes en haut de la liste
+        result.sort((a, b) => {
+            const aUrg = getIsUrgent(a) ? 1 : 0;
+            const bUrg = getIsUrgent(b) ? 1 : 0;
+            return bUrg - aUrg; 
+        });
+
+        return result;
     }, [notifications, notifTab, notifSearch]);
 
-    const urgentCount = notifications.filter((n) => n.urgent).length;
+    const urgentCount = notifications.filter(getIsUrgent).length;
     const unreadCount = notifications.length;
 
     useEffect(() => {
@@ -167,6 +180,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
+    // LOGIQUE DE FOCUS STRICT : Vérification pure sans conflit d'états
     const isRouteActive = (pattern: string): boolean => {
         try {
             return route().current(pattern);
@@ -264,19 +278,23 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
 
                     {/* Navigation principale */}
                     <nav className="px-3 py-2 space-y-4 text-xs font-medium flex-1">
-                        <div className="space-y-1">
-                            <Link
-                                href={route('dashboard')}
-                                className={`flex items-center gap-3 px-3 py-2.5 rounded transition ${
-                                    isRouteActive('dashboard')
-                                        ? 'bg-white/10 text-white font-bold'
-                                        : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
-                                }`}
-                            >
-                                <LayoutDashboard className="w-4 h-4" />
-                                <span>{__('Dashboard')}</span>
-                            </Link>
-                        </div>
+                        
+                        {/* Exclusif : Dashboard Général (Caché si PM car PM a son propre dashboard) */}
+                        {!isMP && (
+                            <div className="space-y-1">
+                                <Link
+                                    href={route('dashboard')}
+                                    className={`flex items-center gap-3 px-3 py-2.5 rounded transition ${
+                                        isRouteActive('dashboard')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <LayoutDashboard className="w-4 h-4" />
+                                    <span>{__('Dashboard')}</span>
+                                </Link>
+                            </div>
+                        )}
 
                         {/* Direction Générale */}
                         {canAccessDirector && (
@@ -342,8 +360,8 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </div>
                         )}
 
-                        {/* Staff / Coordonnateur */}
-                        {isStaff && (
+                        {/* Staff / Coordonnateur (Exclusif : Masqué si l'utilisateur est aussi PM pour éviter les doublons) */}
+                        {isStaff && !isMP && (
                             <div className="space-y-1">
                                 <Link
                                     href={route('requisitions.index')}
@@ -470,7 +488,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 <Link
                                     href={route('finance.budgets.index')}
                                     className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('finance.budgets.*')
+                                        isRouteActive('finance.budgets.index') // Exact match pour éviter le conflit avec import
                                             ? 'bg-white/10 text-white font-bold'
                                             : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
                                     }`}
@@ -844,12 +862,12 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                                     <div className="space-y-0.5 flex-1 min-w-0">
                                                         <div className="flex items-center justify-between gap-1">
                                                             <div className="flex items-center gap-1.5 truncate">
-                                                                {n.urgent && (
+                                                                {getIsUrgent(n) && (
                                                                     <span className="w-2 h-2 rounded-full bg-red-600 shrink-0 animate-pulse" />
                                                                 )}
                                                                 <span
                                                                     className={`font-bold truncate text-[11px] ${
-                                                                        n.urgent ? 'text-red-700' : 'text-[#04326D]'
+                                                                        getIsUrgent(n) ? 'text-red-700' : 'text-[#04326D]'
                                                                     }`}
                                                                 >
                                                                     {n.titre}
@@ -946,7 +964,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                         <div className="flex items-center justify-between border-b pb-2">
                             <h3
                                 className={`text-xs font-bold uppercase ${
-                                    selectedNotif.urgent ? 'text-red-700' : 'text-[#04326D]'
+                                    getIsUrgent(selectedNotif) ? 'text-red-700' : 'text-[#04326D]'
                                 }`}
                             >
                                 {selectedNotif.titre}

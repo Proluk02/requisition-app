@@ -158,7 +158,6 @@ function BudgetLineSearchPicker({
         setSearchTerm(currentCode);
     }, [currentCode]);
 
-    // Fermeture automatique au clic en dehors
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
             if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -169,7 +168,6 @@ function BudgetLineSearchPicker({
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Filtrage instantané côté client (Code OU Libellé)
     const matchingLines = useMemo(() => {
         const query = searchTerm.trim().toLowerCase();
         return allBudgetLines.filter((line) => {
@@ -225,7 +223,6 @@ function BudgetLineSearchPicker({
                 )}
             </div>
 
-            {/* Menu d'autocomplétion GÉANT (Z-Index + Width) */}
             {isOpen && (
                 <div className="absolute left-0 top-full mt-1 w-[500px] bg-white border-2 border-[#04326D] rounded-lg shadow-2xl z-[200] max-h-72 overflow-y-auto divide-y divide-gray-100 text-xs">
                     <div className="p-2 bg-gray-50 text-[10px] text-gray-500 font-bold uppercase tracking-wider flex justify-between sticky top-0 z-10">
@@ -292,7 +289,6 @@ function BudgetLineSearchPicker({
                 </div>
             )}
 
-            {/* Fiche d'impact financier temps réel sous l'input */}
             {activeLine ? (
                 <div className="p-1.5 rounded bg-gray-50 border border-gray-200 text-[10.5px] space-y-0.5 mt-1">
                     <p className="font-semibold text-gray-800 line-clamp-1" title={activeLine.libelle}>
@@ -332,7 +328,6 @@ export default function FinanceDashboard({
 
     const [requisitions, setRequisitions] = useState<FinanceRequisition[]>(initialRequisitions);
 
-    // Filtres instantanés Front-End
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedProject, setSelectedProject] = useState<string>('all');
     const [selectedCaisse, setSelectedCaisse] = useState<string>('all');
@@ -344,7 +339,6 @@ export default function FinanceDashboard({
     const [rejecting, setRejecting] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
 
-    // Données modifiées en direct par le MF dans la modale d'examen
     const [financeCaisse, setFinanceCaisse] = useState<string>('');
     const [financeAllocations, setFinanceAllocations] = useState<Record<string, string>>({});
 
@@ -398,12 +392,10 @@ export default function FinanceDashboard({
         });
     };
 
-    // Calculs pour les KPIs
     const pendingCount = requisitions.filter((item) => item.canDecide).length;
     const decaissementPretCount = requisitions.filter((item) => item.statusCode === 'decaissement_caisse').length;
     const decaisseCount = requisitions.filter((item) => item.statusCode === 'decaisse').length;
 
-    // --- GRAPHIQUES 100% FRONT-END ---
     const chartData = useMemo(() => {
         const total = requisitions.length || 1;
         const pending = requisitions.filter((item) => item.canDecide).length;
@@ -435,9 +427,7 @@ export default function FinanceDashboard({
         if (!recentReqs.length) return 1;
         return Math.max(...recentReqs.map(r => r.montantTotal));
     }, [recentReqs]);
-    // ---------------------------------
 
-    // Filtrage complet instantané côté React (aucun rechargement de page)
     const filteredRequisitions = useMemo(() => {
         return requisitions.filter((item) => {
             if (statusFilter === 'pending' && !item.canDecide) return false;
@@ -458,7 +448,6 @@ export default function FinanceDashboard({
                 return false;
             }
 
-            // Recherche textuelle instantanée (React)
             if (searchQuery.trim()) {
                 const q = searchQuery.toLowerCase().trim();
                 const matchNum = item.numero.toLowerCase().includes(q);
@@ -768,7 +757,6 @@ export default function FinanceDashboard({
                     </div>
                 </div>
 
-                {/* SECTION GRAPHIQUES : VISUALISATIONS FLUX & DOSSIERS (100% REACT/SVG NATIF) */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                     {/* 1. Donut Graphique SVG - Statut des Dossiers */}
                     <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
@@ -783,10 +771,8 @@ export default function FinanceDashboard({
                         </div>
 
                         <div className="flex items-center justify-center gap-6 pt-2">
-                            {/* SVG Donut Chart */}
                             <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
                                 <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-                                    {/* Cercle d'arrière-plan (En attente / Orange) */}
                                     <path
                                         className={chartData.isEmpty ? "text-gray-200" : "text-[#F58F20]"}
                                         strokeWidth="4"
@@ -794,7 +780,6 @@ export default function FinanceDashboard({
                                         fill="none"
                                         d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                                     />
-                                    {/* Segment Traité (Vert) */}
                                     {!chartData.isEmpty && (
                                         <path
                                             className="text-emerald-500 transition-all duration-700 ease-out"
@@ -817,7 +802,6 @@ export default function FinanceDashboard({
                                 </div>
                             </div>
 
-                            {/* Légende du Donut */}
                             <div className="space-y-1.5 text-[11px] flex-1">
                                 <div className="flex items-center justify-between">
                                     <span className="flex items-center gap-1.5 text-gray-600">
@@ -861,7 +845,6 @@ export default function FinanceDashboard({
                                 </strong>
                             </div>
 
-                            {/* Barre de progression (Décaissé / Bon à payer / Autre) */}
                             <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden flex relative">
                                 <div
                                     className={`${gaugeData.isEmpty ? 'bg-gray-300' : 'bg-emerald-500'} transition-all duration-700`}
@@ -901,7 +884,6 @@ export default function FinanceDashboard({
                         </div>
 
                         <div className="pt-5 flex items-end justify-between h-40 gap-2 relative">
-                            {/* Lignes de repère arrières */}
                             <div className="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-20 pb-5">
                                 {[1,2,3,4].map(i => <div key={i} className="border-b border-gray-400 w-full h-0"></div>)}
                             </div>
@@ -914,16 +896,14 @@ export default function FinanceDashboard({
                                 recentReqs.map((req) => {
                                     const heightPct = Math.max((req.montantTotal / maxReqAmount) * 100, 2);
                                     
-                                    // Code couleur selon le statut
                                     let barColor = 'bg-gray-400';
                                     if (req.statusCode === 'decaisse') barColor = 'bg-emerald-500';
                                     else if (req.statusCode === 'decaissement_caisse') barColor = 'bg-[#04326D]';
-                                    else if (req.canDecide) barColor = 'bg-[#F58F20]'; // En attente Finance
+                                    else if (req.canDecide) barColor = 'bg-[#F58F20]'; 
                                     else if (req.financeRejected) barColor = 'bg-red-500';
 
                                     return (
                                         <div key={req.id} className="relative group flex-1 flex flex-col items-center justify-end h-full">
-                                            {/* Tooltip au survol */}
                                             <div className="absolute bottom-[calc(100%+0.5rem)] mb-0 hidden group-hover:block z-10 w-max max-w-[160px] bg-gray-900 text-white text-[10px] p-2.5 rounded shadow-lg text-center animate-fade-in">
                                                 <span className="font-bold border-b border-gray-700 pb-1 mb-1 block">
                                                     {req.numero}
@@ -934,7 +914,6 @@ export default function FinanceDashboard({
                                                 <span className="text-gray-300 block mt-1">{req.statusLabel}</span>
                                             </div>
                                             
-                                            {/* La Barre */}
                                             <div
                                                 className={`w-full max-w-[2rem] rounded-t-sm transition-all duration-700 ease-out hover:opacity-80 cursor-pointer ${barColor}`}
                                                 style={{ height: `calc(${heightPct}% - 20px)` }}
@@ -963,15 +942,15 @@ export default function FinanceDashboard({
                     </header>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
                         {caisses.map((c) => (
-                            <div key={c.id} className="p-3 bg-gray-50 border rounded flex flex-col justify-between space-y-2">
+                            <div key={c.id} className="p-3 bg-gray-50 border border-gray-200 rounded flex flex-col justify-between space-y-2">
                                 <div className="flex items-start justify-between">
                                     <strong className="text-[#0B192C]">{c.name}</strong>
                                     {c.is_ouverte ? (
-                                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
                                             Ouverte
                                         </span>
                                     ) : (
-                                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-gray-200 text-gray-600">
+                                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 border border-gray-200">
                                             Fermée
                                         </span>
                                     )}
@@ -994,7 +973,6 @@ export default function FinanceDashboard({
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="border-b px-4 py-3 bg-gray-50 flex flex-wrap items-center justify-between gap-3 text-xs">
                         <div className="flex flex-wrap items-center gap-2">
-                            {/* Barre de recherche instantanée */}
                             <div className="relative">
                                 <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                                 <input
@@ -1080,7 +1058,7 @@ export default function FinanceDashboard({
                                     <th className="px-4 py-3 text-right">Action</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-200 text-gray-700">
+                            <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
                                 {filteredRequisitions.length === 0 ? (
                                     <tr>
                                         <td colSpan={8} className="py-12 text-center text-gray-400 italic">
@@ -1109,7 +1087,7 @@ export default function FinanceDashboard({
                                             </td>
                                             <td className="px-4 py-3.5 text-center whitespace-nowrap">
                                                 {item.is_urgent ? (
-                                                    <span className="px-2 py-0.5 rounded bg-red-100 text-red-800 font-black text-[9px] uppercase">
+                                                    <span className="px-2 py-0.5 rounded bg-red-50 border border-red-200 text-red-700 font-bold text-[9px] uppercase">
                                                         Urgent
                                                     </span>
                                                 ) : (
@@ -1118,12 +1096,14 @@ export default function FinanceDashboard({
                                             </td>
                                             <td className="px-4 py-3.5 text-center whitespace-nowrap">
                                                 <span
-                                                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                                    className={`px-2.5 py-0.5 border rounded text-[10px] font-bold ${
                                                         item.canDecide
-                                                            ? 'bg-amber-100 text-amber-900'
+                                                            ? 'bg-amber-50 text-[#F58F20] border-amber-200'
                                                             : item.statusCode === 'decaisse'
-                                                            ? 'bg-emerald-100 text-emerald-800'
-                                                            : 'bg-blue-50 text-[#04326D]'
+                                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                            : item.statusCode === 'decaissement_caisse'
+                                                            ? 'bg-blue-50 text-[#04326D] border-blue-200'
+                                                            : 'bg-amber-50 text-[#F58F20] border-amber-200'
                                                     }`}
                                                 >
                                                     {item.canDecide ? 'À Viser' : item.statusLabel}
@@ -1163,10 +1143,10 @@ export default function FinanceDashboard({
                     <div className="w-full max-w-6xl max-h-[92vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-4 animate-slide-down flex flex-col">
                         <header className="flex items-start justify-between border-b pb-3 shrink-0">
                             <div>
-                                <span className="text-[10px] uppercase font-bold text-[#F58F20] tracking-wider">
+                                <span className="text-[10px] uppercase font-bold text-[#F58F20] bg-amber-50 border border-amber-200 px-2 py-0.5 rounded tracking-wider">
                                     Contrôle Budgétaire & Visa Financier (Étape 2)
                                 </span>
-                                <h2 className="text-base font-bold text-[#0B192C]">
+                                <h2 className="text-base font-bold text-[#0B192C] mt-1.5">
                                     Réquisition N° {selected.numero} ({selected.nature})
                                 </h2>
                                 <p className="text-xs text-gray-500 mt-0.5">
@@ -1184,17 +1164,17 @@ export default function FinanceDashboard({
 
                         {/* Choix et Modification directe de la Caisse par le MF */}
                         {selected.canDecide && (
-                            <div className="p-3 bg-blue-50 border border-blue-200 rounded flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shrink-0">
+                            <div className="p-3 bg-amber-50 border border-amber-200 rounded flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shrink-0">
                                 <div>
-                                    <strong className="text-[#04326D] block">Caisse d'imputation et de décaissement</strong>
-                                    <span className="text-gray-600 text-[11px]">
+                                    <strong className="text-[#F58F20] block">Caisse d'imputation et de décaissement</strong>
+                                    <span className="text-amber-900 text-[11px]">
                                         En tant que Manager Finance, vous pouvez réaffecter la caisse si nécessaire avant validation.
                                     </span>
                                 </div>
                                 <select
                                     value={financeCaisse}
                                     onChange={(e) => setFinanceCaisse(e.target.value)}
-                                    className="border border-[#04326D] rounded px-3 py-1.5 text-xs font-bold text-[#0B192C] bg-white min-w-[200px]"
+                                    className="border border-amber-300 rounded px-3 py-1.5 text-xs font-bold text-[#0B192C] bg-white min-w-[200px] focus:outline-none focus:border-[#F58F20]"
                                 >
                                     {cashRegisters.map((c) => (
                                         <option key={c.id} value={c.name}>
@@ -1238,7 +1218,7 @@ export default function FinanceDashboard({
                                             <th className="p-2.5">Justificatifs</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y text-gray-700">
+                                    <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
                                         {selected.lignes.map((line) => {
                                             const currentCode = financeAllocations[line.id] ?? line.codeAllocation ?? line.codeBudget ?? '';
                                             const matchedLine = getBudgetLineObject(currentCode, selected.project_id);
@@ -1288,11 +1268,11 @@ export default function FinanceDashboard({
                                                         {soldeDispo === null || soldeDispo === undefined ? (
                                                             <span className="text-[10px] text-gray-400">À vérifier</span>
                                                         ) : depassement ? (
-                                                            <span className="px-2 py-0.5 rounded bg-red-100 text-red-800 text-[10px] font-bold">
+                                                            <span className="px-2 py-0.5 rounded bg-red-50 border border-red-200 text-red-800 text-[10px] font-bold">
                                                                 Dépassement crédit
                                                             </span>
                                                         ) : (
-                                                            <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                                                            <span className="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-bold">
                                                                 Crédit suffisant
                                                             </span>
                                                         )}
@@ -1301,10 +1281,10 @@ export default function FinanceDashboard({
                                                         {line.justificatifs.length > 0 ? (
                                                             <div className="space-y-1">
                                                                 {line.justificatifs.map((f) => (
-                                                                    <div key={f.id} className="flex items-center justify-between text-[10px] bg-blue-50 text-[#04326D] px-2 py-0.5 rounded">
+                                                                    <div key={f.id} className="flex items-center justify-between text-[10px] bg-gray-50 border border-gray-200 text-[#0B192C] px-2 py-0.5 rounded">
                                                                         <span className="truncate max-w-[110px]">{f.nom}</span>
                                                                         {f.fileUrl && (
-                                                                            <a href={f.fileUrl} target="_blank" rel="noreferrer" className="underline font-bold ml-1">
+                                                                            <a href={f.fileUrl} target="_blank" rel="noreferrer" className="text-[#04326D] underline font-bold ml-1">
                                                                                 Voir
                                                                             </a>
                                                                         )}
@@ -1319,7 +1299,7 @@ export default function FinanceDashboard({
                                             );
                                         })}
                                     </tbody>
-                                    <tfoot className="bg-gray-50 font-bold border-t">
+                                    <tfoot className="bg-gray-50 font-bold border-t border-[#E2E8F0]">
                                         <tr>
                                             <td colSpan={3} className="p-2.5 text-right">Total Dossier :</td>
                                             <td className="p-2.5 text-right font-mono text-sm text-[#0B192C]">
@@ -1414,7 +1394,7 @@ export default function FinanceDashboard({
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in">
                     <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
                         <div className="text-center border-b pb-3">
-                            <div className="w-12 h-12 mx-auto rounded-full bg-blue-50 flex items-center justify-center mb-2">
+                            <div className="w-12 h-12 mx-auto rounded bg-blue-50 border border-blue-100 flex items-center justify-center mb-2">
                                 <Lock className="w-5 h-5 text-[#04326D]" />
                             </div>
                             <h3 className="text-sm font-bold uppercase text-[#0B192C] tracking-wide">

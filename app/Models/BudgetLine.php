@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class BudgetLine extends Model
@@ -17,7 +18,6 @@ class BudgetLine extends Model
     protected $keyType = 'string';
 
     protected $fillable = [
-        'project_id',
         'donor_id',
         'code',
         'category_code',
@@ -42,9 +42,9 @@ class BudgetLine extends Model
         ];
     }
 
-    public function project(): BelongsTo
+    public function projects(): BelongsToMany
     {
-        return $this->belongsTo(Project::class);
+        return $this->belongsToMany(Project::class, 'budget_line_project');
     }
 
     public function donor(): BelongsTo

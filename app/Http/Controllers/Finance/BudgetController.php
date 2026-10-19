@@ -15,9 +15,6 @@ use Inertia\Response;
 
 class BudgetController extends Controller
 {
-    /**
-     * Affiche le centre budgétaire et le suivi de consommation par donateur et par code.
-     */
     public function index(Request $request): Response
     {
         $user = $request->user();
@@ -27,10 +24,12 @@ class BudgetController extends Controller
         $selectedDonor = $request->input('donor_id', 'all');
         $search = $request->input('search', '');
 
-        $linesQuery = BudgetLine::with(['project', 'donor'])->orderBy('code');
+        $linesQuery = BudgetLine::with(['projects', 'donor'])->orderBy('code');
 
         if ($selectedProject !== 'all') {
-            $linesQuery->where('project_id', $selectedProject);
+            $linesQuery->whereHas('projects', function ($query) use ($selectedProject) {
+                $query->where('projects.id', $selectedProject);
+            });
         }
 
         if ($selectedDonor !== 'all') {
@@ -54,8 +53,8 @@ class BudgetController extends Controller
                 'split_code' => $line->split_code,
                 'libelle' => $line->libelle,
                 'devise' => $line->devise,
-                'project_id' => $line->project_id,
-                'project_name' => $line->project?->name ?? 'Général',
+                'project_ids' => $line->projects->pluck('id')->toArray(),
+                'project_name' => $line->projects->pluck('name')->join(', ') ?: 'Général',
                 'donor_id' => $line->donor_id,
                 'donor_name' => $line->donor?->name ?? 'Fonds Propres',
                 'budget_initial' => (float) $line->budget_initial,
@@ -117,24 +116,22 @@ class BudgetController extends Controller
         ]);
     }
 
-    /**
-     * Traite l'importation du budget de référence depuis un fichier Excel ou CSV.
-     */
     public function import(Request $request, BudgetImportService $importService): RedirectResponse
     {
         $user = $request->user();
         abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
 
         $validated = $request->validate([
-            'project_id' => ['required', 'exists:projects,id'],
+            'project_ids' => ['required', 'array', 'min:1'],
+            'project_ids.*' => ['exists:projects,id'],
             'file' => ['required', 'file', 'mimes:xlsx,xls,csv,txt', 'max:10240'],
         ], [
-            'project_id.required' => 'Veuillez sélectionner le projet de rattachement pour ce budget.',
+            'project_ids.required' => 'Veuillez sélectionner au moins un projet de rattachement pour ce budget.',
             'file.required' => 'Veuillez sélectionner un fichier Excel ou CSV.',
             'file.mimes' => 'Le fichier doit être au format Excel (.xlsx, .xls) ou CSV (.csv).',
         ]);
 
-        $result = $importService->import($validated['file'], $validated['project_id']);
+        $result = $importService->import($validated['file'], $validated['project_ids']);
 
         if (! $result['success']) {
             return Redirect::back()->with('error', $result['message']);
@@ -142,21 +139,14 @@ class BudgetController extends Controller
 
         return Redirect::back()->with('success', $result['message']);
     }
-
-    /* =========================================================================
-     *  CRUD LIGNES BUDGÉTAIRES (BUDGET LINES)
-     * ========================================================================= */
-
-    /**
-     * Création d'une ligne budgétaire unitaire.
-     */
     public function storeBudgetLine(Request $request): RedirectResponse
     {
         $user = $request->user();
         abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
 
         $validated = $request->validate([
-            'project_id' => ['required', 'exists:projects,id'],
+            'project_ids' => ['required', 'array', 'min:1'],
+            'project_ids.*' => ['exists:projects,id'],
             'donor_id' => ['nullable', 'exists:donors,id'],
             'code' => ['nullable', 'string', 'max:100'],
             'category_code' => ['nullable', 'string', 'max:50'],
@@ -180,9 +170,7 @@ class BudgetController extends Controller
 
         $budgetInitial = (float) $validated['budget_initial'];
 
-        $existing = BudgetLine::where('project_id', $validated['project_id'])
-            ->where('code', $code)
-            ->first();
+        $existing = BudgetLine::where('code', $code)->first();
 
         if ($existing) {
             $solde = max(0, $budgetInitial - (float) $existing->montant_engage);
@@ -198,11 +186,12 @@ class BudgetController extends Controller
                 'solde' => $solde,
             ]);
 
+            $existing->projects()->syncWithoutDetaching($validated['project_ids']);
+
             return Redirect::back()->with('success', "Ligne budgétaire {$code} mise à jour.");
         }
 
-        BudgetLine::create([
-            'project_id' => $validated['project_id'],
+        $newLine = BudgetLine::create([
             'donor_id' => $validated['donor_id'] ?? null,
             'code' => $code,
             'category_code' => $validated['category_code'] ?? null,
@@ -217,19 +206,19 @@ class BudgetController extends Controller
             'solde' => $budgetInitial,
         ]);
 
+        $newLine->projects()->sync($validated['project_ids']);
+
         return Redirect::back()->with('success', "Ligne budgétaire {$code} enregistrée avec succès.");
     }
 
-    /**
-     * Modification d'une ligne budgétaire existante.
-     */
     public function updateBudgetLine(Request $request, BudgetLine $budgetLine): RedirectResponse
     {
         $user = $request->user();
         abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
 
         $validated = $request->validate([
-            'project_id' => ['required', 'exists:projects,id'],
+            'project_ids' => ['required', 'array', 'min:1'],
+            'project_ids.*' => ['exists:projects,id'],
             'donor_id' => ['nullable', 'exists:donors,id'],
             'code' => ['nullable', 'string', 'max:100'],
             'category_code' => ['nullable', 'string', 'max:50'],
@@ -250,23 +239,18 @@ class BudgetController extends Controller
                 $validated['split_code'] ?? null
             );
         }
-
-        // Vérifier l'unicité du code dans le projet sélectionné (hormis la ligne elle-même)
-        $duplicate = BudgetLine::where('project_id', $validated['project_id'])
-            ->where('code', $code)
+        $duplicate = BudgetLine::where('code', $code)
             ->where('id', '!=', $budgetLine->id)
             ->exists();
 
         if ($duplicate) {
-            return Redirect::back()->with('error', "Une autre ligne avec le code {$code} existe déjà pour ce projet.");
+            return Redirect::back()->with('error', "Une autre ligne avec le code {$code} existe déjà dans le système.");
         }
 
         $budgetInitial = (float) $validated['budget_initial'];
-        // Recalcul strict du solde restant selon les engagements existants
         $solde = max(0, $budgetInitial - (float) $budgetLine->montant_engage);
 
         $budgetLine->update([
-            'project_id' => $validated['project_id'],
             'donor_id' => $validated['donor_id'] ?? null,
             'code' => $code,
             'category_code' => $validated['category_code'] ?? null,
@@ -279,18 +263,16 @@ class BudgetController extends Controller
             'solde' => $solde,
         ]);
 
+        $budgetLine->projects()->sync($validated['project_ids']);
+
         return Redirect::back()->with('success', "Ligne budgétaire {$code} modifiée avec succès.");
     }
 
-    /**
-     * Suppression d'une ligne budgétaire unitaire.
-     */
     public function destroyBudgetLine(Request $request, BudgetLine $budgetLine): RedirectResponse
     {
         $user = $request->user();
         abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
 
-        // Blocage de sécurité : si des fonds sont déjà engagés ou décaissés
         if ((float) $budgetLine->montant_engage > 0 || (float) $budgetLine->montant_decaisse > 0) {
             return Redirect::back()->with(
                 'error',
@@ -306,18 +288,11 @@ class BudgetController extends Controller
         }
 
         $code = $budgetLine->code;
+        $budgetLine->projects()->detach();
         $budgetLine->delete();
 
         return Redirect::back()->with('success', "Ligne budgétaire {$code} supprimée.");
     }
-
-    /* =========================================================================
-     *  CRUD BAILLEURS DE FONDS / DONATEURS (DONORS)
-     * ========================================================================= */
-
-    /**
-     * Enregistre un nouveau bailleur de fonds / Donateur.
-     */
     public function storeDonor(Request $request): RedirectResponse
     {
         $user = $request->user();
@@ -334,9 +309,6 @@ class BudgetController extends Controller
         return Redirect::back()->with('success', "Donateur {$validated['name']} enregistré avec succès.");
     }
 
-    /**
-     * Met à jour les informations d'un bailleur de fonds existant.
-     */
     public function updateDonor(Request $request, Donor $donor): RedirectResponse
     {
         $user = $request->user();
@@ -353,9 +325,6 @@ class BudgetController extends Controller
         return Redirect::back()->with('success', "Donateur {$donor->name} mis à jour avec succès.");
     }
 
-    /**
-     * Supprime un bailleur de fonds.
-     */
     public function destroyDonor(Request $request, Donor $donor): RedirectResponse
     {
         $user = $request->user();
@@ -374,10 +343,6 @@ class BudgetController extends Controller
 
         return Redirect::back()->with('success', "Donateur {$name} supprimé avec succès.");
     }
-
-    /* =========================================================================
-     *  ALIASES REST COMPATIBLES
-     * ========================================================================= */
 
     public function store(Request $request): RedirectResponse
     {

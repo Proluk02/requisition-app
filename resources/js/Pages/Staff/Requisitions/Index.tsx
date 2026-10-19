@@ -83,19 +83,16 @@ export default function RequisitionsIndex({
         });
     }, [requisitions, search, filterEtape, filterDevise, filterNature]);
 
-    // 1. Ouvre le composant HTML pour l'aperçu du navigateur
     const handlePrintPreview = (req: RequisitionSuivi) => {
         setPrintReq(req);
     };
 
-    // Lance l'aperçu quand les données sont prêtes dans le DOM
     useEffect(() => {
         if (!printReq) return;
         void openPrintPreview('bon-pasteur-print-zone')
             .then(() => setPrintReq(null));
     }, [printReq]);
 
-    // 2. TÉLÉCHARGEMENT DIRECT DU PDF (ZÉRO PAGE BLANCHE)
     const handleDownloadPdf = (req: RequisitionSuivi) => {
         const url = route('requisitions.pdf', req.id);
         const link = document.createElement('a');
@@ -107,7 +104,6 @@ export default function RequisitionsIndex({
         document.body.removeChild(link);
     };
 
-    // SAUVEGARDE CORRECTION
     const handleSaveEdit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!editReq) return;
@@ -199,7 +195,8 @@ export default function RequisitionsIndex({
 
         if (stepIndex < currentIndex) return 'bg-emerald-500 text-white border-emerald-500';
         if (stepIndex === currentIndex)
-            return 'bg-[#04326D] text-white border-[#04326D] ring-4 ring-[#04326D]/20';
+            // Orange clair pour l'étape en attente (et non bleu)
+            return 'bg-amber-50 text-[#F58F20] border-amber-200 ring-4 ring-amber-100';
         return 'bg-gray-100 text-gray-400 border-gray-200';
     };
 
@@ -213,11 +210,11 @@ export default function RequisitionsIndex({
         }
         
         const badges: Record<string, string> = {
-            brouillon: 'bg-gray-100 text-gray-700',
-            visa_mp: 'bg-blue-50 text-[#04326D] border border-blue-200',
-            controle_finance: 'bg-purple-50 text-purple-800 border border-purple-200',
-            visa_admin: 'bg-indigo-50 text-indigo-800 border border-indigo-200',
-            approbation_direction: 'bg-amber-50 text-amber-900 border border-amber-200',
+            brouillon: 'bg-gray-100 text-gray-700 border-gray-200',
+            visa_mp: 'bg-amber-50 text-[#F58F20] border-amber-200',
+            controle_finance: 'bg-amber-50 text-[#F58F20] border-amber-200',
+            visa_admin: 'bg-amber-50 text-[#F58F20] border-amber-200',
+            approbation_direction: 'bg-amber-50 text-[#F58F20] border-amber-200',
             decaissement_caisse: 'bg-emerald-50 text-emerald-800 border border-emerald-200',
             cloture: 'bg-gray-800 text-white border border-gray-800',
         };
@@ -231,7 +228,7 @@ export default function RequisitionsIndex({
             cloture: 'Clôturé',
         };
         return (
-            <span className={`${badges[etape] || 'bg-gray-100 text-gray-700'} px-2.5 py-0.5 rounded text-[10px] font-bold`}>
+            <span className={`inline-block border px-2.5 py-0.5 rounded text-[10px] font-bold ${badges[etape] || 'bg-gray-100 text-gray-700'}`}>
                 {labels[etape] || etape}
             </span>
         );
@@ -473,7 +470,7 @@ export default function RequisitionsIndex({
                                                         <button
                                                             type="button"
                                                             onClick={() => handleDownloadPdf(req)}
-                                                            className="p-1.5 text-gray-500 hover:text-[#04326D] hover:bg-blue-50 rounded transition"
+                                                            className="p-1.5 text-gray-500 hover:text-[#04326D] hover:bg-gray-100 rounded transition"
                                                             title="Télécharger le PDF Officiel"
                                                         >
                                                             <Download className="w-4 h-4" />
@@ -493,7 +490,7 @@ export default function RequisitionsIndex({
             {/* MODALE VIEW */}
             {viewReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 no-print-zone animate-fade-in">
-                    <div className="bg-white rounded-lg border border-[#B2BED6] shadow-2xl max-w-3xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto animate-slide-down">
+                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-3xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto animate-slide-down">
                         <div className="flex items-start justify-between border-b border-[#E2E8F0] pb-3">
                             <div>
                                 <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">
@@ -501,7 +498,7 @@ export default function RequisitionsIndex({
                                 </span>
                                 <h2 className="text-lg font-bold text-[#0B192C] flex items-center gap-2 mt-1">
                                     <span>N° {viewReq.numero}</span>
-                                    <span className="text-xs px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-[#04326D] font-mono">
+                                    <span className="text-xs px-2 py-0.5 rounded bg-gray-100 border border-gray-200 text-[#0B192C] font-mono">
                                         {viewReq.nature}
                                     </span>
                                 </h2>
@@ -538,7 +535,7 @@ export default function RequisitionsIndex({
                                         className="flex flex-col items-center text-center z-10 w-16"
                                     >
                                         <div
-                                            className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs border-2 transition ${getStepClasses(
+                                            className={`w-7 h-7 rounded flex items-center justify-center font-bold text-xs border transition ${getStepClasses(
                                                 viewReq.etapeActuelle,
                                                 idx,
                                                 viewReq.is_urgent,
@@ -683,7 +680,7 @@ export default function RequisitionsIndex({
             {/* MODALE EDIT */}
             {editReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 no-print-zone animate-fade-in">
-                    <div className="bg-white rounded-lg border border-[#B2BED6] shadow-2xl max-w-4xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto animate-slide-down">
+                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-4xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto animate-slide-down">
                         <div className="flex items-center justify-between border-b border-[#E2E8F0] pb-3">
                             <div>
                                 <span className="text-[10px] text-amber-600 font-bold uppercase tracking-wider">Mode Correction</span>

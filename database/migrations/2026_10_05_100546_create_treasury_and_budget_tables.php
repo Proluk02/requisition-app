@@ -20,19 +20,29 @@ return new class extends Migration
         // 2. Lignes Budgétaires de référence (Format: 6.112.a ou 1.1.3.a)
         Schema::create('budget_lines', function (Blueprint $table) {
             $table->uuid('id')->primary();
-            $table->foreignUuid('project_id')->constrained('projects')->cascadeOnDelete();
+            // SUPPRESSION DU project_id ICI (Déplacé dans la table pivot plus bas)
             $table->foreignUuid('donor_id')->nullable()->constrained('donors')->nullOnDelete();
-            $table->string('code')->index(); // Code complet: 6.112.a
+            
+            $table->string('code')->unique(); // Code complet rendu Unique pour éviter les doublons globaux
             $table->string('category_code')->nullable();
             $table->string('subcategory_code')->nullable();
             $table->string('descript_code')->nullable();
             $table->string('split_code')->nullable();
             $table->string('libelle');
             $table->string('devise')->default('USD'); // USD ou FC
+            
             $table->decimal('budget_initial', 15, 2)->default(0);
             $table->decimal('montant_engage', 15, 2)->default(0);
             $table->decimal('montant_decaisse', 15, 2)->default(0);
             $table->decimal('solde', 15, 2)->default(0);
+            $table->timestamps();
+        });
+
+        // 2.Bis Table Pivot : Une ligne budgétaire peut appartenir à plusieurs projets
+        Schema::create('budget_line_project', function (Blueprint $table) {
+            $table->id();
+            $table->foreignUuid('budget_line_id')->constrained('budget_lines')->cascadeOnDelete();
+            $table->foreignUuid('project_id')->constrained('projects')->cascadeOnDelete();
             $table->timestamps();
         });
 
@@ -153,6 +163,7 @@ return new class extends Migration
         Schema::dropIfExists('cash_register_sessions');
         Schema::dropIfExists('cash_register_user');
         Schema::dropIfExists('cash_registers');
+        Schema::dropIfExists('budget_line_project');
         Schema::dropIfExists('budget_lines');
         Schema::dropIfExists('donors');
     }

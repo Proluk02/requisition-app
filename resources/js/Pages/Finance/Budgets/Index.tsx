@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { Head, router, useForm, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
@@ -59,7 +59,7 @@ interface BudgetLineItem {
     split_code?: string | null;
     libelle: string;
     devise: string;
-    project_id: string;
+    project_ids: string[];
     project_name: string;
     donor_id: string | null;
     donor_name: string;
@@ -126,9 +126,9 @@ export default function BudgetIndex({
     const [editingLine, setEditingLine] = useState<BudgetLineItem | null>(null);
     const [editingDonor, setEditingDonor] = useState<DonorSummary | DonorOption | null>(null);
 
-    // Formulaires
-    const importForm = useForm<{ project_id: string; file: File | null; }>({
-        project_id: projects[0]?.id ?? '',
+    // Formulaire d'import rapide
+    const importForm = useForm<{ project_ids: string[]; file: File | null; }>({
+        project_ids: projects.length > 0 ? [projects[0].id] : [],
         file: null,
     });
 
@@ -139,7 +139,7 @@ export default function BudgetIndex({
     });
 
     const lineForm = useForm({
-        project_id: projects[0]?.id ?? '',
+        project_ids: projects.length > 0 ? [projects[0].id] : [] as string[],
         donor_id: '',
         category_code: '',
         subcategory_code: '',
@@ -163,7 +163,7 @@ export default function BudgetIndex({
             category_code: parts[0] || '',
             subcategory_code: parts[1] || '',
             descript_code: parts[2] || '',
-            split_code: parts.slice(3).join('.') || '', // S'il y a plus de points, on regroupe à la fin
+            split_code: parts.slice(3).join('.') || '', 
         }));
     };
 
@@ -188,7 +188,8 @@ export default function BudgetIndex({
         const q = search.trim().toLowerCase();
 
         return budgetLines.filter((line) => {
-            if (projectFilter !== 'all' && line.project_id !== projectFilter) return false;
+            // Support de la relation N-to-N
+            if (projectFilter !== 'all' && !line.project_ids.includes(projectFilter)) return false;
             if (donorFilter !== 'all' && line.donor_id !== donorFilter) return false;
             if (q) {
                 const matchCode = line.code.toLowerCase().includes(q);
@@ -319,7 +320,7 @@ export default function BudgetIndex({
     const openCreateLineModal = () => {
         setEditingLine(null); lineForm.reset(); lineForm.clearErrors();
         lineForm.setData({
-            project_id: projects[0]?.id ?? '', donor_id: '', category_code: '', subcategory_code: '',
+            project_ids: projects.length > 0 ? [projects[0].id] : [], donor_id: '', category_code: '', subcategory_code: '',
             descript_code: '', split_code: '', code: '', libelle: '', devise: 'USD', budget_initial: '',
         });
         setLineModalOpen(true);
@@ -328,7 +329,7 @@ export default function BudgetIndex({
     const openEditLineModal = (line: BudgetLineItem) => {
         setEditingLine(line); lineForm.clearErrors();
         lineForm.setData({
-            project_id: line.project_id, donor_id: line.donor_id ?? '', category_code: line.category_code ?? '',
+            project_ids: line.project_ids, donor_id: line.donor_id ?? '', category_code: line.category_code ?? '',
             subcategory_code: line.subcategory_code ?? '', descript_code: line.descript_code ?? '', split_code: line.split_code ?? '',
             code: line.code, libelle: line.libelle, devise: line.devise, budget_initial: line.budget_initial.toString(),
         });
@@ -342,6 +343,19 @@ export default function BudgetIndex({
         } else {
             lineForm.post(route('finance.budgets.lines.store'), { preserveScroll: true, onSuccess: () => { setLineModalOpen(false); lineForm.reset(); }, });
         }
+    };
+
+    // Helper unique pour gérer le cochage/décochage des projets
+    const toggleProjectForm = (formToUpdate: typeof lineForm | typeof importForm, projectId: string, isChecked: boolean) => {
+        const ids = [...formToUpdate.data.project_ids];
+        if (isChecked) {
+            if (!ids.includes(projectId)) ids.push(projectId);
+        } else {
+            const idx = ids.indexOf(projectId);
+            if (idx > -1) ids.splice(idx, 1);
+        }
+        // @ts-ignore : TypeScript contournement (les deux forms partagent project_ids)
+        formToUpdate.setData('project_ids', ids);
     };
 
     return (
@@ -499,7 +513,7 @@ export default function BudgetIndex({
                                         </th>
                                         <th className="py-3 px-4">Code Ligne</th>
                                         <th className="py-3 px-4">Libellé / Activité</th>
-                                        <th className="py-3 px-4">Projet & Donateur</th>
+                                        <th className="py-3 px-4">Projet(s) & Donateur</th>
                                         <th className="py-3 px-4 text-right">Budget Initial</th>
                                         <th className="py-3 px-4 text-right">Engagé</th>
                                         <th className="py-3 px-4 text-right">Décaissé</th>
@@ -528,7 +542,7 @@ export default function BudgetIndex({
                                                     <td className="py-3 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">{line.code}</td>
                                                     <td className="py-3 px-4 font-medium text-gray-800 max-w-xs truncate" title={line.libelle}>{line.libelle}</td>
                                                     <td className="py-3 px-4">
-                                                        <p className="font-bold text-[#0B192C] truncate">{line.project_name}</p>
+                                                        <p className="font-bold text-[#0B192C] truncate max-w-[200px]" title={line.project_name}>{line.project_name}</p>
                                                         <p className="text-[10px] text-gray-500 font-semibold">{line.donor_name}</p>
                                                     </td>
                                                     <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-[#0B192C] whitespace-nowrap">{money(line.budget_initial, line.devise)}</td>
@@ -662,7 +676,7 @@ export default function BudgetIndex({
                 </div>
             )}
 
-            {/* Modal Import Excel */}
+            {/* Modal Import Excel depuis Index.tsx */}
             {importModalOpen && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-md w-full p-6 space-y-4 animate-slide-down">
@@ -673,16 +687,30 @@ export default function BudgetIndex({
                             </div>
                             <button type="button" onClick={() => setImportModalOpen(false)} className="text-gray-400 hover:text-gray-600 text-lg font-bold"><X className="w-5 h-5" /></button>
                         </header>
-                        <form onSubmit={handleImportSubmit} className="space-y-3.5 text-xs">
+                        <form onSubmit={handleImportSubmit} className="space-y-4 text-xs">
                             <div>
-                                <label className="block font-bold text-gray-700 mb-1">Projet de Rattachement *</label>
-                                <select value={importForm.data.project_id} onChange={(e) => importForm.setData('project_id', e.target.value)} className="w-full border border-[#B2BED6] rounded p-2 text-xs font-semibold focus:outline-none focus:border-[#04326D]" required>
-                                    {projects.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.full_name})</option>)}
-                                </select>
+                                <label className="block font-bold text-gray-700 mb-1.5">Projet(s) de Rattachement (Cochez) *</label>
+                                <div className="max-h-32 overflow-y-auto border border-[#B2BED6] rounded p-2 bg-gray-50 space-y-1 shadow-inner">
+                                    {projects.length === 0 && <span className="text-gray-400 italic">Aucun projet</span>}
+                                    {projects.map((p) => (
+                                        <label key={p.id} className="flex items-center gap-2 cursor-pointer p-1.5 hover:bg-white rounded transition">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={importForm.data.project_ids.includes(p.id)}
+                                                onChange={(e) => toggleProjectForm(importForm, p.id, e.target.checked)}
+                                                className="w-3.5 h-3.5 rounded border-gray-300 text-[#04326D] focus:ring-[#04326D]" 
+                                            />
+                                            <span className="font-semibold text-gray-700 truncate">{p.name} {p.full_name ? `— ${p.full_name}` : ''}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                                {importForm.errors.project_ids && <p className="text-[11px] text-red-600 mt-1">{importForm.errors.project_ids}</p>}
                             </div>
                             <div>
                                 <label className="block font-bold text-gray-700 mb-1">Fichier Excel (.xlsx, .xls) ou CSV (.csv) *</label>
-                                <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => importForm.setData('file', e.target.files ? e.target.files[0] : null)} className="w-full border border-dashed border-[#B2BED6] rounded p-3 text-xs bg-gray-50 focus:outline-none" required />
+                                <div className="border-2 border-dashed border-[#B2BED6] rounded p-3 bg-gray-50/50">
+                                    <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => importForm.setData('file', e.target.files ? e.target.files[0] : null)} className="w-full text-xs text-gray-600 file:mr-3 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-bold file:bg-[#04326D] file:text-white hover:file:bg-[#06428f] cursor-pointer focus:outline-none" required />
+                                </div>
                                 {importForm.errors.file && <p className="text-[11px] text-red-600 mt-1">{importForm.errors.file}</p>}
                             </div>
                             <div className="p-3 bg-blue-50 border border-blue-200 rounded text-[11px] text-gray-700 leading-relaxed space-y-1">
@@ -691,8 +719,8 @@ export default function BudgetIndex({
                             </div>
                             <div className="flex justify-end gap-2 pt-2 border-t">
                                 <button type="button" onClick={() => setImportModalOpen(false)} className="px-3.5 py-1.5 border border-[#B2BED6] rounded text-xs font-semibold text-gray-600 hover:bg-gray-50">Annuler</button>
-                                <button type="submit" disabled={importForm.processing} className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] disabled:opacity-50 text-white rounded text-xs font-bold shadow transition">
-                                    <Upload className="w-4 h-4" /><span>{importForm.processing ? 'Importation en cours...' : 'Lancer l’importation'}</span>
+                                <button type="submit" disabled={importForm.processing || importForm.data.project_ids.length === 0} className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] disabled:opacity-50 text-white rounded text-xs font-bold shadow transition">
+                                    <Upload className="w-4 h-4" /><span>{importForm.processing ? 'Importation...' : 'Lancer l’importation'}</span>
                                 </button>
                             </div>
                         </form>
@@ -737,7 +765,7 @@ export default function BudgetIndex({
                 </div>
             )}
 
-            {/* Modal Création / Édition Ligne Budgétaire NOUVELLE VERSION LARGE ET PRO */}
+            {/* Modal Création / Édition Ligne Budgétaire */}
             {lineModalOpen && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 animate-fade-in">
                     <div className="bg-white rounded-xl border border-slate-200 shadow-2xl max-w-2xl w-full flex flex-col max-h-[90vh] animate-slide-down">
@@ -764,15 +792,22 @@ export default function BudgetIndex({
                                 {/* Section 1 : Affectation */}
                                 <div className="grid grid-cols-2 gap-5">
                                     <div>
-                                        <label className="block font-bold text-slate-700 mb-1.5">Projet de rattachement *</label>
-                                        <select
-                                            value={lineForm.data.project_id}
-                                            onChange={(e) => lineForm.setData('project_id', e.target.value)}
-                                            className="w-full border border-slate-300 rounded-md p-2.5 text-xs font-semibold focus:outline-none focus:border-[#04326D] focus:ring-1 focus:ring-[#04326D]"
-                                            required
-                                        >
-                                            {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                        </select>
+                                        <label className="block font-bold text-slate-700 mb-1.5">Projet(s) de rattachement (Cochez) *</label>
+                                        <div className="max-h-24 overflow-y-auto border border-slate-300 rounded-md p-1.5 bg-slate-50 space-y-1 shadow-inner">
+                                            {projects.length === 0 && <span className="text-slate-400 text-xs px-1">Aucun projet</span>}
+                                            {projects.map((p) => (
+                                                <label key={p.id} className="flex items-center gap-2 cursor-pointer p-1.5 hover:bg-white rounded transition">
+                                                    <input 
+                                                        type="checkbox" 
+                                                        checked={lineForm.data.project_ids.includes(p.id)}
+                                                        onChange={(e) => toggleProjectForm(lineForm, p.id, e.target.checked)}
+                                                        className="w-3.5 h-3.5 rounded border-slate-300 text-[#04326D] focus:ring-[#04326D]" 
+                                                    />
+                                                    <span className="font-semibold text-slate-700 truncate">{p.name}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                        {lineForm.errors.project_ids && <p className="text-[11px] text-red-600 mt-1">{lineForm.errors.project_ids}</p>}
                                     </div>
                                     <div>
                                         <label className="block font-bold text-slate-700 mb-1.5">Bailleur de fonds (Donateur)</label>
@@ -908,7 +943,7 @@ export default function BudgetIndex({
                             <button
                                 type="submit"
                                 form="line-form"
-                                disabled={lineForm.processing}
+                                disabled={lineForm.processing || lineForm.data.project_ids.length === 0}
                                 className="px-6 py-2 bg-[#04326D] text-white rounded-md text-xs font-bold shadow-md hover:bg-[#06428f] transition disabled:opacity-50"
                             >
                                 {editingLine ? 'Enregistrer les modifications' : 'Créer la ligne budgétaire'}

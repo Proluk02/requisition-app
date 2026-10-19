@@ -39,8 +39,9 @@ const requiredColumns = [
 export default function ImportBudgetLines({ projects = [] }: Props) {
     const { flash } = usePage<PageProps>().props;
 
-    const form = useForm<{ project_id: string; file: File | null }>({
-        project_id: projects[0]?.id ?? '',
+    // Passage en tableau pour supporter le Many-to-Many
+    const form = useForm<{ project_ids: string[]; file: File | null }>({
+        project_ids: projects.length > 0 ? [projects[0].id] : [],
         file: null,
     });
 
@@ -51,6 +52,17 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
             preserveScroll: true,
             onSuccess: () => form.reset('file'),
         });
+    };
+
+    const toggleProject = (projectId: string, isChecked: boolean) => {
+        const ids = [...form.data.project_ids];
+        if (isChecked) {
+            if (!ids.includes(projectId)) ids.push(projectId);
+        } else {
+            const idx = ids.indexOf(projectId);
+            if (idx > -1) ids.splice(idx, 1);
+        }
+        form.setData('project_ids', ids);
     };
 
     return (
@@ -170,29 +182,31 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
                             </span>
                         </div>
 
-                        <form onSubmit={handleSubmit} className="p-5 space-y-4 text-xs">
+                        <form onSubmit={handleSubmit} className="p-5 space-y-5 text-xs">
                             <div>
-                                <label className="block font-bold text-gray-700 mb-1">
-                                    Projet de Rattachement *
+                                <label className="block font-bold text-gray-700 mb-1.5">
+                                    Projet(s) de Rattachement (Cochez) *
                                 </label>
-                                <select
-                                    value={form.data.project_id}
-                                    onChange={(e) => form.setData('project_id', e.target.value)}
-                                    className="w-full border border-[#B2BED6] rounded p-2 text-xs font-semibold focus:outline-none focus:border-[#04326D] bg-white text-[#0B192C]"
-                                    required
-                                    disabled={projects.length === 0}
-                                >
+                                <div className="border border-[#B2BED6] bg-gray-50 rounded-md p-2 max-h-40 overflow-y-auto space-y-1 shadow-inner">
                                     {projects.length === 0 && (
-                                        <option value="">Aucun projet enregistré</option>
+                                        <span className="text-gray-400 italic">Aucun projet enregistré</span>
                                     )}
                                     {projects.map((p) => (
-                                        <option key={p.id} value={p.id}>
-                                            {p.name} {p.full_name ? `— ${p.full_name}` : ''}
-                                        </option>
+                                        <label key={p.id} className="flex items-center gap-2.5 cursor-pointer p-1.5 hover:bg-white rounded transition">
+                                            <input
+                                                type="checkbox"
+                                                checked={form.data.project_ids.includes(p.id)}
+                                                onChange={(e) => toggleProject(p.id, e.target.checked)}
+                                                className="w-4 h-4 text-[#04326D] rounded border-gray-300 focus:ring-[#04326D]"
+                                            />
+                                            <span className="font-semibold text-gray-800">
+                                                {p.name} {p.full_name ? `— ${p.full_name}` : ''}
+                                            </span>
+                                        </label>
                                     ))}
-                                </select>
-                                {form.errors.project_id && (
-                                    <p className="text-[11px] text-red-600 mt-1">{form.errors.project_id}</p>
+                                </div>
+                                {form.errors.project_ids && (
+                                    <p className="text-[11px] text-red-600 mt-1">{form.errors.project_ids}</p>
                                 )}
                             </div>
 
@@ -209,7 +223,7 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
                                         required
                                     />
                                     {form.data.file && (
-                                        <div className="mt-3 p-2 bg-white border border-[#B2BED6] rounded flex items-center justify-between text-xs">
+                                        <div className="mt-3 p-2 bg-white border border-[#B2BED6] rounded flex items-center justify-between text-xs shadow-sm">
                                             <div className="flex items-center gap-2 truncate">
                                                 <FileCheck2 className="w-4 h-4 text-emerald-600 shrink-0" />
                                                 <span className="font-mono font-semibold text-gray-800 truncate">
@@ -247,7 +261,7 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
 
                                 <button
                                     type="submit"
-                                    disabled={form.processing || projects.length === 0}
+                                    disabled={form.processing || form.data.project_ids.length === 0}
                                     className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#04326D] hover:bg-[#06428f] disabled:opacity-50 text-white rounded text-xs font-bold shadow-sm transition"
                                 >
                                     <Upload className="w-4 h-4" />

@@ -47,10 +47,12 @@ class DashboardController extends Controller
 
             $requisitions = $requisitionsQuery->get();
 
-            // Strictement filtré sur le projet du Manager
+            // Strictement filtré sur le projet du Manager via la table pivot
             $budgetLines = clone BudgetLine::query()
-                ->where('project_id', $user->project_id)
-                ->get(['id', 'project_id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
+                ->whereHas('projects', function ($q) use ($user) {
+                    $q->where('projects.id', $user->project_id);
+                })
+                ->get(['id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
                 ->keyBy(fn (BudgetLine $line) => BudgetLine::normalizeCode($line->code));
 
             $budgetTotal = $budgetLines->sum('budget_initial');
@@ -70,7 +72,6 @@ class DashboardController extends Controller
                 'requisitions' => $this->buildProjectManagerRequisitionList($requisitions, $user->id, $budgetLines),
                 'budgetLines' => $budgetLines->values()->map(fn (BudgetLine $line) => [
                     'id' => $line->id,
-                    'project_id' => $line->project_id,
                     'code' => $line->code,
                     'libelle' => $line->libelle,
                     'normalizedCode' => BudgetLine::normalizeCode($line->code),
@@ -277,7 +278,6 @@ class DashboardController extends Controller
     {
         abort_unless($request->user()?->canApproveAsDirector(), 403);
 
-        // MODIFICATION : On récupère TOUTES les urgences non clôturées/rejetées pour le Tracker.
         $urgences = Requisition::with(['user', 'demandes.justificatifs', 'project'])
             ->where('is_urgent', true)
             ->whereNotIn('status', ['decaisse', 'cloture', 'rejetee'])
@@ -295,8 +295,8 @@ class DashboardController extends Controller
                 'status' => $r->status,
                 'dateSoumission' => $r->created_at?->format('d/m/Y H:i') ?? '',
                 'observation' => $r->observation,
-                'needsWaiver' => $r->status === 'urgent_direction', // Maintenu pour compatibilité
-                'canApprove' => $r->status === 'visa_admin', // La Directrice ne peut valider que si le dossier est arrivé chez elle
+                'needsWaiver' => $r->status === 'urgent_direction',
+                'canApprove' => $r->status === 'visa_admin',
                 'statusLabel' => $this->mapWorkflowLevel($r->status)['label']
             ]);
 
@@ -317,14 +317,13 @@ class DashboardController extends Controller
             ->orderByDesc('created_at')
             ->get();
 
-        $budgetLines = BudgetLine::all()->keyBy(fn ($b) => $b->project_id . '_' . $b->code);
+        $budgetLines = BudgetLine::with('projects')->get()->keyBy('code');
 
         $allBudgetLines = BudgetLine::query()
             ->orderBy('code')
-            ->get(['id', 'project_id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
+            ->get(['id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
             ->map(fn (BudgetLine $b) => [
                 'id' => $b->id,
-                'project_id' => $b->project_id,
                 'code' => $b->code,
                 'libelle' => $b->libelle,
                 'normalizedCode' => BudgetLine::normalizeCode($b->code),
@@ -405,10 +404,10 @@ class DashboardController extends Controller
                     'financeRejected' => $r->status === 'returned_to_project_manager',
                     'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
                     'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
-                    'lignes' => $r->demandes->map(function (Demande $d) use ($r, $budgetLines) {
+                    'lignes' => $r->demandes->map(function (Demande $d) use ($budgetLines) {
                         $codeAlloc = trim((string) ($d->code_allocation ?: $d->code_all_budget));
-                        $budgetKey = $r->project_id . '_' . $codeAlloc;
-                        $lineModel = $budgetLines->get($budgetKey);
+                        // La recherche se fait désormais sur le code global
+                        $lineModel = $budgetLines->get($codeAlloc);
 
                         return [
                             'id' => (string) $d->id,
