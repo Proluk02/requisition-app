@@ -20,7 +20,18 @@ import {
     Coins,
     BarChart3,
     Activity,
+    LayoutTemplate
 } from 'lucide-react';
+
+interface Signature {
+    role: string;
+    nom: string;
+    action: string;
+    commentaire?: string;
+    date: string;
+    code: string;
+    hash: string;
+}
 
 interface FinanceJustificatif {
     id: string;
@@ -67,6 +78,7 @@ interface FinanceRequisition {
     financeRejected: boolean;
     motifRejet?: string | null;
     dateSoumission: string;
+    signatures: Signature[];
     lignes: FinanceLine[];
 }
 
@@ -224,7 +236,7 @@ function BudgetLineSearchPicker({
             </div>
 
             {isOpen && (
-                <div className="absolute left-0 top-full mt-1 w-[500px] bg-white border-2 border-[#04326D] rounded-lg shadow-2xl z-[200] max-h-72 overflow-y-auto divide-y divide-gray-100 text-xs">
+                <div className="absolute left-0 top-full mt-1 w-[600px] bg-white border-2 border-[#04326D] rounded-lg shadow-2xl z-[9999] max-h-96 overflow-y-auto divide-y divide-gray-100 text-xs">
                     <div className="p-2 bg-gray-50 text-[10px] text-gray-500 font-bold uppercase tracking-wider flex justify-between sticky top-0 z-10">
                         <span>Lignes trouvées ({matchingLines.length})</span>
                         <span>Solde disponible</span>
@@ -328,6 +340,11 @@ export default function FinanceDashboard({
 
     const [requisitions, setRequisitions] = useState<FinanceRequisition[]>(initialRequisitions);
 
+    // Resynchronisation automatique de l'état local quand Inertia recharge les props
+    useEffect(() => {
+        setRequisitions(initialRequisitions);
+    }, [initialRequisitions]);
+
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedProject, setSelectedProject] = useState<string>('all');
     const [selectedCaisse, setSelectedCaisse] = useState<string>('all');
@@ -335,6 +352,7 @@ export default function FinanceDashboard({
     const [statusFilter, setStatusFilter] = useState('all');
 
     const [selected, setSelected] = useState<FinanceRequisition | null>(null);
+    const [directorPreviewReq, setDirectorPreviewReq] = useState<FinanceRequisition | null>(null);
     const [correcting, setCorrecting] = useState<RequisitionCorrectionData | null>(null);
     const [rejecting, setRejecting] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
@@ -499,6 +517,8 @@ export default function FinanceDashboard({
             code_allocation: code_allocation.trim(),
         }));
 
+        const currentNumero = selected.numero;
+
         router.patch(
             route('requisitions.finance-decision', selected.id),
             {
@@ -511,43 +531,12 @@ export default function FinanceDashboard({
                 preserveScroll: true,
                 onFinish: () => setProcessing(false),
                 onSuccess: () => {
-                    const updatedId = selected.id;
                     setPinModalOpen(false);
                     setSelected(null);
                     setPinSaisi('');
-
-                    setRequisitions((prev) =>
-                        prev.map((item) => {
-                            if (item.id === updatedId) {
-                                return {
-                                    ...item,
-                                    caisseAttribuee: financeCaisse,
-                                    statusCode: 'controle_finance',
-                                    statusLabel: 'Validée par Finance',
-                                    canDecide: false,
-                                    lignes: item.lignes.map((l) => {
-                                        const alloc = allocationsArray.find((a) => a.demande_id === l.id);
-                                        const matched = alloc ? getBudgetLineObject(alloc.code_allocation, item.project_id) : null;
-                                        return alloc
-                                            ? {
-                                                  ...l,
-                                                  codeAllocation: alloc.code_allocation,
-                                                  codeBudget: alloc.code_allocation,
-                                                  libelleAllocation: matched?.libelle || l.libelleAllocation,
-                                                  budget_solde_actuel: matched ? matched.solde : l.budget_solde_actuel,
-                                              }
-                                            : l;
-                                    }),
-                                };
-                            }
-                            return item;
-                        })
-                    );
-
-                    showToast(
-                        'success',
-                        `Visa Financier certifié apposé sur ${selected.numero}. Transmis à l'Administration.`
-                    );
+                    // Rechargement complet des props pour resynchroniser l'état
+                    router.reload();
+                    showToast('success', `Visa Financier certifié apposé sur ${currentNumero}. Transmis à l'Administration.`);
                 },
                 onError: (errors) => {
                     setPinError((errors as any).pin || 'Code PIN financier incorrect ou non configuré.');
@@ -563,6 +552,7 @@ export default function FinanceDashboard({
         }
 
         setProcessing(true);
+        const currentNumero = selected.numero;
 
         router.patch(
             route('requisitions.finance-decision', selected.id),
@@ -575,28 +565,11 @@ export default function FinanceDashboard({
                 preserveScroll: true,
                 onFinish: () => setProcessing(false),
                 onSuccess: () => {
-                    const updatedId = selected.id;
                     setSelected(null);
                     setRejecting(false);
                     setRejectionReason('');
-
-                    setRequisitions((prev) =>
-                        prev.map((item) => {
-                            if (item.id === updatedId) {
-                                return {
-                                    ...item,
-                                    statusCode: 'returned_to_project_manager',
-                                    statusLabel: 'Renvoyée au Manager de Projet',
-                                    canDecide: false,
-                                    canCorrect: false,
-                                    financeRejected: true,
-                                };
-                            }
-                            return item;
-                        })
-                    );
-
-                    showToast('error', `Réquisition ${selected.numero} renvoyée pour correction budgétaire.`);
+                    router.reload({ preserveUrl: true });
+                    showToast('error', `Réquisition ${currentNumero} renvoyée au Chef de Projet pour correction budgétaire.`);
                 },
                 onError: (errors) => {
                     showToast('error', (errors as any).motif_rejet || 'Erreur lors du renvoi.');
@@ -611,6 +584,7 @@ export default function FinanceDashboard({
 
         setAuthorizingSession(true);
         setSessionPinError(null);
+        const caisseName = sessionToAuthorize.caisse_name;
 
         router.patch(
             route('cashier.session.authorize-opening', sessionToAuthorize.id),
@@ -621,7 +595,8 @@ export default function FinanceDashboard({
                 onSuccess: () => {
                     setSessionToAuthorize(null);
                     setSessionPin('');
-                    showToast('success', `Guichet ${sessionToAuthorize.caisse_name} ouvert avec succès.`);
+                    router.reload({ preserveScroll: true });
+                    showToast('success', `Guichet ${caisseName} ouvert avec succès.`);
                 },
                 onError: (errs) => {
                     setSessionPinError(errs.pin || 'Code PIN financier incorrect.');
@@ -1110,23 +1085,42 @@ export default function FinanceDashboard({
                                                 </span>
                                             </td>
                                             <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                                                {item.canCorrect && (
+                                                <div className="flex items-center justify-end gap-1.5">
+                                                    
+                                                    {/* VUE DIRECTION / HISTORIQUE DES VISAS */}
                                                     <button
                                                         type="button"
-                                                        onClick={() => openCorrection(item)}
-                                                        className="mr-2 rounded border border-amber-600 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-50"
+                                                        onClick={() => setDirectorPreviewReq(item)}
+                                                        className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-semibold transition"
+                                                        title="Aperçu de l'historique des signatures"
                                                     >
-                                                        Corriger
+                                                        <LayoutTemplate className="w-3.5 h-3.5 text-[#04326D]" />
+                                                        <span className="hidden xl:inline">Historique Visas</span>
                                                     </button>
-                                                )}
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleOpenExamen(item)}
-                                                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow-sm transition"
-                                                >
-                                                    <ShieldCheck className="w-3.5 h-3.5" />
-                                                    <span>{item.canDecide ? 'Examiner & Viser' : 'Détails'}</span>
-                                                </button>
+
+                                                    {/* BOUTON CORRIGER : STRICTEMENT SI LA FINANCE Y EST HABILITEE */}
+                                                    {item.canCorrect && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => openCorrection(item)}
+                                                            className="px-2.5 py-1.5 border border-red-600 bg-red-50 text-red-700 rounded font-bold text-xs hover:bg-red-100 transition"
+                                                        >
+                                                            Corriger (Rejet)
+                                                        </button>
+                                                    )}
+
+                                                    {/* BOUTON EXAMINER (Si en attente) OU IMPUTATIONS (Détails) */}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleOpenExamen(item)}
+                                                        className={`inline-flex items-center gap-1 px-3 py-1.5 rounded font-bold text-xs shadow-sm transition ${
+                                                            item.canDecide ? 'bg-[#04326D] hover:bg-[#06428f] text-white' : 'bg-gray-700 hover:bg-gray-800 text-white'
+                                                        }`}
+                                                    >
+                                                        <ShieldCheck className="w-3.5 h-3.5" />
+                                                        <span>{item.canDecide ? 'Examiner & Viser' : 'Imputations'}</span>
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))
@@ -1136,6 +1130,75 @@ export default function FinanceDashboard({
                     </div>
                 </div>
             </div>
+
+            {/* APERÇU CONSOLIDÉ (Vue Direction/Historique des signatures) */}
+            {directorPreviewReq && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
+                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-4xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
+                        <header className="flex items-start justify-between border-b pb-3">
+                            <div>
+                                <span className="text-[10px] bg-blue-100 text-[#04326D] font-bold uppercase px-2 py-0.5 rounded">
+                                    Historique des Visas & Approbations
+                                </span>
+                                <h2 className="text-base font-bold text-[#0B192C] mt-1 flex items-center gap-2">
+                                    Réquisition {directorPreviewReq.numero} ({directorPreviewReq.nature})
+                                    {directorPreviewReq.is_urgent && (
+                                        <span className="bg-red-100 text-red-800 text-[9px] px-1.5 py-0.5 rounded font-black uppercase">
+                                            URGENT
+                                        </span>
+                                    )}
+                                </h2>
+                                <p className="text-xs text-gray-500">
+                                    Projet : <strong>{directorPreviewReq.projet}</strong> • Caisse : <strong>{directorPreviewReq.caisseAttribuee || 'Non assignée'}</strong>
+                                </p>
+                            </div>
+                            <button onClick={() => setDirectorPreviewReq(null)} className="text-gray-400 hover:text-gray-600">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </header>
+
+                        {/* Signatures et Visas certifiés */}
+                        <div className="space-y-2">
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700">
+                                Chaîne des Visas & Signatures Numériques
+                            </h3>
+                            {directorPreviewReq.signatures && directorPreviewReq.signatures.length === 0 ? (
+                                <p className="text-xs text-gray-400 italic">Aucune signature enregistrée pour le moment.</p>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                                    {directorPreviewReq.signatures?.map((sig, idx) => (
+                                        <div key={idx} className="p-2.5 rounded border border-gray-200 bg-gray-50 text-[11px] space-y-1">
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-bold uppercase text-[#04326D]">{sig.role}</span>
+                                                <span className="text-[9px] text-gray-400 font-mono">{sig.date}</span>
+                                            </div>
+                                            <p className="font-semibold text-gray-800">{sig.nom}</p>
+                                            <p className="text-[10px] text-gray-500 font-mono truncate" title={sig.hash}>
+                                                {sig.code}
+                                            </p>
+                                            {sig.commentaire && (
+                                                <p className="text-[10px] italic text-gray-600 bg-white p-1 rounded border mt-1">
+                                                    « {sig.commentaire} »
+                                                </p>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex justify-end pt-3 border-t">
+                            <button
+                                type="button"
+                                onClick={() => setDirectorPreviewReq(null)}
+                                className="px-4 py-2 bg-gray-800 text-white rounded text-xs font-semibold hover:bg-black transition"
+                            >
+                                Fermer l'historique
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* MODALE D'EXAMEN & D'IMPUTATION AVEC FILTRAGE REACT INSTANTANÉ */}
             {selected && (
@@ -1322,7 +1385,7 @@ export default function FinanceDashboard({
                                             className="px-3.5 py-2 border border-red-300 text-red-600 hover:bg-red-50 rounded text-xs font-bold transition"
                                         >
                                             <Ban className="w-3.5 h-3.5 inline mr-1" />
-                                            Rejeter (Problème Budgétaire)
+                                            Rejeter (Renvoi au Manager Projet)
                                         </button>
 
                                         <div className="flex gap-2">
@@ -1346,7 +1409,7 @@ export default function FinanceDashboard({
                                     <div className="bg-red-50 p-4 rounded border border-red-200 space-y-3">
                                         <div className="flex justify-between items-center">
                                             <h4 className="text-xs font-bold text-red-800 uppercase">
-                                                Motif du Rejet Financier (Obligatoire)
+                                                Motif du Rejet (Retour au Manager de Projet)
                                             </h4>
                                             <button
                                                 type="button"
@@ -1360,7 +1423,7 @@ export default function FinanceDashboard({
                                             rows={3}
                                             value={rejectionReason}
                                             onChange={(e) => setRejectionReason(e.target.value)}
-                                            placeholder="Précisez le motif comptable : dépassement de crédit, ligne erronée..."
+                                            placeholder="Précisez le motif comptable : dépassement de crédit, ligne erronée... Le dossier sera renvoyé au Chef de Projet."
                                             className="w-full border border-red-300 rounded p-2 text-xs bg-white focus:outline-none"
                                             required
                                         />
@@ -1519,6 +1582,7 @@ export default function FinanceDashboard({
                 </div>
             )}
 
+            {/* FORMULAIRE DE CORRECTION FINANCE : Renvoyé par Admin/Directrice */}
             {correcting && (
                 <RequisitionCorrectionForm
                     key={correcting.id}
@@ -1526,9 +1590,9 @@ export default function FinanceDashboard({
                     budgetLines={allBudgetLines}
                     onClose={() => setCorrecting(null)}
                     onSuccess={() => {
-                        setRequisitions((items) => items.filter((item) => item.id !== correcting.id));
                         setCorrecting(null);
-                        showToast('success', `Réquisition ${correcting.numero} corrigée et resoumise à l’étape de contrôle suivante.`);
+                        router.reload({ preserveUrl: true });
+                        showToast('success', `Réquisition ${correcting.numero} corrigée et resoumise au PAM avec succès.`);
                     }}
                 />
             )}

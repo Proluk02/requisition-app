@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import { Head, router, usePage } from '@inertiajs/react';
+import { Head, router, usePage, Link } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
 import RequisitionCorrectionForm, { type RequisitionCorrectionData } from '@/Components/RequisitionCorrectionForm';
@@ -21,9 +21,11 @@ import {
     Lock, 
     Eye,
     Filter,
-    BarChart3,
     Activity,
-    PieChart
+    Wallet,
+    FolderKanban,
+    Building2,
+    TrendingUp
 } from 'lucide-react';
 
 interface Justificatif {
@@ -51,6 +53,7 @@ interface RequisitionAdmin {
     id: string;
     numero: string;
     projet: string;
+    project_id?: number | string | null;
     initiateurNom: string;
     initiateurRole: string;
     nature: 'Achat' | 'Service';
@@ -72,6 +75,7 @@ interface HistoryRequisition {
     id: string;
     numero: string;
     projet: string;
+    project_id?: number | string | null;
     initiateurNom: string;
     nature: 'Achat' | 'Service';
     devise: 'USD' | 'FC' | 'EUR';
@@ -80,6 +84,7 @@ interface HistoryRequisition {
     statusCode: string;
     statusLabel: string;
     is_urgent: boolean;
+    dateSoumission?: string;
     signatures: {
         role: string;
         nom: string;
@@ -91,28 +96,73 @@ interface HistoryRequisition {
     }[];
 }
 
+interface AdminStats {
+    en_attente_visa: number;
+    urgences_count: number;
+    total_dossiers: number;
+    validees_count: number;
+    renvoyees_finance_count: number;
+    total_usd: number;
+    total_fc: number;
+    decaisse_usd: number;
+    decaisse_fc: number;
+}
+
+interface ProjectStat {
+    id: number | string;
+    name: string;
+    full_name?: string | null;
+    count: number;
+    en_attente_pam: number;
+    total_usd: number;
+    total_fc: number;
+}
+
+interface CaisseStat {
+    id: number | string;
+    name: string;
+    code?: string;
+    devise: string;
+    solde_actuel: number;
+    is_ouverte: boolean;
+    total_dossiers: number;
+    total_usd: number;
+    total_fc: number;
+    decaisse_usd: number;
+}
+
 interface Props extends PageProps {
     requisitions?: RequisitionAdmin[];
     historyRequisitions?: HistoryRequisition[];
+    adminStats?: AdminStats;
+    projectsStats?: ProjectStat[];
+    caissesStats?: CaisseStat[];
+    isInterim?: boolean;
 }
 
 const money = (amount: number, currency: string) =>
-    `${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${currency}`;
+    `${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 
 export default function AdminManagerDashboard({
     requisitions: initialRequisitions = [],
     historyRequisitions = [],
+    adminStats,
+    projectsStats = [],
+    caissesStats = [],
+    isInterim = false,
 }: Props) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
 
     const [requisitions, setRequisitions] = useState<RequisitionAdmin[]>(initialRequisitions);
     
-    // États pour les filtres
+    // Filtres table à viser
     const [search, setSearch] = useState('');
     const [filterNature, setFilterNature] = useState<string>('All');
     const [filterUrgency, setFilterUrgency] = useState<string>('All');
+    const [filterProject, setFilterProject] = useState<string>('All');
     
+    // Filtres table historique
     const [historySearch, setHistorySearch] = useState('');
     const [historyStatusFilter, setHistoryStatusFilter] = useState<string>('All');
 
@@ -123,30 +173,42 @@ export default function AdminManagerDashboard({
     const [rejecting, setRejecting] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
 
-    // État pour l'impression / téléchargement
+    // Impression / téléchargement
     const [printReq, setPrintReq] = useState<RequisitionAdmin | null>(null);
 
-    // Sécurité : Visa Administratif
+    // Sécurité Visa
     const [passwordModalOpen, setPasswordModalOpen] = useState(false);
     const [passwordSaisi, setPasswordSaisi] = useState('');
     const [processing, setProcessing] = useState(false);
     const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-    // --- CALCUL DES STATISTIQUES (Analytics) ---
+    // --- STATISTIQUES ---
     const stats = useMemo(() => {
         const pendingCount = requisitions.length;
         const urgentCount = requisitions.filter(r => r.is_urgent).length;
-        const achatsCount = requisitions.filter(r => r.nature === 'Achat').length;
-        const servicesCount = requisitions.filter(r => r.nature === 'Service').length;
+        const totalUSD = requisitions.filter(r => r.devise === 'USD').reduce((acc, r) => acc + r.montantTotal, 0);
+        const totalFC = requisitions.filter(r => r.devise === 'FC' || (r.devise as string) === 'CDF').reduce((acc, r) => acc + r.montantTotal, 0);
         
-        const historyCount = historyRequisitions.length;
-        const decaisseCount = historyRequisitions.filter(r => r.statusCode === 'decaisse').length;
-        const rejetsCount = historyRequisitions.filter(r => r.statusCode.startsWith('returned_')).length;
-        
-        return { pendingCount, urgentCount, achatsCount, servicesCount, historyCount, decaisseCount, rejetsCount };
-    }, [requisitions, historyRequisitions]);
+        return {
+            pendingCount: adminStats?.en_attente_visa ?? pendingCount,
+            urgentCount: adminStats?.urgences_count ?? urgentCount,
+            totalDossiers: adminStats?.total_dossiers ?? historyRequisitions.length,
+            valideesCount: adminStats?.validees_count ?? 0,
+            renvoyeesFinanceCount: adminStats?.renvoyees_finance_count ?? 0,
+            totalUSD: adminStats?.total_usd ?? totalUSD,
+            totalFC: adminStats?.total_fc ?? totalFC,
+        };
+    }, [requisitions, adminStats, historyRequisitions]);
 
-    // --- FILTRAGES ---
+    // Projets disponibles pour filtre
+    const projectOptions = useMemo(() => {
+        const set = new Set<string>();
+        requisitions.forEach(r => { if (r.projet) set.add(r.projet); });
+        projectsStats.forEach(p => { if (p.name) set.add(p.name); });
+        return Array.from(set).sort();
+    }, [requisitions, projectsStats]);
+
+    // Filtrage des dossiers à viser
     const filteredRequisitions = useMemo(() => {
         const q = search.toLowerCase();
         return requisitions.filter(item => {
@@ -159,11 +221,13 @@ export default function AdminManagerDashboard({
             const matchesUrgency = filterUrgency === 'All' || 
                 (filterUrgency === 'Urgent' && item.is_urgent) || 
                 (filterUrgency === 'Normal' && !item.is_urgent);
+            const matchesProject = filterProject === 'All' || item.projet === filterProject;
 
-            return matchesSearch && matchesNature && matchesUrgency;
+            return matchesSearch && matchesNature && matchesUrgency && matchesProject;
         });
-    }, [requisitions, search, filterNature, filterUrgency]);
+    }, [requisitions, search, filterNature, filterUrgency, filterProject]);
 
+    // Filtrage de l'historique
     const filteredHistory = useMemo(() => {
         const q = historySearch.toLowerCase();
         return historyRequisitions.filter(item => {
@@ -172,7 +236,7 @@ export default function AdminManagerDashboard({
                 item.initiateurNom.toLowerCase().includes(q);
             
             let matchesStatus = true;
-            if (historyStatusFilter === 'Rejeté') matchesStatus = item.statusCode.startsWith('returned_');
+            if (historyStatusFilter === 'Rejeté') matchesStatus = item.statusCode.startsWith('returned_') || item.statusCode === 'rejetee';
             else if (historyStatusFilter === 'Décaissé') matchesStatus = item.statusCode === 'decaisse';
             else if (historyStatusFilter === 'En cours') matchesStatus = !item.statusCode.startsWith('returned_') && item.statusCode !== 'decaisse';
 
@@ -215,7 +279,7 @@ export default function AdminManagerDashboard({
             onError: (errors) => {
                 setToast({
                     type: 'error',
-                    message: errors.password || 'Erreur lors de la signature administrative.'
+                    message: errors.password || errors.pin || 'Erreur lors de la signature administrative.'
                 });
             }
         });
@@ -223,7 +287,7 @@ export default function AdminManagerDashboard({
 
     const handleReject = () => {
         if (!selected || !rejectionReason.trim()) {
-            setToast({ type: 'error', message: 'Veuillez spécifier le motif du rejet.' });
+            setToast({ type: 'error', message: 'Veuillez spécifier le motif du rejet administratif.' });
             return;
         }
 
@@ -246,7 +310,7 @@ export default function AdminManagerDashboard({
 
                 setToast({
                     type: 'error',
-                    message: `Réquisition ${selected.numero} renvoyée pour non-conformité administrative.`
+                    message: `Réquisition ${selected.numero} renvoyée aux Finances pour correction.`
                 });
                 setTimeout(() => setToast(null), 5000);
             },
@@ -259,7 +323,7 @@ export default function AdminManagerDashboard({
         });
     };
 
-    // --- LOGIQUE D'IMPRESSION ET TÉLÉCHARGEMENT ---
+    // Impression
     const handlePrintPreview = (req: RequisitionAdmin) => {
         setPrintReq(req);
     };
@@ -281,7 +345,6 @@ export default function AdminManagerDashboard({
             .then(() => setPrintReq(null));
     }, [printReq]);
 
-    // Formatage temporaire pour OfficialPrintSheet
     const printRequisition = printReq ? {
         id: printReq.id,
         numero: printReq.numero,
@@ -321,12 +384,11 @@ export default function AdminManagerDashboard({
 
     return (
         <AppLayout>
-            <Head title="Contrôle Administratif (Visa 3)" />
+            <Head title="Contrôle Administratif & PAM" />
             
             <style>{`
                 #bon-pasteur-print-zone { display: none; }
                 @media print {
-                    /* Impression en mode paysage exigée */
                     @page { size: landscape; }
                     body * { visibility: hidden !important; }
                     #bon-pasteur-print-zone,
@@ -345,6 +407,31 @@ export default function AdminManagerDashboard({
             `}</style>
 
             <div className="space-y-6 no-print">
+                {/* BANNIÈRE SI INTÉRIM DIRECTION ACTIF */}
+                {isInterim && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded p-4 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-amber-500 text-white rounded shadow-sm">
+                                <ShieldCheck className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <h3 className="text-xs font-black uppercase tracking-wider text-amber-900">
+                                    Intérim Direction Générale Actif (Pour Ordre / P.O.)
+                                </h3>
+                                <p className="text-[11px] text-amber-800 mt-0.5">
+                                    Vous disposez des prérogatives officielles d'approbation finale des bons à payer pour la Direction Générale.
+                                </p>
+                            </div>
+                        </div>
+                        <Link
+                            href={route('director.dashboard')}
+                            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded shadow transition whitespace-nowrap"
+                        >
+                            Accéder au Dashboard Direction &rarr;
+                        </Link>
+                    </div>
+                )}
+
                 {/* En-tête */}
                 <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-[#E2E8F0] pb-4">
                     <div>
@@ -352,10 +439,10 @@ export default function AdminManagerDashboard({
                             <ShieldCheck className="w-3.5 h-3.5 text-[#F58F20]" />
                             <span className="text-[#F58F20]">Étape 3 du Workflow</span>
                             <span className="mx-1">/</span>
-                            <span className="text-[#04326D]">PAM</span>
+                            <span className="text-[#04326D]">PAM (Manager Administratif)</span>
                         </nav>
                         <h1 className="text-xl font-bold text-[#0B192C]">
-                            Contrôle Administratif & Visa
+                            Supervision & Contrôle Administratif
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
                             Manager Admin : <strong className="text-[#0B192C]">{user.name}</strong> • Vérification de la conformité institutionnelle.
@@ -363,64 +450,85 @@ export default function AdminManagerDashboard({
                     </div>
                 </header>
 
-                {/* CHARTES GRAPHIQUES ET STATISTIQUES */}
-                <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {/* Carte 1: Dossiers en Attente */}
+                {/* 4 CARTES KPI STATISTIQUES */}
+                <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* Carte 1 */}
                     <div className="bg-white border border-[#B2BED6] rounded shadow-sm p-4 flex flex-col justify-between">
                         <div className="flex justify-between items-start">
                             <div>
-                                <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Dossiers en attente</h3>
+                                <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Dossiers à Viser</h3>
                                 <div className="text-2xl font-black text-[#04326D] mt-1">{stats.pendingCount}</div>
                             </div>
                             <div className="p-2 bg-blue-50 rounded-full">
                                 <Activity className="w-4 h-4 text-[#04326D]" />
                             </div>
                         </div>
-                        <div className="mt-3 text-[11px] text-gray-500">
-                            Dont <strong className="text-red-600">{stats.urgentCount}</strong> dossier(s) urgent(s)
+                        <div className="mt-3 text-[11px] text-gray-500 flex items-center justify-between">
+                            <span>Urgences :</span>
+                            <span className="font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">
+                                {stats.urgentCount} dossier(s)
+                            </span>
                         </div>
                     </div>
 
-                    {/* Carte 2: Répartition Achat vs Service */}
-                    <div className="bg-white border border-[#B2BED6] rounded shadow-sm p-4 flex flex-col justify-between">
-                        <div className="flex justify-between items-start mb-2">
-                            <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Répartition (En attente)</h3>
-                            <PieChart className="w-4 h-4 text-gray-400" />
-                        </div>
-                        <div>
-                            <div className="flex justify-between text-[11px] mb-1 font-semibold">
-                                <span className="text-[#04326D]">Achats ({stats.achatsCount})</span>
-                                <span className="text-[#F58F20]">Services ({stats.servicesCount})</span>
-                            </div>
-                            <div className="flex h-2 w-full rounded-full overflow-hidden bg-gray-100">
-                                <div 
-                                    style={{ width: stats.pendingCount ? `${(stats.achatsCount / stats.pendingCount) * 100}%` : '50%' }} 
-                                    className="bg-[#04326D]" 
-                                    title="Achats"
-                                ></div>
-                                <div 
-                                    style={{ width: stats.pendingCount ? `${(stats.servicesCount / stats.pendingCount) * 100}%` : '50%' }} 
-                                    className="bg-[#F58F20]" 
-                                    title="Services"
-                                ></div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Carte 3: Historique Global */}
+                    {/* Carte 2 */}
                     <div className="bg-white border border-[#B2BED6] rounded shadow-sm p-4 flex flex-col justify-between">
                         <div className="flex justify-between items-start">
                             <div>
-                                <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Volume Traité</h3>
-                                <div className="text-2xl font-black text-gray-800 mt-1">{stats.historyCount}</div>
+                                <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Volume Global USD</h3>
+                                <div className="text-lg font-black text-[#0B192C] mt-1 font-mono">
+                                    {money(stats.totalUSD, 'USD')}
+                                </div>
                             </div>
-                            <div className="p-2 bg-gray-50 rounded-full border border-gray-100">
-                                <BarChart3 className="w-4 h-4 text-gray-500" />
+                            <div className="p-2 bg-emerald-50 rounded-full">
+                                <TrendingUp className="w-4 h-4 text-emerald-600" />
                             </div>
                         </div>
-                        <div className="mt-3 flex gap-3 text-[11px] font-medium">
-                            <span className="text-emerald-600 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>{stats.decaisseCount} décaissés</span>
-                            <span className="text-red-600 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>{stats.rejetsCount} renvoyés</span>
+                        <div className="mt-3 text-[11px] text-gray-500 flex items-center justify-between">
+                            <span>Décaissements effectués :</span>
+                            <span className="font-bold text-emerald-700">
+                                {money(adminStats?.decaisse_usd ?? 0, 'USD')}
+                            </span>
+                        </div>
+                    </div>
+
+                    {/* Carte 3 */}
+                    <div className="bg-white border border-[#B2BED6] rounded shadow-sm p-4 flex flex-col justify-between">
+                        <div className="flex justify-between items-start">
+                            <div>
+                                <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Volume Global FC</h3>
+                                <div className="text-lg font-black text-[#0B192C] mt-1 font-mono">
+                                    {money(stats.totalFC, 'FC')}
+                                </div>
+                            </div>
+                            <div className="p-2 bg-amber-50 rounded-full">
+                                <Wallet className="w-4 h-4 text-[#F58F20]" />
+                            </div>
+                        </div>
+                        <div className="mt-3 text-[11px] text-gray-500 flex items-center justify-between">
+                            <span>Total réquisitions :</span>
+                            <span className="font-bold text-gray-700">{stats.totalDossiers} dossiers</span>
+                        </div>
+                    </div>
+
+                    {/* Carte 4 */}
+                    <div className="bg-white border border-[#B2BED6] rounded shadow-sm p-4 flex flex-col justify-between">
+                        <div className="flex justify-between items-start">
+                            <div>
+                                <h3 className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Flux Administratif</h3>
+                                <div className="text-lg font-black text-gray-800 mt-1">
+                                    {stats.valideesCount} <span className="text-xs font-normal text-gray-500">visés</span>
+                                </div>
+                            </div>
+                            <div className="p-2 bg-purple-50 rounded-full">
+                                <ShieldCheck className="w-4 h-4 text-purple-600" />
+                            </div>
+                        </div>
+                        <div className="mt-3 text-[11px] text-gray-500 flex items-center justify-between">
+                            <span>Renvoyés aux Finances :</span>
+                            <span className="font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">
+                                {stats.renvoyeesFinanceCount}
+                            </span>
                         </div>
                     </div>
                 </section>
@@ -435,18 +543,31 @@ export default function AdminManagerDashboard({
                     </div>
                 )}
 
-                {/* TABLEAU DES RÉQUISITIONS À VISER */}
+                {/* 1. TABLE PRINCIPALE : DOSSIERS EN ATTENTE DE VISA (VISIBLE DIRECTEMENT) */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="p-4 border-b border-[#E2E8F0] flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-gray-50/50">
                         <div>
                             <h2 className="text-sm font-bold text-[#0B192C] uppercase tracking-wider flex items-center gap-2">
-                                Dossiers en Attente de Visa Administratif
+                                Dossiers en Attente de Visa
                                 <span className="bg-[#04326D] text-white px-2 py-0.5 rounded-full text-[10px]">{filteredRequisitions.length}</span>
                             </h2>
                         </div>
 
-                        {/* Filtres Actifs */}
+                        {/* Barre de filtres */}
                         <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex items-center gap-1.5 bg-white border border-[#B2BED6] rounded px-2 py-1">
+                                <FolderKanban className="w-3.5 h-3.5 text-gray-400" />
+                                <select 
+                                    value={filterProject}
+                                    onChange={(e) => setFilterProject(e.target.value)}
+                                    className="text-xs border-none bg-transparent focus:ring-0 py-0.5 pl-1 pr-6 cursor-pointer text-gray-700 font-medium"
+                                >
+                                    <option value="All">Tous Projets</option>
+                                    {projectOptions.map(p => (
+                                        <option key={p} value={p}>{p}</option>
+                                    ))}
+                                </select>
+                            </div>
                             <div className="flex items-center gap-1.5 bg-white border border-[#B2BED6] rounded px-2 py-1">
                                 <Filter className="w-3.5 h-3.5 text-gray-400" />
                                 <select 
@@ -501,7 +622,7 @@ export default function AdminManagerDashboard({
                                 {filteredRequisitions.length === 0 ? (
                                     <tr>
                                         <td colSpan={7} className="py-10 text-center text-gray-400 italic">
-                                            Aucun dossier ne correspond à vos filtres.
+                                            Aucun dossier en attente de visa administratif.
                                         </td>
                                     </tr>
                                 ) : (
@@ -593,100 +714,193 @@ export default function AdminManagerDashboard({
                         </table>
                     </div>
                 </div>
-            </div>
 
-            {/* HISTORIQUE GLOBAL */}
-            <section className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden mt-6 no-print">
-                <header className="p-4 border-b border-[#E2E8F0] flex flex-col md:flex-row justify-between items-center gap-4 bg-gray-50/50">
-                    <div>
-                        <h2 className="text-[13px] font-bold text-[#0B192C] uppercase tracking-wider flex items-center gap-2">
-                            Historique Global des Réquisitions
-                            <span className="bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full text-[10px]">{filteredHistory.length}</span>
-                        </h2>
-                    </div>
+                {/* 2. SYNTHÈSE COMPACTE : PROJETS ET CAISSES (VISIBLE CÔTE À CÔTE SANS CACHER LES TABLES) */}
+                {(projectsStats.length > 0 || caissesStats.length > 0) && (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {/* Synthèse Projets */}
+                        <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
+                            <div className="p-3 border-b border-[#E2E8F0] bg-gray-50 flex justify-between items-center">
+                                <h3 className="text-xs font-bold text-[#0B192C] uppercase flex items-center gap-1.5">
+                                    <Building2 className="w-3.5 h-3.5 text-[#04326D]" />
+                                    Synthèse par Projet
+                                </h3>
+                                <span className="text-[10px] text-gray-500 font-semibold">{projectsStats.length} projets</span>
+                            </div>
+                            <div className="max-h-56 overflow-y-auto">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-[#0B192C] text-white text-[9px] uppercase font-bold sticky top-0">
+                                        <tr>
+                                            <th className="px-3 py-2">Projet</th>
+                                            <th className="px-3 py-2 text-center">Dossiers</th>
+                                            <th className="px-3 py-2 text-center">À Viser</th>
+                                            <th className="px-3 py-2 text-right">Total USD</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100 text-gray-700 text-[11px]">
+                                        {projectsStats.map((p) => (
+                                            <tr key={p.id} className="hover:bg-gray-50">
+                                                <td className="px-3 py-2 font-bold text-[#04326D] truncate max-w-[140px]" title={p.name}>
+                                                    {p.name}
+                                                </td>
+                                                <td className="px-3 py-2 text-center">{p.count}</td>
+                                                <td className="px-3 py-2 text-center">
+                                                    {p.en_attente_pam > 0 ? (
+                                                        <span className="bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                                                            {p.en_attente_pam}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-gray-400">0</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-3 py-2 text-right font-mono font-bold">{money(p.total_usd, 'USD')}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
 
-                    <div className="flex flex-wrap items-center gap-3">
-                        <div className="flex items-center gap-1.5 bg-white border border-[#B2BED6] rounded px-2 py-1">
-                            <Filter className="w-3.5 h-3.5 text-gray-400" />
-                            <select 
-                                value={historyStatusFilter}
-                                onChange={(e) => setHistoryStatusFilter(e.target.value)}
-                                className="text-xs border-none bg-transparent focus:ring-0 py-0.5 pl-1 pr-6 cursor-pointer text-gray-700 font-medium"
-                            >
-                                <option value="All">Tous les statuts</option>
-                                <option value="En cours">En cours de traitement</option>
-                                <option value="Décaissé">Décaissés</option>
-                                <option value="Rejeté">Renvoyés / Rejetés</option>
-                            </select>
-                        </div>
-                        <div className="relative">
-                            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                            <input
-                                type="text"
-                                placeholder="Rechercher historique..."
-                                value={historySearch}
-                                onChange={(e) => setHistorySearch(e.target.value)}
-                                className="pl-8 pr-3 py-1.5 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D] focus:ring-1 focus:ring-[#04326D] w-52 bg-white transition shadow-sm"
-                            />
+                        {/* Situation Caisses */}
+                        <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
+                            <div className="p-3 border-b border-[#E2E8F0] bg-gray-50 flex justify-between items-center">
+                                <h3 className="text-xs font-bold text-[#0B192C] uppercase flex items-center gap-1.5">
+                                    <Wallet className="w-3.5 h-3.5 text-[#04326D]" />
+                                    Situation des Caisses
+                                </h3>
+                                <span className="text-[10px] text-gray-500 font-semibold">{caissesStats.length} caisses</span>
+                            </div>
+                            <div className="max-h-56 overflow-y-auto">
+                                <table className="w-full text-left text-xs">
+                                    <thead className="bg-[#0B192C] text-white text-[9px] uppercase font-bold sticky top-0">
+                                        <tr>
+                                            <th className="px-3 py-2">Caisse</th>
+                                            <th className="px-3 py-2 text-center">Statut</th>
+                                            <th className="px-3 py-2 text-right">Solde Actuel</th>
+                                            <th className="px-3 py-2 text-center">Dossiers</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100 text-gray-700 text-[11px]">
+                                        {caissesStats.map((c) => (
+                                            <tr key={c.id} className="hover:bg-gray-50">
+                                                <td className="px-3 py-2 font-bold text-[#0B192C] truncate max-w-[140px]" title={c.name}>
+                                                    {c.name}
+                                                </td>
+                                                <td className="px-3 py-2 text-center">
+                                                    {c.is_ouverte ? (
+                                                        <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded text-[9px] font-bold">
+                                                            Ouverte
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-gray-500 text-[9px]">Fermée</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-3 py-2 text-right font-mono font-bold text-[#04326D]">
+                                                    {money(c.solde_actuel, c.devise)}
+                                                </td>
+                                                <td className="px-3 py-2 text-center">{c.total_dossiers}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
-                </header>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                            <tr className="bg-[#0B192C] text-white uppercase text-[10px] font-bold tracking-wider">
-                                <th className="px-4 py-3">Numéro</th>
-                                <th className="px-4 py-3">Initiateur</th>
-                                <th className="px-4 py-3">Projet</th>
-                                <th className="px-4 py-3 text-right">Montant</th>
-                                <th className="px-4 py-3">Statut</th>
-                                <th className="px-4 py-3 text-right">Historique & PDF</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
-                            {filteredHistory.map((item) => (
-                                <tr key={item.id} className="hover:bg-[#F9F9FF] transition">
-                                    <td className="px-4 py-3 font-mono font-bold text-[#04326D]">{item.numero}</td>
-                                    <td className="px-4 py-3 font-semibold">{item.initiateurNom}</td>
-                                    <td className="px-4 py-3">{item.projet}</td>
-                                    <td className="px-4 py-3 text-right font-mono font-bold">{money(item.montantTotal, item.devise)}</td>
-                                    <td className="px-4 py-3">
-                                        <span className={`rounded px-2.5 py-1 text-[10px] font-bold border ${
-                                            item.statusCode.startsWith('returned_')
-                                                ? 'bg-red-50 text-red-800 border-red-200'
-                                                : item.statusCode === 'decaisse'
-                                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                                : 'bg-blue-50 text-[#04326D] border-blue-200'
-                                        }`}>
-                                            {item.is_urgent ? 'URGENT · ' : ''}{item.statusLabel}
-                                        </span>
-                                    </td>
-                                    <td className="px-4 py-3 text-right whitespace-nowrap">
-                                        <div className="flex items-center justify-end gap-1">
-                                            <button
-                                                type="button"
-                                                onClick={() => setHistorySelected(item)}
-                                                className="rounded border border-[#04326D] px-2.5 py-1 text-[11px] font-bold text-[#04326D] hover:bg-blue-50 transition"
-                                            >
-                                                Consulter Visas
-                                            </button>
-                                            <div className="w-px h-4 bg-gray-300 mx-1"></div>
-                                            <IconButton
-                                                title="Télécharger le PDF"
-                                                onClick={() => handleDownloadPdf(item.id, item.numero)}
-                                                icon={<Download className="w-4 h-4" />}
-                                            />
-                                        </div>
-                                    </td>
+                )}
+
+                {/* 3. HISTORIQUE GLOBAL DES RÉQUISITIONS (VISIBLE DIRECTEMENT SUR LA PAGE) */}
+                <section className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden mt-6">
+                    <header className="p-4 border-b border-[#E2E8F0] flex flex-col md:flex-row justify-between items-center gap-4 bg-gray-50/50">
+                        <div>
+                            <h2 className="text-[13px] font-bold text-[#0B192C] uppercase tracking-wider flex items-center gap-2">
+                                Historique Global des Réquisitions
+                                <span className="bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full text-[10px]">{filteredHistory.length}</span>
+                            </h2>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex items-center gap-1.5 bg-white border border-[#B2BED6] rounded px-2 py-1">
+                                <Filter className="w-3.5 h-3.5 text-gray-400" />
+                                <select 
+                                    value={historyStatusFilter}
+                                    onChange={(e) => setHistoryStatusFilter(e.target.value)}
+                                    className="text-xs border-none bg-transparent focus:ring-0 py-0.5 pl-1 pr-6 cursor-pointer text-gray-700 font-medium"
+                                >
+                                    <option value="All">Tous les statuts</option>
+                                    <option value="En cours">En cours de traitement</option>
+                                    <option value="Décaissé">Décaissés</option>
+                                    <option value="Rejeté">Renvoyés / Rejetés</option>
+                                </select>
+                            </div>
+                            <div className="relative">
+                                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                <input
+                                    type="text"
+                                    placeholder="Rechercher historique..."
+                                    value={historySearch}
+                                    onChange={(e) => setHistorySearch(e.target.value)}
+                                    className="pl-8 pr-3 py-1.5 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D] focus:ring-1 focus:ring-[#04326D] w-52 bg-white transition shadow-sm"
+                                />
+                            </div>
+                        </div>
+                    </header>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                                <tr className="bg-[#0B192C] text-white uppercase text-[10px] font-bold tracking-wider">
+                                    <th className="px-4 py-3">Numéro</th>
+                                    <th className="px-4 py-3">Initiateur</th>
+                                    <th className="px-4 py-3">Projet</th>
+                                    <th className="px-4 py-3 text-right">Montant</th>
+                                    <th className="px-4 py-3">Statut</th>
+                                    <th className="px-4 py-3 text-right">Historique & PDF</th>
                                 </tr>
-                            ))}
-                            {filteredHistory.length === 0 && (
-                                <tr><td colSpan={6} className="py-8 text-center text-gray-400 italic">Aucune réquisition dans l'historique selon vos critères.</td></tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </section>
+                            </thead>
+                            <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
+                                {filteredHistory.map((item) => (
+                                    <tr key={item.id} className="hover:bg-[#F9F9FF] transition">
+                                        <td className="px-4 py-3 font-mono font-bold text-[#04326D]">{item.numero}</td>
+                                        <td className="px-4 py-3 font-semibold">{item.initiateurNom}</td>
+                                        <td className="px-4 py-3">{item.projet}</td>
+                                        <td className="px-4 py-3 text-right font-mono font-bold">{money(item.montantTotal, item.devise)}</td>
+                                        <td className="px-4 py-3">
+                                            <span className={`rounded px-2.5 py-1 text-[10px] font-bold border ${
+                                                item.statusCode.startsWith('returned_')
+                                                    ? 'bg-red-50 text-red-800 border-red-200'
+                                                    : item.statusCode === 'decaisse'
+                                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                                    : 'bg-blue-50 text-[#04326D] border-blue-200'
+                                            }`}>
+                                                {item.is_urgent ? 'URGENT · ' : ''}{item.statusLabel}
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                                            <div className="flex items-center justify-end gap-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setHistorySelected(item)}
+                                                    className="rounded border border-[#04326D] px-2.5 py-1 text-[11px] font-bold text-[#04326D] hover:bg-blue-50 transition"
+                                                >
+                                                    Consulter Visas
+                                                </button>
+                                                <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                                                <IconButton
+                                                    title="Télécharger le PDF"
+                                                    onClick={() => handleDownloadPdf(item.id, item.numero)}
+                                                    icon={<Download className="w-4 h-4" />}
+                                                />
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                                {filteredHistory.length === 0 && (
+                                    <tr><td colSpan={6} className="py-8 text-center text-gray-400 italic">Aucune réquisition dans l'historique selon vos critères.</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
 
             {/* MODALE D'EXAMEN ET VISA ADMINISTRATIF */}
             {selected && (
@@ -721,10 +935,10 @@ export default function AdminManagerDashboard({
                             </div>
                         )}
 
-                        {/* TABLEAU DES DEMANDES AVEC LES DEVIS */}
+                        {/* TABLEAU DES DEMANDES ET JUSTIFICATIFS */}
                         <div>
                             <h3 className="text-xs font-bold text-[#0B192C] uppercase tracking-wider mb-2">
-                                Articles & Devis Attachés (Conformité)
+                                Articles & Devis Attachés (Conformité Administrative)
                             </h3>
                             <div className="border border-[#B2BED6] rounded overflow-hidden shadow-sm">
                                 <table className="w-full text-left text-xs">
@@ -782,84 +996,86 @@ export default function AdminManagerDashboard({
                             </div>
                         </div>
 
-                        {/* ACTIONS */}
-                        {selected.canDecide && <div className="border-t pt-4 space-y-3">
-                            {!rejecting ? (
-                                <div className="flex items-center justify-between">
-                                    <button
-                                        type="button"
-                                        onClick={() => setRejecting(true)}
-                                        className="px-3.5 py-1.5 border border-red-300 text-red-600 hover:bg-red-50 rounded text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
-                                    >
-                                        <Ban className="w-3.5 h-3.5" />
-                                        Rejeter (Non-conformité)
-                                    </button>
+                        {/* ACTIONS DE DÉCISION */}
+                        {selected.canDecide && (
+                            <div className="border-t pt-4 space-y-3">
+                                {!rejecting ? (
+                                    <div className="flex items-center justify-between">
+                                        <button
+                                            type="button"
+                                            onClick={() => setRejecting(true)}
+                                            className="px-3.5 py-1.5 border border-red-300 text-red-600 hover:bg-red-50 rounded text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                                        >
+                                            <Ban className="w-3.5 h-3.5" />
+                                            Rejeter aux Finances
+                                        </button>
 
-                                    <div className="flex gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setSelected(null)}
-                                            className="px-4 py-1.5 border rounded text-xs font-semibold text-gray-600 hover:bg-gray-50 transition shadow-sm"
-                                        >
-                                            Fermer
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={handleTriggerApprove}
-                                            className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white rounded text-xs font-bold shadow flex items-center gap-1.5 transition"
-                                        >
-                                            <span>Accorder Visa (Visa 3)</span>
-                                            <span>&rarr;</span>
-                                        </button>
+                                        <div className="flex gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => setSelected(null)}
+                                                className="px-4 py-1.5 border rounded text-xs font-semibold text-gray-600 hover:bg-gray-50 transition shadow-sm"
+                                            >
+                                                Fermer
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={handleTriggerApprove}
+                                                className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white rounded text-xs font-bold shadow flex items-center gap-1.5 transition"
+                                            >
+                                                <span>Accorder Visa Administratif</span>
+                                                <span>&rarr;</span>
+                                            </button>
+                                        </div>
                                     </div>
-                                </div>
-                            ) : (
-                                <div className="bg-red-50 p-4 rounded border border-red-200 space-y-3 shadow-inner">
-                                    <div className="flex justify-between items-center">
-                                        <h4 className="text-xs font-bold text-red-800 uppercase flex items-center gap-1.5">
-                                            <Ban className="w-3.5 h-3.5" /> Motif du Rejet Administratif
-                                        </h4>
-                                        <button
-                                            type="button"
-                                            onClick={() => setRejecting(false)}
-                                            className="text-xs text-gray-500 hover:text-gray-800 font-semibold transition"
-                                        >
-                                            Annuler
-                                        </button>
+                                ) : (
+                                    <div className="bg-red-50 p-4 rounded border border-red-200 space-y-3 shadow-inner">
+                                        <div className="flex justify-between items-center">
+                                            <h4 className="text-xs font-bold text-red-800 uppercase flex items-center gap-1.5">
+                                                <Ban className="w-3.5 h-3.5" /> Motif du Rejet Administratif (Retour Finances)
+                                            </h4>
+                                            <button
+                                                type="button"
+                                                onClick={() => setRejecting(false)}
+                                                className="text-xs text-gray-500 hover:text-gray-800 font-semibold transition"
+                                            >
+                                                Annuler
+                                            </button>
+                                        </div>
+                                        <textarea
+                                            rows={3}
+                                            value={rejectionReason}
+                                            onChange={(e) => setRejectionReason(e.target.value)}
+                                            placeholder="Précisez la non-conformité administrative constatée..."
+                                            className="w-full border border-red-300 rounded p-2 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 bg-white shadow-sm"
+                                            required
+                                        ></textarea>
+                                        <div className="flex justify-end gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => setRejecting(false)}
+                                                className="px-3 py-1.5 border border-red-200 rounded text-xs bg-white text-gray-700 hover:bg-gray-50 transition"
+                                            >
+                                                Annuler
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={handleReject}
+                                                disabled={processing}
+                                                className="px-4 py-1.5 bg-[#DC2626] hover:bg-[#b91c1c] text-white rounded text-xs font-bold shadow transition"
+                                            >
+                                                {processing ? 'Renvoi aux finances...' : 'Confirmer le Rejet aux Finances'}
+                                            </button>
+                                        </div>
                                     </div>
-                                    <textarea
-                                        rows={3}
-                                        value={rejectionReason}
-                                        onChange={(e) => setRejectionReason(e.target.value)}
-                                        placeholder="Précisez le problème administratif ou institutionnel..."
-                                        className="w-full border border-red-300 rounded p-2 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 bg-white shadow-sm"
-                                        required
-                                    ></textarea>
-                                    <div className="flex justify-end gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setRejecting(false)}
-                                            className="px-3 py-1.5 border border-red-200 rounded text-xs bg-white text-gray-700 hover:bg-gray-50 transition"
-                                        >
-                                            Annuler
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={handleReject}
-                                            disabled={processing}
-                                            className="px-4 py-1.5 bg-[#DC2626] hover:bg-[#b91c1c] text-white rounded text-xs font-bold shadow transition"
-                                        >
-                                            {processing ? 'Renvoi en cours...' : 'Confirmer le Rejet Administratif'}
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>}
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
 
-            {/* MODALE D'AUTHENTIFICATION DE MOT DE PASSE POUR SIGNER */}
+            {/* MODALE D'AUTHENTIFICATION MOT DE PASSE */}
             {passwordModalOpen && selected && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in no-print">
                     <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
@@ -878,7 +1094,7 @@ export default function AdminManagerDashboard({
                         <form onSubmit={handleConfirmSignature} className="space-y-4">
                             <div>
                                 <label className="block text-[11px] font-bold text-gray-700 mb-1.5">
-                                    Mot de passe pour signer le visa 3 :
+                                    Mot de passe pour signer le visa administratif :
                                 </label>
                                 <input
                                     type="password"
@@ -892,7 +1108,7 @@ export default function AdminManagerDashboard({
                             </div>
 
                             <p className="text-[10px] text-gray-500 leading-tight bg-gray-50 p-2 rounded border border-gray-100">
-                                Un certificat électronique unique sera émis et la demande sera transmise à la Directrice Générale.
+                                Un certificat électronique unique sera apposé et la demande sera transmise à la Direction Générale.
                             </p>
 
                             <div className="flex justify-end gap-2 pt-2 border-t">
@@ -928,7 +1144,7 @@ export default function AdminManagerDashboard({
                             setCorrecting(null);
                             setToast({
                                 type: 'success',
-                                message: `Réquisition ${correcting.numero} corrigée et resoumise à la Direction.`,
+                                message: `Réquisition ${correcting.numero} corrigée et resoumise avec succès.`,
                             });
                         }}
                     />
@@ -980,7 +1196,6 @@ export default function AdminManagerDashboard({
     );
 }
 
-// Bouton Icône réutilisable (Design standardisé)
 function IconButton({ title, onClick, icon }: { title: string; onClick: () => void; icon: ReactNode }) {
     return (
         <button

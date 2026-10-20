@@ -93,7 +93,7 @@ interface Props extends PageProps {
 }
 
 const money = (n: number, c: string) =>
-    `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${c}`;
+    `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${c}`;
 
 export default function DirectorDashboard({
     selectedPeriod,
@@ -137,12 +137,18 @@ export default function DirectorDashboard({
         });
     }, [requisitions, selectedProject, selectedCaisse, decaissementFilter]);
 
+    // Volumes consolidés en USD et en Francs Congolais (CDF/FC)
     const volumeUSD = useMemo(
         () => requisitions.reduce((acc, r) => acc + (r.devise === 'USD' ? r.montantTotal : 0), 0),
         [requisitions]
     );
 
-    // --- GRAPHIQUES 100% FRONT-END ---
+    const volumeCDF = useMemo(
+        () => requisitions.reduce((acc, r) => acc + (r.devise === 'FC' || (r.devise as string) === 'CDF' ? r.montantTotal : 0), 0),
+        [requisitions]
+    );
+
+    // --- GRAPHIQUES ---
     const donutData = useMemo(() => {
         const total = requisitions.length || 1;
         const pctDecaisse = requisitions.length > 0 ? Math.round((decaisseesCount / total) * 100) : 0;
@@ -174,7 +180,6 @@ export default function DirectorDashboard({
         if (!projectsStats.length) return 1;
         return Math.max(...projectsStats.map(p => p.total_usd));
     }, [projectsStats]);
-    // ---------------------------------
 
     const handleOpenSignature = (req: RequisitionDirectrice) => {
         setPinError(null);
@@ -207,6 +212,7 @@ export default function DirectorDashboard({
         );
     };
 
+    // REJET DIRECTRICE : RENVOI STRICTEMENT AUX FINANCES
     const handleReject = (event: React.FormEvent) => {
         event.preventDefault();
         if (!rejectReq || !rejectionReason.trim()) return;
@@ -220,7 +226,7 @@ export default function DirectorDashboard({
                 onSuccess: () => {
                     setToast({
                         type: 'success',
-                        message: `Réquisition ${rejectReq.numero} renvoyée au PAM pour correction.`,
+                        message: `Réquisition ${rejectReq.numero} renvoyée aux Finances pour correction budgétaire.`,
                     });
                     setRejectReq(null);
                     setRejectionReason('');
@@ -234,14 +240,11 @@ export default function DirectorDashboard({
         );
     };
 
-    // 1. Ouvre le composant HTML pour l'aperçu du navigateur
     const handlePrintPreview = (req: RequisitionDirectrice) => {
         setPrintReq(req);
     };
 
-    // 2. Téléchargement direct du PDF sans page blanche intermédiaire
     const handleDownloadPdf = (req: RequisitionDirectrice) => {
-        // On crée un lien <a> invisible avec l'attribut download pour forcer le téléchargement
         const url = route('requisitions.pdf', req.id);
         const link = document.createElement('a');
         link.href = url;
@@ -252,12 +255,39 @@ export default function DirectorDashboard({
         document.body.removeChild(link);
     };
 
-    // Lance l'aperçu quand les données sont prêtes dans le DOM
     useEffect(() => {
         if (!printReq) return;
         void openPrintPreview('bon-pasteur-print-zone')
             .then(() => setPrintReq(null));
     }, [printReq]);
+
+    // Conversion rigoureuse du statut vers l'étape pour la feuille d'impression
+    const mapStatusToWorkflow = (status: string): RequisitionSuivi['etapeActuelle'] => {
+        switch (status) {
+            case 'returned_to_beneficiary':
+            case 'returned_to_urgent_initiator':
+                return 'brouillon';
+            case 'returned_to_project_manager':
+            case 'draft':
+                return 'visa_mp';
+            case 'returned_to_finance':
+            case 'visa_mp':
+                return 'controle_finance';
+            case 'returned_to_admin_manager':
+            case 'controle_finance':
+                return 'visa_admin';
+            case 'visa_admin':
+            case 'urgent_direction':
+                return 'approbation_direction';
+            case 'decaissement_caisse':
+                return 'decaissement_caisse';
+            case 'decaisse':
+            case 'cloture':
+                return 'cloture';
+            default:
+                return 'brouillon';
+        }
+    };
 
     const printRequisition = printReq ? {
         id: printReq.id,
@@ -274,7 +304,9 @@ export default function DirectorDashboard({
         date_livraison: printReq.date_livraison,
         observation: printReq.observation ?? undefined,
         is_urgent: printReq.is_urgent,
-        etapeActuelle: 'approbation_direction' as const,
+        statusCode: printReq.statusCode,
+        statusLabel: printReq.workflowLevel.label,
+        etapeActuelle: mapStatusToWorkflow(printReq.statusCode),
         articles: printReq.lignes.map((line) => ({
             id: line.id,
             activite: line.activite,
@@ -304,17 +336,21 @@ export default function DirectorDashboard({
             <style>{`
                 #bon-pasteur-print-zone { display: none; }
                 @media print {
+                    /* FORCE L'IMPRESSION EN MODE PAYSAGE SUR A4 */
+                    @page { size: A4 landscape; margin: 8mm 10mm; }
                     body * { visibility: hidden !important; }
                     #bon-pasteur-print-zone,
                     #bon-pasteur-print-zone * { visibility: visible !important; }
                     #bon-pasteur-print-zone {
                         display: block !important;
-                        position: fixed !important;
+                        position: absolute !important;
                         inset: 0 !important;
                         width: 100% !important;
                         min-height: 194mm !important;
                         background: white !important;
                         z-index: 2147483647 !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
                     }
                     #bon-pasteur-official-sheet { width: 100% !important; min-height: 194mm !important; }
                 }
@@ -362,7 +398,8 @@ export default function DirectorDashboard({
                     </div>
                 </header>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {/* 5 CARTES KPI : INCLUANT USD ET CDF (FC) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                     <KpiCard
                         label="Réquisitions du mois"
                         value={requisitions.length}
@@ -381,14 +418,20 @@ export default function DirectorDashboard({
                         tone="amber"
                     />
                     <KpiCard
-                        label="Volume (USD)"
-                        value={`$${volumeUSD.toLocaleString('fr-FR')}`}
-                        hint="Engagements consolidés"
+                        label="Volume Global (USD)"
+                        value={`$${volumeUSD.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        hint="Engagements en dollars"
+                        tone="dark"
+                    />
+                    <KpiCard
+                        label="Volume Global (CDF)"
+                        value={`${volumeCDF.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} FC`}
+                        hint="Engagements en Francs"
                         tone="dark"
                     />
                 </div>
 
-                {/* --- NOUVELLE SECTION DES GRAPHIQUES --- */}
+                {/* --- SECTION DES GRAPHIQUES --- */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                     {/* 1. Donut Graphique SVG - Statut des Dossiers */}
                     <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
@@ -475,7 +518,6 @@ export default function DirectorDashboard({
                                 </strong>
                             </div>
 
-                            {/* Barre de progression */}
                             <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden flex relative">
                                 <div
                                     className={`${gaugeData.isEmpty ? 'bg-gray-300' : 'bg-emerald-500'} transition-all duration-700`}
@@ -515,7 +557,6 @@ export default function DirectorDashboard({
                         </div>
 
                         <div className="pt-5 flex items-end justify-between h-40 gap-2 relative">
-                            {/* Lignes de repère arrières */}
                             <div className="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-20 pb-5">
                                 {[1,2,3,4].map(i => <div key={i} className="border-b border-gray-400 w-full h-0"></div>)}
                             </div>
@@ -528,15 +569,13 @@ export default function DirectorDashboard({
                                 timelineReqs.map((req) => {
                                     const heightPct = Math.max((req.montantTotal / maxTimelineAmount) * 100, 2);
 
-                                    // Code couleur selon le statut
                                     let barColor = 'bg-gray-400';
                                     if (req.is_decaissee) barColor = 'bg-emerald-500';
                                     else if (req.statusCode === 'decaissement_caisse') barColor = 'bg-[#04326D]';
-                                    else if (req.statusCode === 'visa_admin') barColor = 'bg-[#F58F20]'; // En attente Directrice
+                                    else if (req.statusCode === 'visa_admin') barColor = 'bg-[#F58F20]';
 
                                     return (
                                         <div key={req.id} className="relative group flex-1 flex flex-col items-center justify-end h-full">
-                                            {/* Tooltip au survol */}
                                             <div className="absolute bottom-[calc(100%+0.5rem)] mb-0 hidden group-hover:block z-10 w-max max-w-[160px] bg-gray-900 text-white text-[10px] p-2.5 rounded shadow-lg text-center animate-fade-in">
                                                 <span className="font-bold border-b border-gray-700 pb-1 mb-1 block">
                                                     {req.numero}
@@ -547,7 +586,6 @@ export default function DirectorDashboard({
                                                 <span className="text-gray-300 block mt-1 truncate">{req.projet}</span>
                                             </div>
 
-                                            {/* La Barre */}
                                             <div
                                                 className={`w-full max-w-[2rem] rounded-t-sm transition-all duration-700 ease-out hover:opacity-80 cursor-pointer ${barColor}`}
                                                 style={{ height: `calc(${heightPct}% - 20px)` }}
@@ -563,7 +601,7 @@ export default function DirectorDashboard({
                     </div>
                 </div>
 
-                {/* --- SECTIONS SYNTHÈSE PROJET & CAISSE AMÉLIORÉES --- */}
+                {/* --- SECTIONS SYNTHÈSE PROJET & CAISSE (USD & CDF) --- */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                     <section className="lg:col-span-7 bg-white border border-[#B2BED6] rounded">
                         <header className="px-4 py-3 border-b border-[#E2E8F0] flex items-center justify-between">
@@ -583,11 +621,16 @@ export default function DirectorDashboard({
                                     return (
                                         <div key={p.id} className="relative">
                                             <div className="flex justify-between items-center text-[11px] mb-1 z-10 relative">
-                                                <strong className="text-[#04326D] truncate max-w-[70%]">{p.name}</strong>
+                                                <strong className="text-[#04326D] truncate max-w-[50%]">{p.name}</strong>
                                                 <div className="text-right">
                                                     <span className="font-mono font-bold text-[#0B192C] mr-2">
                                                         ${p.total_usd.toLocaleString('fr-FR')}
                                                     </span>
+                                                    {p.total_fc > 0 && (
+                                                        <span className="font-mono font-bold text-[#F58F20] mr-2">
+                                                            {p.total_fc.toLocaleString('fr-FR')} FC
+                                                        </span>
+                                                    )}
                                                     <span className="text-gray-400">({p.count} doss.)</span>
                                                 </div>
                                             </div>
@@ -785,7 +828,7 @@ export default function DirectorDashboard({
                                                         icon={<Eye className="w-4 h-4" />}
                                                     />
                                                     <IconButton
-                                                        title="Aperçu avant impression"
+                                                        title="Aperçu avant impression (Paysage)"
                                                         onClick={() => handlePrintPreview(req)}
                                                         icon={<Printer className="w-4 h-4" />}
                                                     />
@@ -822,41 +865,43 @@ export default function DirectorDashboard({
                 onSubmit={handleSubmitSignature}
             />
 
+            {/* MODALE DE REJET DIRECTRICE : RETOUR AUX FINANCES */}
             {rejectReq && (
                 <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4">
                     <form onSubmit={handleReject} className="w-full max-w-lg space-y-4 rounded bg-white p-6 shadow-xl">
-                        <h2 className="font-bold text-gray-900">
+                        <h2 className="font-bold text-gray-900 text-base">
                             Rejeter la réquisition {rejectReq.numero}
                         </h2>
-                        <p className="text-sm text-gray-600">
-                            Le dossier sera retourné au PAM pour correction, puis resoumis à la Direction.
+                        <p className="text-xs text-gray-600">
+                            Le dossier sera retourné au service des <strong>Finances</strong> pour correction et ajustement budgétaire avant réexamen.
                         </p>
-                        <label className="block text-sm font-semibold text-gray-700">
-                            Motif du refus
+                        <label className="block text-xs font-semibold text-gray-700">
+                            Motif du rejet :
                             <textarea
                                 required
                                 autoFocus
                                 rows={4}
                                 value={rejectionReason}
                                 onChange={(event) => setRejectionReason(event.target.value)}
-                                className="mt-1 w-full rounded border p-2 text-sm"
+                                placeholder="Précisez la non-conformité constatée ou la correction financière demandée..."
+                                className="mt-1.5 w-full rounded border border-gray-300 p-2 text-xs focus:ring-1 focus:ring-red-500 focus:outline-none"
                             />
                         </label>
-                        <div className="flex justify-end gap-2">
+                        <div className="flex justify-end gap-2 pt-2 border-t">
                             <button
                                 type="button"
                                 disabled={rejecting}
                                 onClick={() => setRejectReq(null)}
-                                className="rounded border px-4 py-2 text-sm"
+                                className="rounded border px-3.5 py-1.5 text-xs text-gray-700 font-semibold hover:bg-gray-50"
                             >
                                 Annuler
                             </button>
                             <button
                                 type="submit"
                                 disabled={rejecting || !rejectionReason.trim()}
-                                className="rounded bg-red-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
+                                className="rounded bg-red-700 px-4 py-1.5 text-xs font-bold text-white hover:bg-red-800 disabled:opacity-60 transition"
                             >
-                                {rejecting ? 'Envoi…' : 'Rejeter et renvoyer au PAM'}
+                                {rejecting ? 'Envoi en cours…' : 'Rejeter et renvoyer aux Finances'}
                             </button>
                         </div>
                     </form>
@@ -865,6 +910,7 @@ export default function DirectorDashboard({
 
             {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} />}
 
+            {/* FEUILLE D'IMPRESSION OFFICIELLE */}
             {printRequisition && (
                 <div id="bon-pasteur-print-zone">
                     <OfficialPrintSheet requisition={printRequisition} />
@@ -919,6 +965,8 @@ function WorkflowBadge({ level }: { level: { step: number; label: string; color:
         amber: 'bg-amber-100 text-amber-900 border-amber-200',
         purple: 'bg-purple-100 text-purple-800 border-purple-200',
         blue: 'bg-blue-100 text-blue-800 border-blue-200',
+        red: 'bg-red-100 text-red-800 border-red-200',
+        gray: 'bg-gray-100 text-gray-800 border-gray-200',
     };
     const cls = map[level.color] ?? 'bg-gray-100 text-gray-700 border-gray-200';
     return (

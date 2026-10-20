@@ -37,52 +37,7 @@ class DashboardController extends Controller
         }
 
         if ($user->hasRole('project_manager')) {
-            $requisitionsQuery = clone Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
-                ->where('project_id', $user->project_id)
-                ->orderByDesc('created_at');
-
-            if ($user->project_id === null) {
-                $requisitionsQuery->whereRaw('1 = 0');
-            }
-
-            $requisitions = $requisitionsQuery->get();
-
-            // CORRECTION: Utilisation de project_id directement au lieu de whereHas('projects')
-            $budgetLines = clone BudgetLine::query()
-                ->where('project_id', $user->project_id)
-                ->get(['id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
-                ->keyBy(fn (BudgetLine $line) => BudgetLine::normalizeCode($line->code));
-
-            $budgetTotal = $budgetLines->sum('budget_initial');
-            $budgetSolde = $budgetLines->sum('solde');
-            $budgetConsomme = $budgetTotal - $budgetSolde;
-
-            $pmStats = [
-                'budget_total' => $budgetTotal,
-                'budget_solde' => $budgetSolde,
-                'budget_consomme' => $budgetConsomme,
-                'req_en_attente' => $requisitions->whereIn('status', ['draft', 'returned_to_project_manager'])->count(),
-                'req_validees' => $requisitions->whereNotIn('status', ['draft', 'returned_to_project_manager', 'rejetee', 'returned_to_beneficiary', 'returned_to_urgent_initiator'])->count(),
-                'req_a_corriger' => $requisitions->whereIn('status', ['returned_to_beneficiary', 'returned_to_urgent_initiator'])->count(),
-            ];
-
-            return Inertia::render('ProjectManager/Dashboard', [
-                'requisitions' => $this->buildProjectManagerRequisitionList($requisitions, $user->id, $budgetLines),
-                'budgetLines' => $budgetLines->values()->map(fn (BudgetLine $line) => [
-                    'id' => $line->id,
-                    'code' => $line->code,
-                    'libelle' => $line->libelle,
-                    'normalizedCode' => BudgetLine::normalizeCode($line->code),
-                    'solde' => (float) $line->solde,
-                    'devise' => $line->devise,
-                    'budget_initial' => (float) $line->budget_initial,
-                ])->all(),
-                'cashRegisters' => CashRegister::query()
-                    ->where('is_active', true)
-                    ->orderBy('name')
-                    ->get(['id', 'name', 'devise']),
-                'pmStats' => $pmStats,
-            ]);
+            return $this->renderProjectManagerDashboard($user);
         }
 
         if ($user->hasRole('director')) {
@@ -127,6 +82,68 @@ class DashboardController extends Controller
         return $this->renderDirectorDashboard($request);
     }
 
+    private function renderProjectManagerDashboard(User $user)
+    {
+        $requisitionsQuery = clone Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
+            ->where('project_id', $user->project_id)
+            ->orderByDesc('created_at');
+
+        if ($user->project_id === null) {
+            $requisitionsQuery->whereRaw('1 = 0');
+        }
+
+        $requisitions = $requisitionsQuery->get();
+
+        $budgetLines = clone BudgetLine::query()
+            ->where('project_id', $user->project_id)
+            ->get(['id', 'project_id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
+            ->keyBy(fn (BudgetLine $line) => BudgetLine::normalizeCode($line->code));
+
+        $budgetTotalUSD = (float) $budgetLines->where('devise', 'USD')->sum('budget_initial');
+        $budgetSoldeUSD = (float) $budgetLines->where('devise', 'USD')->sum('solde');
+        $budgetConsommeUSD = max(0, $budgetTotalUSD - $budgetSoldeUSD);
+
+        $budgetTotalFC = (float) $budgetLines->whereIn('devise', ['FC', 'CDF'])->sum('budget_initial');
+        $budgetSoldeFC = (float) $budgetLines->whereIn('devise', ['FC', 'CDF'])->sum('solde');
+        $budgetConsommeFC = max(0, $budgetTotalFC - $budgetSoldeFC);
+
+        $pmStats = [
+            'budget_total_usd' => $budgetTotalUSD,
+            'budget_solde_usd' => $budgetSoldeUSD,
+            'budget_consomme_usd' => $budgetConsommeUSD,
+            'budget_total_fc' => $budgetTotalFC,
+            'budget_solde_fc' => $budgetSoldeFC,
+            'budget_consomme_fc' => $budgetConsommeFC,
+            'req_en_attente' => $requisitions->whereIn('status', ['draft'])->count(),
+            'req_validees' => $requisitions->whereNotIn('status', ['draft', 'returned_to_project_manager', 'rejetee', 'returned_to_beneficiary', 'returned_to_urgent_initiator'])->count(),
+            'req_a_corriger' => $requisitions->whereIn('status', ['returned_to_project_manager'])->count(),
+        ];
+
+        $projectUsers = User::where('project_id', $user->project_id)
+            ->orderBy('name')
+            ->get(['id', 'name', 'email']);
+
+        return Inertia::render('ProjectManager/Dashboard', [
+            'requisitions' => $this->buildProjectManagerRequisitionList($requisitions, $user->id, $budgetLines),
+            'budgetLines' => $budgetLines->values()->map(fn (BudgetLine $line) => [
+                'id' => $line->id,
+                'project_id' => $line->project_id,
+                'code' => $line->code,
+                'libelle' => $line->libelle,
+                'normalizedCode' => BudgetLine::normalizeCode($line->code),
+                'solde' => (float) $line->solde,
+                'devise' => $line->devise,
+                'budget_initial' => (float) $line->budget_initial,
+            ])->all(),
+            'cashRegisters' => CashRegister::query()
+                ->where('is_active', true)
+                ->orderBy('name')
+                ->get(['id', 'name', 'devise']),
+            'pmStats' => $pmStats,
+            'projectUsers' => $projectUsers,
+        ]);
+    }
+
     private function renderDirectorDashboard(Request $request)
     {
         $user = $request->user();
@@ -149,7 +166,7 @@ class DashboardController extends Controller
                 'name' => $p->name,
                 'count' => $projReqs->count(),
                 'total_usd' => (float) $projReqs->where('devise', 'USD')->sum('montant_total'),
-                'total_fc' => (float) $projReqs->where('devise', 'FC')->sum('montant_total'),
+                'total_fc' => (float) $projReqs->whereIn('devise', ['FC', 'CDF'])->sum('montant_total'),
             ];
         });
 
@@ -186,15 +203,7 @@ class DashboardController extends Controller
                 'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
                 'date_paiement' => $r->date_paiement?->format('d/m/Y'),
                 'date_livraison' => $r->date_livraison?->format('d/m/Y'),
-                'signatures' => $r->signatures->map(fn ($s) => [
-                    'role' => $s->role_signataire,
-                    'nom' => $s->nom_signataire,
-                    'action' => $s->action,
-                    'commentaire' => $s->commentaire,
-                    'date' => $s->signed_at->format('d/m/Y H:i'),
-                    'code' => $s->signature_code,
-                    'hash' => $s->signature_hash,
-                ])->values()->all(),
+                'signatures' => $this->formatSignatures($r->signatures),
                 'lignes' => $r->demandes->map(fn ($d) => [
                     'id' => (string) $d->id,
                     'activite' => $d->activite,
@@ -240,7 +249,7 @@ class DashboardController extends Controller
                 'full_name' => $p->full_name,
                 'count' => $reqs->count(),
                 'total_usd' => (float) $reqs->where('devise', 'USD')->sum('montant_total'),
-                'total_fc' => (float) $reqs->where('devise', 'FC')->sum('montant_total'),
+                'total_fc' => (float) $reqs->whereIn('devise', ['FC', 'CDF'])->sum('montant_total'),
                 'decaisse_usd' => (float) $reqs->where('status', 'decaisse')->where('devise', 'USD')->sum('montant_total'),
                 'en_attente_count' => $reqs->whereIn('status', ['draft', 'visa_mp', 'controle_finance', 'visa_admin'])->count(),
             ];
@@ -261,7 +270,7 @@ class DashboardController extends Controller
                 'nom' => $c->name,
                 'total_dossiers' => $reqs->count(),
                 'total_usd' => (float) $reqs->where('devise', 'USD')->sum('montant_total'),
-                'total_fc' => (float) $reqs->where('devise', 'FC')->sum('montant_total'),
+                'total_fc' => (float) $reqs->whereIn('devise', ['FC', 'CDF'])->sum('montant_total'),
                 'decaisse_usd' => (float) $reqs->where('status', 'decaisse')->where('devise', 'USD')->sum('montant_total'),
                 'en_attente_usd' => (float) $reqs->where('status', 'decaissement_caisse')->where('devise', 'USD')->sum('montant_total'),
             ];
@@ -315,23 +324,26 @@ class DashboardController extends Controller
             ->orderByDesc('created_at')
             ->get();
 
-        // CORRECTION: project() au singulier
-        $budgetLines = BudgetLine::with('project')->get()->keyBy('code');
+        $allBudgetLinesModels = BudgetLine::with('project')->get();
 
-        $allBudgetLines = BudgetLine::query()
-            ->orderBy('code')
-            ->get(['id', 'project_id', 'code', 'libelle', 'solde', 'devise', 'budget_initial'])
-            ->map(fn (BudgetLine $b) => [
-                'id' => $b->id,
-                'project_id' => $b->project_id,
-                'code' => $b->code,
-                'libelle' => $b->libelle,
-                'normalizedCode' => BudgetLine::normalizeCode($b->code),
-                'solde' => (float) $b->solde,
-                'devise' => $b->devise,
-                'budget_initial' => (float) $b->budget_initial,
-            ])
-            ->all();
+        $budgetLinesByKey = [];
+        foreach ($allBudgetLinesModels as $line) {
+            $key = ($line->project_id ?? 'all') . '_' . BudgetLine::normalizeCode($line->code);
+            $budgetLinesByKey[$key] = $line;
+            $budgetLinesByKey[BudgetLine::normalizeCode($line->code)] = $line;
+        }
+
+        $allBudgetLines = $allBudgetLinesModels->map(fn (BudgetLine $b) => [
+            'id' => $b->id,
+            'project_id' => $b->project_id,
+            'project_name' => $b->project?->name ?? 'Général',
+            'code' => $b->code,
+            'libelle' => $b->libelle,
+            'normalizedCode' => BudgetLine::normalizeCode($b->code),
+            'solde' => (float) $b->solde,
+            'devise' => $b->devise,
+            'budget_initial' => (float) $b->budget_initial,
+        ])->all();
 
         $pendingSessions = CashRegisterSession::with(['cashRegister', 'cashier'])
             ->where('status', 'en_attente_autorisation')
@@ -371,7 +383,7 @@ class DashboardController extends Controller
             'cashRegisters' => $cashRegisters,
             'allBudgetLines' => $allBudgetLines,
             'pendingSessions' => $pendingSessions,
-            'requisitions' => $requisitions->map(function (Requisition $r) use ($budgetLines, $user) {
+            'requisitions' => $requisitions->map(function (Requisition $r) use ($budgetLinesByKey, $user) {
                 return [
                     'id' => (string) $r->id,
                     'numero' => $r->numero_requisition,
@@ -392,27 +404,27 @@ class DashboardController extends Controller
                         'returned_to_finance' => 'À corriger par les Finances',
                         'returned_to_project_manager' => 'Renvoyée au Manager de Projet',
                         'returned_to_admin_manager' => 'Renvoyée au PAM',
-                        'returned_to_urgent_initiator' => 'Urgence à corriger par son initiateur',
                         'controle_finance' => 'Validée par les Finances',
+                        'visa_admin' => 'Transmise à la Direction',
                         'decaissement_caisse' => 'Prête pour la Caisse',
                         'decaisse' => 'Décaissée',
                         default => ucfirst(str_replace('_', ' ', $r->status)),
                     },
                     'canDecide' => $r->status === 'visa_mp',
-                    'canCorrect' => $r->status === 'returned_to_finance'
-                        || ($r->status === 'returned_to_urgent_initiator' && (string) $r->user_id === (string) $user->id),
-                    'financeRejected' => $r->status === 'returned_to_project_manager',
+                    'canCorrect' => $r->status === 'returned_to_finance',
                     'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
                     'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
-                    'lignes' => $r->demandes->map(function (Demande $d) use ($budgetLines) {
-                        $codeAlloc = trim((string) ($d->code_allocation ?: $d->code_all_budget));
-                        $lineModel = $budgetLines->get($codeAlloc);
+                    'signatures' => $this->formatSignatures($r->signatures),
+                    'lignes' => $r->demandes->map(function (Demande $d) use ($budgetLinesByKey, $r) {
+                        $codeNorm = BudgetLine::normalizeCode($d->code_allocation ?: $d->code_all_budget);
+                        $lookupKey = ($r->project_id ?? 'all') . '_' . $codeNorm;
+                        $lineModel = $budgetLinesByKey[$lookupKey] ?? ($budgetLinesByKey[$codeNorm] ?? null);
 
                         return [
                             'id' => (string) $d->id,
                             'activite' => $d->activite,
                             'codeBudget' => $d->code_all_budget,
-                            'codeAllocation' => $d->code_allocation,
+                            'codeAllocation' => $d->code_allocation ?: $d->code_all_budget,
                             'libelleAllocation' => $d->libelle_allocation ?: $lineModel?->libelle,
                             'nature' => $d->nature ?? '',
                             'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
@@ -442,13 +454,12 @@ class DashboardController extends Controller
 
     private function renderAdminManagerDashboard(User $user)
     {
-        $allRequisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user'])
+        $allRequisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
             ->orderByDesc('created_at')
             ->get();
 
-        $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user'])
+        $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
             ->where(function ($query) use ($user) {
-                // CORRECTION: Le PAM ne voit plus les 'returned_to_admin_manager'
                 $query->whereIn('status', ['controle_finance'])
                     ->orWhere(function ($urgentQuery) use ($user) {
                         $urgentQuery->where('status', 'returned_to_urgent_initiator')
@@ -458,8 +469,70 @@ class DashboardController extends Controller
             ->orderByDesc('created_at')
             ->get();
 
+        // 1. Statistiques globales et financières pour le PAM
+        $adminStats = [
+            'en_attente_visa' => $allRequisitions->where('status', 'controle_finance')->count(),
+            'urgences_count' => $allRequisitions->where('is_urgent', true)->whereNotIn('status', ['decaisse', 'cloture', 'rejetee'])->count(),
+            'total_dossiers' => $allRequisitions->count(),
+            'validees_count' => $allRequisitions->whereIn('status', ['visa_admin', 'decaissement_caisse', 'decaisse', 'cloture'])->count(),
+            'renvoyees_finance_count' => $allRequisitions->where('status', 'returned_to_finance')->count(),
+            'total_usd' => (float) $allRequisitions->where('devise', 'USD')->sum('montant_total'),
+            'total_fc' => (float) $allRequisitions->whereIn('devise', ['FC', 'CDF'])->sum('montant_total'),
+            'decaisse_usd' => (float) $allRequisitions->where('status', 'decaisse')->where('devise', 'USD')->sum('montant_total'),
+            'decaisse_fc' => (float) $allRequisitions->where('status', 'decaisse')->whereIn('devise', ['FC', 'CDF'])->sum('montant_total'),
+        ];
+
+        // 2. Synthèse détaillée par projet
+        $projectsStats = Project::all()->map(function ($p) use ($allRequisitions) {
+            $projReqs = $allRequisitions->filter(fn ($r) => $r->project_id === $p->id || $r->projet === $p->name);
+            return [
+                'id' => $p->id,
+                'name' => $p->name,
+                'full_name' => $p->full_name,
+                'count' => $projReqs->count(),
+                'en_attente_pam' => $projReqs->where('status', 'controle_finance')->count(),
+                'total_usd' => (float) $projReqs->where('devise', 'USD')->sum('montant_total'),
+                'total_fc' => (float) $projReqs->whereIn('devise', ['FC', 'CDF'])->sum('montant_total'),
+            ];
+        });
+
+        // 3. Synthèse des caisses
+        $caissesStats = CashRegister::with('activeSession')->get()->map(function ($c) use ($allRequisitions) {
+            $caisseReqs = $allRequisitions->filter(fn ($r) => $r->caisse_decaissement === $c->name);
+            return [
+                'id' => $c->id,
+                'name' => $c->name,
+                'code' => $c->code,
+                'devise' => $c->devise,
+                'solde_actuel' => (float) $c->solde_actuel,
+                'is_ouverte' => $c->isOuverte(),
+                'total_dossiers' => $caisseReqs->count(),
+                'total_usd' => (float) $caisseReqs->where('devise', 'USD')->sum('montant_total'),
+                'total_fc' => (float) $caisseReqs->whereIn('devise', ['FC', 'CDF'])->sum('montant_total'),
+                'decaisse_usd' => (float) $caisseReqs->where('status', 'decaisse')->where('devise', 'USD')->sum('montant_total'),
+            ];
+        });
+
+        $allBudgetLines = BudgetLine::with('project')->get()->map(fn (BudgetLine $b) => [
+            'id' => $b->id,
+            'project_id' => $b->project_id,
+            'project_name' => $b->project?->name ?? 'Général',
+            'code' => $b->code,
+            'libelle' => $b->libelle,
+            'normalizedCode' => BudgetLine::normalizeCode($b->code),
+            'solde' => (float) $b->solde,
+            'devise' => $b->devise,
+            'budget_initial' => (float) $b->budget_initial,
+        ])->all();
+
         return Inertia::render('AdminManager/Dashboard', [
             'isInterim' => (bool) $user->is_director_interim,
+            'adminStats' => $adminStats,
+            'projectsStats' => $projectsStats,
+            'caissesStats' => $caissesStats,
+            'projects' => Project::orderBy('name')->get(['id', 'name', 'full_name']),
+            'cashRegisters' => CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name', 'devise']),
+            'allBudgetLines' => $allBudgetLines,
             'historyRequisitions' => $allRequisitions->map(fn ($r) => [
                 'id' => (string) $r->id,
                 'numero' => $r->numero_requisition,
@@ -473,21 +546,15 @@ class DashboardController extends Controller
                 'statusCode' => $r->status,
                 'statusLabel' => $this->mapWorkflowLevel($r->status)['label'],
                 'is_urgent' => (bool) $r->is_urgent,
-                'signatures' => $r->signatures->map(fn ($signature) => [
-                    'role' => $signature->role_signataire,
-                    'nom' => $signature->nom_signataire,
-                    'action' => $signature->action,
-                    'commentaire' => $signature->commentaire,
-                    'date' => $signature->signed_at->format('d/m/Y H:i'),
-                    'code' => $signature->signature_code,
-                    'hash' => $signature->signature_hash,
-                ])->values()->all(),
+                'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
+                'signatures' => $this->formatSignatures($r->signatures),
             ])->values()->all(),
             'requisitions' => $requisitions->map(fn ($r) => [
                 'id' => (string) $r->id,
                 'numero' => $r->numero_requisition,
                 'projet' => $r->projet,
                 'project_id' => $r->project_id,
+                'user_id' => $r->user_id,
                 'initiateurNom' => $r->user?->name ?? 'Inconnu',
                 'initiateurRole' => $r->user?->role ?? 'Staff',
                 'nature' => $r->nature_requisition,
@@ -499,13 +566,13 @@ class DashboardController extends Controller
                 'statusCode' => $r->status,
                 'statusLabel' => match ($r->status) {
                     'returned_to_urgent_initiator' => 'Urgence à corriger par son initiateur',
-                    default => 'Contrôle Administratif',
+                    default => 'Contrôle Administratif en attente',
                 },
                 'canDecide' => $r->status === 'controle_finance',
-                // CORRECTION: PAM ne corrige que ses propres urgences
                 'canCorrect' => ($r->status === 'returned_to_urgent_initiator' && (string) $r->user_id === (string) $user->id),
                 'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
                 'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
+                'signatures' => $this->formatSignatures($r->signatures),
                 'lignes' => $r->demandes->map(fn ($d) => [
                     'id' => (string) $d->id,
                     'activite' => $d->activite,
@@ -534,14 +601,14 @@ class DashboardController extends Controller
             'returned_to_beneficiary', 'returned_to_urgent_initiator' => ['step' => 1, 'label' => 'À corriger par l’initiateur', 'color' => 'red'],
             'urgent_direction' => ['step' => 1, 'label' => 'Dérogation Urgente', 'color' => 'red'],
             'visa_mp' => ['step' => 2, 'label' => 'Visa MP Accordé', 'color' => 'blue'],
+            'returned_to_project_manager' => ['step' => 2, 'label' => 'À corriger par le Manager de Projet', 'color' => 'red'],
             'controle_finance' => ['step' => 3, 'label' => 'Contrôle Finances Validé', 'color' => 'purple'],
+            'returned_to_finance' => ['step' => 3, 'label' => 'À corriger par les Finances', 'color' => 'red'],
             'visa_admin' => ['step' => 4, 'label' => 'En attente Bon à Payer', 'color' => 'amber'],
+            'returned_to_admin_manager' => ['step' => 4, 'label' => 'À corriger par le PAM', 'color' => 'red'],
             'decaissement_caisse' => ['step' => 5, 'label' => 'Approuvé (À décaisser)', 'color' => 'emerald'],
             'decaisse' => ['step' => 6, 'label' => 'Décaissé', 'color' => 'green'],
             'cloture' => ['step' => 7, 'label' => 'Clôturé', 'color' => 'black'],
-            'returned_to_project_manager' => ['step' => 2, 'label' => 'À corriger par le Manager de Projet', 'color' => 'red'],
-            'returned_to_finance' => ['step' => 3, 'label' => 'À corriger par les Finances', 'color' => 'red'],
-            'returned_to_admin_manager' => ['step' => 4, 'label' => 'À corriger par le PAM', 'color' => 'red'],
             'rejetee' => ['step' => 0, 'label' => 'Rejeté', 'color' => 'red'],
             default => ['step' => 1, 'label' => ucfirst($status), 'color' => 'gray'],
         };
@@ -565,6 +632,7 @@ class DashboardController extends Controller
             ])->count(),
             'valideesPretesCount' => $validees->count(),
             'valideesPretesMontantUSD' => (float) $validees->where('devise', 'USD')->sum('montant_total'),
+            'valideesPretesMontantFC' => (float) $validees->whereIn('devise', ['FC', 'CDF'])->sum('montant_total'),
             'vouchersMoisCount' => 0,
             'vouchersMoisTotalUSD' => 0,
             'justificatifsADeposerCount' => 0,
@@ -588,16 +656,9 @@ class DashboardController extends Controller
                 'montant' => number_format($r->montant_total, 2, '.', ' ') . ' ' . $r->devise,
                 'devise' => $r->devise,
                 'articlesCount' => $r->demandes->count(),
-                // CORRECTIONS: On ajoute ces champs manquants pour le staff
                 'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
-                'signatures' => $r->signatures->map(fn ($s) => [
-                    'role' => $s->role_signataire,
-                    'nom' => $s->nom_signataire,
-                    'action' => $s->action,
-                    'commentaire' => $s->commentaire,
-                    'date' => $s->signed_at->format('d/m/Y H:i'),
-                    'hash' => $s->signature_hash,
-                ])->values()->all(),
+                'signatures' => $this->formatSignatures($r->signatures),
+                'canCorrect' => $r->status === 'returned_to_beneficiary',
                 'etapeWorkflow' => [
                     'nom' => $status['label'],
                     'statut' => $status['key'],
@@ -611,20 +672,24 @@ class DashboardController extends Controller
     {
         return $requisitions->map(function ($r) use ($managerId, $budgetLines) {
             $isFinanceReturned = $r->status === 'returned_to_project_manager';
-            $isRejectedForInitiator = in_array($r->status, [
+            
+            // CORRECTION CRUCIALE : returned_to_finance est retiré pour ne jamais renvoyer la réquisition au PM
+            $isInitiatorCorrection = in_array($r->status, [
                 'returned_to_beneficiary',
                 'returned_to_urgent_initiator',
-                'returned_to_finance',
-                'returned_to_admin_manager',
             ], true);
+            
             $statut = match (true) {
-                $isFinanceReturned || $isRejectedForInitiator => 'a_corriger',
+                $isFinanceReturned => 'a_corriger',
+                $isInitiatorCorrection => 'a_corriger_initiateur',
                 $r->status === 'draft' => 'en_attente_mp',
                 $r->status === 'rejetee' => 'rejete_mp',
                 default => 'valide_mp',
             };
+            
             return [
                 'id' => (string) $r->id,
+                'user_id' => $r->user_id,
                 'numero' => $r->numero_requisition,
                 'projet' => $r->projet,
                 'project_id' => $r->project_id,
@@ -643,7 +708,7 @@ class DashboardController extends Controller
                 'statusLabel' => match ($r->status) {
                     'draft' => 'En attente Visa MP',
                     'returned_to_beneficiary' => 'À corriger par le bénéficiaire',
-                    'returned_to_project_manager' => 'À corriger par le Manager de Projet',
+                    'returned_to_project_manager' => 'À corriger par le Chef de Projet',
                     'returned_to_finance' => 'À corriger par les Finances',
                     'returned_to_admin_manager' => 'À corriger par le PAM',
                     'returned_to_urgent_initiator' => 'Urgence à corriger par l’initiateur',
@@ -657,15 +722,12 @@ class DashboardController extends Controller
                     'rejetee' => 'Rejetée',
                     default => 'Validé MP',
                 },
-                // CORRECTION: PM peut arbitrer toutes les requêtes en draft de son projet
-                'canDecide' => $r->status === 'draft',
-                'canEdit' => ((string) $r->user_id === $managerId
-                    && in_array($r->status, ['draft', 'visa_mp', 'returned_to_urgent_initiator'], true))
-                    || $r->status === 'returned_to_project_manager',
+                'canDecide' => in_array($r->status, ['draft', 'returned_to_project_manager'], true),
                 'canCorrect' => $r->status === 'returned_to_project_manager',
                 'financeReturned' => $isFinanceReturned,
-                'needsCorrection' => $isFinanceReturned || $isRejectedForInitiator || $r->status === 'returned_to_urgent_initiator',
+                'needsCorrection' => $isFinanceReturned,
                 'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
+                'signatures' => $this->formatSignatures($r->signatures),
                 'lignes' => $r->demandes->map(function ($d) use ($budgetLines, $r) {
                     $codeNorm = BudgetLine::normalizeCode($d->code_allocation ?: $d->code_all_budget);
                     $lineObj = $budgetLines->get($codeNorm);
@@ -725,5 +787,18 @@ class DashboardController extends Controller
             'cloture' => ['key' => 'caisse_pret', 'label' => 'Clôturé', 'validator' => 'Clôture'],
             default => ['key' => 'chef_projet', 'label' => 'Brouillon', 'validator' => 'Initiateur'],
         };
+    }
+
+    private function formatSignatures($signatures): array
+    {
+        return $signatures->map(fn ($s) => [
+            'role' => $s->role_signataire,
+            'nom' => $s->nom_signataire,
+            'action' => $s->action,
+            'commentaire' => $s->commentaire,
+            'date' => $s->signed_at?->format('d/m/Y H:i') ?? '',
+            'code' => $s->signature_code,
+            'hash' => $s->signature_hash,
+        ])->values()->all();
     }
 }

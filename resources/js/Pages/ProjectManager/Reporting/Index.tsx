@@ -7,10 +7,7 @@ import {
     BarChart3,
     Calendar,
     Printer,
-    FolderKanban,
     Layers,
-    ShoppingCart,
-    Wrench,
 } from 'lucide-react';
 
 interface ProjectInfo {
@@ -32,17 +29,32 @@ interface ReportingStats {
     countDecaissees: number;
     countEnCours: number;
     countRejetees: number;
-    totalSoumisUSD: number;
-    totalSoumisFC: number;
-    totalDecaisseUSD: number;
-    totalDecaisseFC: number;
-    totalEnCoursUSD: number;
-    totalEnCoursFC: number;
-    totalRejeteUSD: number;
+    
+    totalSoumisUSD?: number;
+    totalSoumisFC?: number;
+    totalSoumisEUR?: number;
+    
+    totalDecaisseUSD?: number;
+    totalDecaisseFC?: number;
+    totalDecaisseEUR?: number;
+    
+    totalEnCoursUSD?: number;
+    totalEnCoursFC?: number;
+    totalEnCoursEUR?: number;
+    
+    totalRejeteUSD?: number;
+    totalRejeteFC?: number;
+    totalRejeteEUR?: number;
+    
     countAchats: number;
     countServices: number;
-    totalAchatsUSD: number;
-    totalServicesUSD: number;
+    totalAchatsUSD?: number;
+    totalAchatsFC?: number;
+    totalAchatsEUR?: number;
+    
+    totalServicesUSD?: number;
+    totalServicesFC?: number;
+    totalServicesEUR?: number;
 }
 
 interface LigneVentilation {
@@ -289,55 +301,82 @@ export default function ReportingIndex({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {/* STATS : SOUMISES */}
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                            Total Réquisitions Soumises
+                            Total Engagé ({stats.countTotal} dossiers)
                         </span>
-                        <p className="text-2xl font-black text-[#0B192C] mt-1 font-mono">
-                            {money(stats.totalSoumisUSD, 'USD')}
-                        </p>
-                        <span className="text-[10px] text-gray-400 mt-1">
-                            {stats.countTotal} dossier(s) • + {money(stats.totalSoumisFC, 'FC')}
-                        </span>
+                        <div className="mt-2 space-y-1">
+                            <p className="text-lg font-black text-[#0B192C] font-mono leading-tight">
+                                {money(stats.totalSoumisUSD || 0, 'USD')}
+                            </p>
+                            <p className="text-xs font-bold text-gray-600 font-mono">
+                                {money(stats.totalSoumisFC || 0, 'FC')}
+                            </p>
+                            <p className="text-xs font-bold text-gray-600 font-mono">
+                                {money(stats.totalSoumisEUR || 0, 'EUR')}
+                            </p>
+                        </div>
                     </div>
 
+                    {/* STATS : DÉCAISSEMENTS */}
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">
-                            Décaissements Effectifs (Caisse)
+                            Décaissé ({stats.countDecaissees} dossiers)
                         </span>
-                        <p className="text-2xl font-black text-emerald-700 mt-1 font-mono">
-                            {money(stats.totalDecaisseUSD, 'USD')}
-                        </p>
-                        <span className="text-[10px] text-emerald-700 mt-1">
-                            {stats.countDecaissees} dossier(s) décaissé(s)
-                        </span>
+                        <div className="mt-2 space-y-1">
+                            <p className="text-lg font-black text-emerald-700 font-mono leading-tight">
+                                {money(stats.totalDecaisseUSD || 0, 'USD')}
+                            </p>
+                            <p className="text-xs font-bold text-emerald-600 font-mono">
+                                {money(stats.totalDecaisseFC || 0, 'FC')}
+                            </p>
+                            <p className="text-xs font-bold text-emerald-600 font-mono">
+                                {money(stats.totalDecaisseEUR || 0, 'EUR')}
+                            </p>
+                        </div>
                     </div>
 
+                    {/* STATS : EN CIRCUIT */}
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-[#F58F20]">
-                            En Circuit d'Approbation
+                            En Circuit ({stats.countEnCours} dossiers)
                         </span>
-                        <p className="text-2xl font-black text-[#F58F20] mt-1 font-mono">
-                            {money(stats.totalEnCoursUSD, 'USD')}
-                        </p>
-                        <span className="text-[10px] text-gray-400 mt-1">
-                            {stats.countEnCours} dossier(s) en attente
-                        </span>
+                        <div className="mt-2 space-y-1">
+                            <p className="text-lg font-black text-[#F58F20] font-mono leading-tight">
+                                {money(stats.totalEnCoursUSD || 0, 'USD')}
+                            </p>
+                            <p className="text-xs font-bold text-amber-700 font-mono">
+                                {money(stats.totalEnCoursFC || 0, 'FC')}
+                            </p>
+                            <p className="text-xs font-bold text-amber-700 font-mono">
+                                {money(stats.totalEnCoursEUR || 0, 'EUR')}
+                            </p>
+                        </div>
                     </div>
 
-                    <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    {/* STATS : ACHATS / SERVICES */}
+                    <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">
                             Répartition Achat / Service
                         </span>
-                        <div className="mt-1 space-y-0.5 text-xs font-mono">
-                            <p className="flex justify-between">
-                                <span className="text-gray-500">Achats :</span>
-                                <strong className="text-[#04326D]">{money(stats.totalAchatsUSD, 'USD')} ({stats.countAchats})</strong>
-                            </p>
-                            <p className="flex justify-between">
-                                <span className="text-gray-500">Services :</span>
-                                <strong className="text-[#F58F20]">{money(stats.totalServicesUSD, 'USD')} ({stats.countServices})</strong>
-                            </p>
+                        <div className="space-y-2 mt-auto">
+                            <div className="border-b border-gray-100 pb-1.5">
+                                <span className="text-[10px] text-gray-500 font-bold block mb-0.5">Achats ({stats.countAchats})</span>
+                                <div className="flex justify-between items-center text-xs font-mono font-bold text-[#04326D]">
+                                    <span>{money(stats.totalAchatsUSD || 0, '$')}</span>
+                                    <span>{money(stats.totalAchatsFC || 0, 'FC')}</span>
+                                    <span>{money(stats.totalAchatsEUR || 0, '€')}</span>
+                                </div>
+                            </div>
+                            <div>
+                                <span className="text-[10px] text-gray-500 font-bold block mb-0.5">Services ({stats.countServices})</span>
+                                <div className="flex justify-between items-center text-xs font-mono font-bold text-[#F58F20]">
+                                    <span>{money(stats.totalServicesUSD || 0, '$')}</span>
+                                    <span>{money(stats.totalServicesFC || 0, 'FC')}</span>
+                                    <span>{money(stats.totalServicesEUR || 0, '€')}</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -346,7 +385,7 @@ export default function ReportingIndex({
                     <header className="p-4 border-b bg-gray-50 flex items-center justify-between">
                         <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
                             <Layers className="w-4 h-4 text-[#04326D]" />
-                            <span>Ventilation des Dépenses par Code d'Imputation Budgétaire</span>
+                            <span>Ventilation des Dépenses par Code d'Imputation Budgétaire (Eq. USD)</span>
                         </h3>
                         <span className="text-xs font-mono text-gray-500 font-bold">
                             {lignesVentilation.length} code(s) mobilisé(s)
@@ -486,22 +525,35 @@ export default function ReportingIndex({
                     </div>
                 </div>
 
+                {/* TABLEAU RÉCAPITULATIF POUR IMPRESSION */}
                 <div className="grid grid-cols-4 gap-4 border border-black p-3 text-xs">
                     <div>
-                        <span className="block text-gray-600 uppercase text-[9px]">Total Réquisitions</span>
-                        <strong className="text-sm font-mono">{stats.countTotal} dossier(s)</strong>
+                        <span className="block text-gray-600 uppercase text-[9px] mb-1">Total Réquisitions</span>
+                        <strong className="text-sm font-mono block">{stats.countTotal} dossier(s)</strong>
                     </div>
                     <div>
-                        <span className="block text-gray-600 uppercase text-[9px]">Volume Engagé USD</span>
-                        <strong className="text-sm font-mono">{money(stats.totalSoumisUSD, '$')}</strong>
+                        <span className="block text-gray-600 uppercase text-[9px] mb-1">Volume Engagé</span>
+                        <div className="font-mono mt-1 space-y-0.5">
+                            <div className="font-bold">{money(stats.totalSoumisUSD || 0, 'USD')}</div>
+                            <div>{money(stats.totalSoumisFC || 0, 'FC')}</div>
+                            <div>{money(stats.totalSoumisEUR || 0, 'EUR')}</div>
+                        </div>
                     </div>
                     <div>
-                        <span className="block text-gray-600 uppercase text-[9px]">Volume Décaissé USD</span>
-                        <strong className="text-sm font-mono text-emerald-800">{money(stats.totalDecaisseUSD, '$')}</strong>
+                        <span className="block text-gray-600 uppercase text-[9px] mb-1">Volume Décaissé</span>
+                        <div className="font-mono mt-1 space-y-0.5 text-emerald-800">
+                            <div className="font-bold">{money(stats.totalDecaisseUSD || 0, 'USD')}</div>
+                            <div>{money(stats.totalDecaisseFC || 0, 'FC')}</div>
+                            <div>{money(stats.totalDecaisseEUR || 0, 'EUR')}</div>
+                        </div>
                     </div>
                     <div>
-                        <span className="block text-gray-600 uppercase text-[9px]">En Circuit USD</span>
-                        <strong className="text-sm font-mono text-amber-800">{money(stats.totalEnCoursUSD, '$')}</strong>
+                        <span className="block text-gray-600 uppercase text-[9px] mb-1">En Circuit</span>
+                        <div className="font-mono mt-1 space-y-0.5 text-amber-800">
+                            <div className="font-bold">{money(stats.totalEnCoursUSD || 0, 'USD')}</div>
+                            <div>{money(stats.totalEnCoursFC || 0, 'FC')}</div>
+                            <div>{money(stats.totalEnCoursEUR || 0, 'EUR')}</div>
+                        </div>
                     </div>
                 </div>
 

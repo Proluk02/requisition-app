@@ -166,10 +166,37 @@ export default function RequisitionsIndex({
     };
 
     const renderEtapeBadge = (etape: string, isUrgent: boolean, statusCode?: string) => {
-        if (statusCode?.startsWith('returned_to_')) {
+        // 1. Rejet adressé directement à l'initiateur (Seul cas où le demandeur doit agir)
+        if (statusCode === 'returned_to_beneficiary' || statusCode === 'returned_to_urgent_initiator') {
             return (
-                <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">
-                    À Corriger
+                <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-red-100 text-red-800 border border-red-200 shadow-sm">
+                    À Corriger (Par vous)
+                </span>
+            );
+        }
+
+        // 2. Rejet interne : renvoyé au Manager de Projet par les finances
+        if (statusCode === 'returned_to_project_manager') {
+            return (
+                <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
+                    En révision (Chef de Projet)
+                </span>
+            );
+        }
+
+        // 3. Rejet interne : renvoyé aux finances par le PAM ou la Directrice
+        if (statusCode === 'returned_to_finance') {
+            return (
+                <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300">
+                    En révision (Finances)
+                </span>
+            );
+        }
+
+        if (statusCode === 'rejetee') {
+            return (
+                <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-red-50 text-red-700 border border-red-200">
+                    Rejetée définitivement
                 </span>
             );
         }
@@ -184,7 +211,7 @@ export default function RequisitionsIndex({
             cloture: 'bg-gray-800 text-white border border-gray-800',
         };
         const labels: Record<string, string> = {
-            brouillon: 'Brouillon',
+            brouillon: 'En attente Chef Projet',
             visa_mp: 'Visa Chef Projet',
             controle_finance: 'Contrôle Finances',
             visa_admin: 'Administration',
@@ -274,7 +301,7 @@ export default function RequisitionsIndex({
                             className="border border-[#B2BED6] rounded px-2.5 py-1.5 bg-white text-[#0B192C] font-semibold text-xs focus:outline-none focus:border-[#04326D] transition"
                         >
                             <option value="all">Toutes les étapes</option>
-                            <option value="brouillon">Brouillon / À corriger</option>
+                            <option value="brouillon">En attente / À corriger</option>
                             <option value="visa_mp">Visa Manager Projet</option>
                             <option value="controle_finance">Contrôle Finances</option>
                             <option value="visa_admin">Visa Administration</option>
@@ -351,11 +378,11 @@ export default function RequisitionsIndex({
                                     </tr>
                                 ) : (
                                     filteredList.map((req) => {
-                                        const canEdit = req.statusCode === 'draft' || req.statusCode?.startsWith('returned_to_') === true;
-
-                                        function handleTriggerPrint(req: RequisitionSuivi): void {
-                                            handlePrintPreview(req);
-                                        }
+                                        // CORRECTION ESSENTIELLE : Seules les réquisitions en brouillon ou retournées AU BÉNÉFICIAIRE
+                                        // peuvent être modifiées par lui. Les retours internes vers le PM ou les Finances ne sont PAS modifiables par le bénéficiaire.
+                                        const canEdit = req.statusCode === 'draft' 
+                                            || req.statusCode === 'returned_to_beneficiary'
+                                            || req.statusCode === 'returned_to_urgent_initiator';
 
                                         return (
                                             <tr key={req.id} className="hover:bg-[#F9F9FF] transition-colors">
@@ -410,7 +437,7 @@ export default function RequisitionsIndex({
                                                                     setEditError(null);
                                                                 }}
                                                                 className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded transition border border-transparent hover:border-amber-200"
-                                                                title="Corriger la demande"
+                                                                title="Corriger ma demande"
                                                             >
                                                                 <Pencil className="w-4 h-4" />
                                                             </button>
@@ -426,7 +453,7 @@ export default function RequisitionsIndex({
                                                         </button>
                                                         <button
                                                             type="button"
-                                                            onClick={() => handleTriggerPrint(req)}
+                                                            onClick={() => handlePrintPreview(req)}
                                                             className="p-1.5 text-gray-500 hover:text-emerald-700 hover:bg-emerald-50 rounded transition"
                                                             title="Aperçu avant Impression"
                                                         >
@@ -488,16 +515,44 @@ export default function RequisitionsIndex({
                             </div>
                         </div>
 
-                        {/* Motif de rejet affiché dans la consultation si applicable */}
-                        {viewReq.statusCode?.startsWith('returned_') && (
+                        {/* Motif de rejet explicite selon le destinataire */}
+                        {(viewReq.statusCode === 'returned_to_beneficiary' || viewReq.statusCode === 'returned_to_urgent_initiator') && (
                             <div className="bg-red-50 border border-red-200 p-3.5 rounded flex gap-3 items-start shadow-sm">
                                 <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
                                 <div>
                                     <strong className="block uppercase tracking-wider text-[11px] mb-1 font-black text-red-800">
-                                        Dossier renvoyé pour correction
+                                        Dossier rejeté à corriger par vous :
                                     </strong>
                                     <p className="font-medium text-sm text-red-900 whitespace-pre-wrap">
-                                        {(viewReq as any).motifRejet || viewReq.signatures?.filter(s => s.action === 'rejected').pop()?.commentaire || 'Aucun motif spécifié. Veuillez revoir votre demande.'}
+                                        {(viewReq as any).motifRejet || viewReq.signatures?.filter(s => s.action === 'rejected').pop()?.commentaire || 'Veuillez corriger votre demande et la soumettre à nouveau.'}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {viewReq.statusCode === 'returned_to_project_manager' && (
+                            <div className="bg-amber-50 border border-amber-200 p-3.5 rounded flex gap-3 items-start shadow-sm">
+                                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-amber-600" />
+                                <div>
+                                    <strong className="block uppercase tracking-wider text-[11px] mb-1 font-black text-amber-800">
+                                        Dossier renvoyé au Manager de Projet pour révision budgétaire :
+                                    </strong>
+                                    <p className="font-medium text-xs text-amber-900 whitespace-pre-wrap">
+                                        Le dossier est actuellement entre les mains de votre Chef de Projet suite au contrôle des Finances.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {viewReq.statusCode === 'returned_to_finance' && (
+                            <div className="bg-purple-50 border border-purple-200 p-3.5 rounded flex gap-3 items-start shadow-sm">
+                                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-purple-600" />
+                                <div>
+                                    <strong className="block uppercase tracking-wider text-[11px] mb-1 font-black text-purple-800">
+                                        Dossier renvoyé au service financier pour régularisation :
+                                    </strong>
+                                    <p className="font-medium text-xs text-purple-900 whitespace-pre-wrap">
+                                        Ce dossier fait l'objet d'un ajustement administratif entre la Direction et les Finances. Aucune action n'est requise de votre part.
                                     </p>
                                 </div>
                             </div>
@@ -663,19 +718,17 @@ export default function RequisitionsIndex({
                             )}
 
                             {/* AFFICHAGE EXPLICITE DU MOTIF DE REJET DANS LE FORMULAIRE */}
-                            {editReq.statusCode?.startsWith('returned_') && (
-                                <div className="bg-red-50 border border-red-200 p-3.5 rounded flex gap-3 items-start shadow-sm">
-                                    <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
-                                    <div>
-                                        <strong className="block uppercase tracking-wider text-[11px] mb-1 font-black text-red-800">
-                                            Motif du renvoi pour correction :
-                                        </strong>
-                                        <p className="font-medium text-sm text-red-900 whitespace-pre-wrap">
-                                            {(editReq as any).motifRejet || editReq.signatures?.filter(s => s.action === 'rejected').pop()?.commentaire || 'Aucun motif spécifié. Veuillez revoir votre demande et la resoumettre.'}
-                                        </p>
-                                    </div>
+                            <div className="bg-red-50 border border-red-200 p-3.5 rounded flex gap-3 items-start shadow-sm">
+                                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
+                                <div>
+                                    <strong className="block uppercase tracking-wider text-[11px] mb-1 font-black text-red-800">
+                                        Motif du renvoi pour correction :
+                                    </strong>
+                                    <p className="font-medium text-sm text-red-900 whitespace-pre-wrap">
+                                        {(editReq as any).motifRejet || editReq.signatures?.filter(s => s.action === 'rejected').pop()?.commentaire || 'Veuillez corriger votre demande et la soumettre à nouveau.'}
+                                    </p>
                                 </div>
-                            )}
+                            </div>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 border border-[#E2E8F0] rounded">
                                 <div>
