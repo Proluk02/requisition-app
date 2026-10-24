@@ -5,7 +5,7 @@ import RequisitionCorrectionForm, { type RequisitionCorrectionData } from '@/Com
 import { PageProps } from '@/types';
 import {
     ShieldCheck, Plus, Eye, X, AlertCircle, CheckCircle2,
-    Paperclip, Filter, PieChart, BarChart3, Search, Check, UserCheck, LayoutTemplate
+    Paperclip, Filter, PieChart, BarChart3, Search, Check, UserCheck, LayoutTemplate, AlertTriangle
 } from 'lucide-react';
 
 interface Signature {
@@ -214,6 +214,17 @@ export default function ProjectManagerDashboard({
         setAllocations(initialAllocations);
     };
 
+    // DÉTECTION STRICTE DES DÉPASSEMENTS BUDGÉTAIRES
+    const hasDepassement = useMemo(() => {
+        if (!selectedReq) return false;
+        return selectedReq.lignes.some((ligne) => {
+            const code = allocations[ligne.id] || '';
+            const bLine = getBudgetLineObject(code, selectedReq.project_id);
+            const solde = bLine ? bLine.solde : ligne.budget_solde_actuel;
+            return solde !== null && solde !== undefined && ligne.total > solde;
+        });
+    }, [selectedReq, allocations, budgetLines]);
+
     const handleDeclencherApprobation = () => {
         if (!selectedReq) return;
 
@@ -228,6 +239,12 @@ export default function ProjectManagerDashboard({
             return;
         }
 
+        // BLOCAGE AUTOMATIQUE EN CAS DE DÉPASSEMENT BUDGÉTAIRE
+        if (hasDepassement) {
+            showToast('error', 'Blocage strict : Une ou plusieurs lignes dépassent le solde budgétaire disponible. Vous devez ajuster les montants ou rejeter la demande.');
+            return;
+        }
+
         setPasswordSaisi('');
         setPinError(null);
         setPasswordModalOpen(true);
@@ -236,6 +253,12 @@ export default function ProjectManagerDashboard({
     const handleConfirmerSignature = (e: React.FormEvent) => {
         e.preventDefault();
         if (!selectedReq || !passwordSaisi.trim()) return;
+
+        // VÉRIFICATION DE SÉCURITÉ SUPPLÉMENTAIRE
+        if (hasDepassement) {
+            setPinError('Approbation bloquée : dépassement du budget disponible constaté.');
+            return;
+        }
 
         setSigningLoading(true);
         setPinError(null);
@@ -267,7 +290,7 @@ export default function ProjectManagerDashboard({
                     router.reload();
                 },
                 onError: (errors) => {
-                    const message = (errors as any).pin || (errors as any).password || Object.values(errors)[0] || 'Code PIN ou mot de passe incorrect.';
+                    const message = (errors as any).pin || (errors as any).password || (errors as any).general || Object.values(errors)[0] || 'Code PIN ou mot de passe incorrect.';
                     setPinError(message);
                     showToast('error', message);
                 },
@@ -702,7 +725,7 @@ export default function ProjectManagerDashboard({
                 </div>
             )}
 
-            {/* MODALE D'ARBITRAGE DU PM */}
+            {/* MODALE D'ARBITRAGE DU PM AVEC DÉTECTION DE BLOCAGE DÉPASSEMENT */}
             {selectedReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-5xl w-full p-6 space-y-4 max-h-[95vh] flex flex-col animate-slide-down">
@@ -729,6 +752,16 @@ export default function ProjectManagerDashboard({
                                 <X className="w-5 h-5" />
                             </button>
                         </header>
+
+                        {/* BANNIÈRE DE BLOCAGE SI DÉPASSEMENT DÉTECTÉ */}
+                        {hasDepassement && (
+                            <div className="p-3 bg-red-100 border-2 border-red-500 rounded text-xs text-red-900 font-bold flex items-center gap-2 shadow-sm animate-pulse">
+                                <AlertTriangle className="w-5 h-5 text-red-700 shrink-0" />
+                                <span>
+                                    BLOCAGE AUTOMATIQUE : Le crédit budgétaire disponible sur au moins une des lignes est dépassé. La signature du visa est strictement interdite. Veuillez rejeter le dossier ou ajuster les imputations.
+                                </span>
+                            </div>
+                        )}
 
                         {selectedReq.motifRejet && (
                             <div className="rounded border border-red-200 bg-red-50 p-3 text-xs text-red-900 shrink-0">
@@ -772,7 +805,7 @@ export default function ProjectManagerDashboard({
                                             const isDecidable = selectedReq.canDecide || selectedReq.statut === 'en_attente_mp';
 
                                             return (
-                                                <tr key={ligne.id} className={depassement ? 'bg-red-50/60' : ''}>
+                                                <tr key={ligne.id} className={depassement ? 'bg-red-50/80 font-semibold' : ''}>
                                                     <td className="p-2.5 font-medium max-w-[200px] truncate" title={ligne.activite}>{ligne.activite}</td>
                                                     <td className="p-2.5 relative">
                                                         {isDecidable ? (
@@ -849,7 +882,7 @@ export default function ProjectManagerDashboard({
                                                         {soldeDispo === null || soldeDispo === undefined ? (
                                                             <span className="text-[10px] text-gray-400">À vérifier</span>
                                                         ) : depassement ? (
-                                                            <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-[10px] font-bold">
+                                                            <span className="px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-black uppercase shadow-sm">
                                                                 Dépassement crédit
                                                             </span>
                                                         ) : (
@@ -924,7 +957,6 @@ export default function ProjectManagerDashboard({
                                             </select>
                                         </div>
 
-                                        {/* Observation optionnelle du PM */}
                                         <div>
                                             <label className="block text-[11px] font-bold text-gray-700 mb-1">
                                                 Observation / Commentaire du PM (Optionnel lors de la validation) :
@@ -955,14 +987,21 @@ export default function ProjectManagerDashboard({
                                                 >
                                                     Fermer
                                                 </button>
+                                                
+                                                {/* BOUTON DÉSACTIVÉ EN CAS DE DÉPASSEMENT */}
                                                 <button
                                                     type="button"
                                                     onClick={handleDeclencherApprobation}
-                                                    disabled={!caisseChoisie}
-                                                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition"
+                                                    disabled={!caisseChoisie || hasDepassement}
+                                                    className={`inline-flex items-center gap-1.5 px-4 py-2 text-white rounded text-xs font-bold shadow transition ${
+                                                        hasDepassement 
+                                                            ? 'bg-gray-400 cursor-not-allowed opacity-60' 
+                                                            : 'bg-[#04326D] hover:bg-[#06428f]'
+                                                    }`}
+                                                    title={hasDepassement ? "Validation bloquée : dépassement budgétaire sur une ou plusieurs lignes" : "Valider et transmettre au PAM"}
                                                 >
                                                     <ShieldCheck className="w-4 h-4" />
-                                                    <span>Valider & Transmettre au PAM</span>
+                                                    <span>{hasDepassement ? 'Validation Bloquée (Dépassement)' : 'Valider & Transmettre au PAM'}</span>
                                                 </button>
                                             </div>
                                         </div>
@@ -1055,7 +1094,7 @@ export default function ProjectManagerDashboard({
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={signingLoading}
+                                    disabled={signingLoading || hasDepassement}
                                     className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow disabled:opacity-50"
                                 >
                                     {signingLoading ? 'Signature en cours…' : 'Signer & Transmettre au PAM'}

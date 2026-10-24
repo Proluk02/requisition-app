@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\CashierController;
 use App\Http\Controllers\CashierSessionController;
+use App\Http\Controllers\DailyExchangeRateController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ExpenseJustificationController;
 use App\Http\Controllers\Finance\BudgetController;
@@ -79,6 +80,14 @@ Route::middleware(['auth', 'active'])->group(function () {
 
     Route::prefix('finance')->name('finance.')->middleware('role:finance')->group(function () {
         Route::get('/requisitions', [DashboardController::class, 'finance'])->name('dashboard');
+
+
+    Route::get('/exchange-rates', [DailyExchangeRateController::class, 'index'])
+        ->name('exchange-rates.index');
+
+    Route::post('/exchange-rates', [DailyExchangeRateController::class, 'store'])
+        ->name('exchange-rates.store');
+
 
         Route::get('/budgets', [BudgetController::class, 'index'])->name('budgets.index');
         Route::get('/budgets/import', [BudgetController::class, 'importForm'])->name('budgets.import-form');

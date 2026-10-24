@@ -24,6 +24,7 @@ interface CaisseOption {
     devise: string;
     solde_actuel: number;
     is_ouverte: boolean;
+    pending_count?: number;
 }
 
 interface LigneItem {
@@ -226,7 +227,7 @@ export default function DisbursementsIndex({
                                 >
                                     {userCaisses.map((c) => (
                                         <option key={c.id} value={c.id}>
-                                            {c.name} ({c.devise})
+                                            {c.name} ({c.devise}) {c.pending_count ? `• ${c.pending_count} en attente` : ''}
                                         </option>
                                     ))}
                                 </select>
@@ -322,7 +323,7 @@ export default function DisbursementsIndex({
                                     {filteredADecaisser.length === 0 ? (
                                         <tr>
                                             <td colSpan={6} className="py-12 text-center text-gray-400 italic">
-                                                Aucune réquisition en attente de décaissement pour cette caisse.
+                                                Aucune réquisition en attente de décaissement pour cette caisse ({selectedCaisse?.name}).
                                             </td>
                                         </tr>
                                     ) : (
@@ -455,7 +456,6 @@ export default function DisbursementsIndex({
                             </button>
                         </header>
 
-                        {/* Bloc alerte si solde insuffisant */}
                         {isFondsInsuffisants && (
                             <div className="p-3.5 bg-red-50 border-2 border-red-300 rounded text-red-900 text-xs space-y-1">
                                 <div className="flex items-center gap-1.5 font-bold text-red-800">

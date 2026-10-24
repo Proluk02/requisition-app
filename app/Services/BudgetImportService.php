@@ -13,7 +13,6 @@ class BudgetImportService
 {
     public function import(UploadedFile $file, string $projectId): array
     {
-        // Vérification de l'existence du projet
         $project = Project::find($projectId);
         if (! $project) {
             throw new \Exception('Le projet sélectionné est introuvable.');
@@ -34,7 +33,7 @@ class BudgetImportService
                 if (empty($rows)) {
                     return [
                         'success' => false,
-                        'message' => 'Impossible de lire le fichier .xlsx. convertissez le fichier en .csv.',
+                        'message' => 'Impossible de lire le fichier .xlsx. Convertissez le fichier en .csv.',
                         'imported' => 0,
                         'updated' => 0,
                         'errors' => ['Lecture du fichier .xlsx impossible.'],
@@ -80,7 +79,6 @@ class BudgetImportService
             'split_code',
             'code',
             'libelle',
-            'devise',
             'budget_initial',
             'donor',
         ];
@@ -94,7 +92,6 @@ class BudgetImportService
                 'split_code' => 'SPLIT',
                 'code' => 'CODE',
                 'libelle' => 'LIBELLE',
-                'devise' => 'DEVISE',
                 'budget_initial' => 'BUDGET_INITIAL',
                 'donor' => 'DONATEUR',
             ];
@@ -138,9 +135,11 @@ class BudgetImportService
                 }
 
                 $libelle = $this->getValue($row, $headerMap['libelle'] ?? null) ?: "Ligne budgétaire {$code}";
-                $devise = strtoupper($this->getValue($row, $headerMap['devise'] ?? null) ?: 'USD');
-                if (! in_array($devise, ['USD', 'FC', 'EUR'], true)) {
-                    $devise = 'USD';
+
+                $rawDevise = $this->getValue($row, $headerMap['devise'] ?? null);
+                $devise = ! empty($rawDevise) ? strtoupper($rawDevise) : 'EUR';
+                if (! in_array($devise, ['EUR', 'USD', 'FC', 'CDF'], true)) {
+                    $devise = 'EUR';
                 }
 
                 $rawBudget = $this->getValue($row, $headerMap['budget_initial'] ?? null);
@@ -156,7 +155,6 @@ class BudgetImportService
                     $donorId = $donor->id;
                 }
 
-                // Recherche si la ligne existe déjà pour CE PROJET SPECIFIQUE
                 $existingLine = BudgetLine::where('code', $code)->where('project_id', $projectId)->first();
 
                 if ($existingLine) {
@@ -169,7 +167,7 @@ class BudgetImportService
                         'libelle' => $libelle,
                         'devise' => $devise,
                         'budget_initial' => $budgetInitial,
-                        'solde' => round($budgetInitial - (float) $existingLine->montant_engage, 2),
+                        'solde' => round($budgetInitial - (float) $existingLine->montant_decaisse, 2),
                     ]);
                     $updatedCount++;
                 } else {

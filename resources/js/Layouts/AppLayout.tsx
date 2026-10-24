@@ -35,6 +35,7 @@ import {
     CheckCheck,
     AlertTriangle,
     CalendarDays,
+    Coins,
 } from 'lucide-react';
 
 interface NotificationItem {
@@ -92,7 +93,6 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
     const [showHelpModal, setShowHelpModal] = useState(false);
     const [selectedNotif, setSelectedNotif] = useState<NotificationItem | null>(null);
 
-    // Notifications en state React local (synchronisation fluide sans rechargement)
     const [notifications, setNotifications] = useState<NotificationItem[]>([]);
     const [notifSearch, setNotifSearch] = useState('');
     const [notifTab, setNotifTab] = useState<'all' | 'urgent'>('all');
@@ -138,7 +138,6 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
         handleMarkSingleAsRead(notif.id);
     };
 
-    // Tolérance d'accès à l'attribut urgent, peu importe la syntaxe de la BDD
     const getIsUrgent = (n: NotificationItem) => Boolean(n.urgent || (n as any).is_urgent || (n as any).isUrgent);
 
     const filteredNotifications = useMemo(() => {
@@ -154,7 +153,6 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
             return true;
         });
 
-        // On trie pour TOUJOURS placer les notifications urgentes en haut de la liste
         result.sort((a, b) => {
             const aUrg = getIsUrgent(a) ? 1 : 0;
             const bUrg = getIsUrgent(b) ? 1 : 0;
@@ -180,7 +178,6 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // LOGIQUE DE FOCUS STRICT : Vérification pure sans conflit d'états
     const isRouteActive = (pattern: string): boolean => {
         try {
             return route().current(pattern);
@@ -234,10 +231,10 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                         </button>
                     </div>
 
-                    {/* Projet affecté & Mention Intérim */}
+                    {/* ESPACEMENT ET ENCART DU PROJET AFFECTÉ */}
                     {projetAffecte && (
-                        <div className="p-4 shrink-0">
-                            <div className="bg-[#04326D] p-3 rounded border border-white/10">
+                        <div className="px-4 pt-5 pb-3 shrink-0">
+                            <div className="bg-[#04326D] p-3 rounded border border-white/10 shadow-sm">
                                 <span className="text-[9px] uppercase tracking-wider text-[#B2BED6] font-bold block">
                                     {__('Projet')}
                                 </span>
@@ -279,7 +276,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                     {/* Navigation principale */}
                     <nav className="px-3 py-2 space-y-4 text-xs font-medium flex-1">
                         
-                        {/* Exclusif : Dashboard Général (Caché si PM car PM a son propre dashboard) */}
+                        {/* Exclusif : Dashboard Général */}
                         {!isMP && (
                             <div className="space-y-1">
                                 <Link
@@ -360,7 +357,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                             </div>
                         )}
 
-                        {/* Staff / Coordonnateur (Exclusif : Masqué si l'utilisateur est aussi PM pour éviter les doublons) */}
+                        {/* Staff / Coordonnateur */}
                         {isStaff && !isMP && (
                             <div className="space-y-1">
                                 <Link
@@ -488,7 +485,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 <Link
                                     href={route('finance.budgets.index')}
                                     className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('finance.budgets.index') // Exact match pour éviter le conflit avec import
+                                        isRouteActive('finance.budgets.index')
                                             ? 'bg-white/10 text-white font-bold'
                                             : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
                                     }`}
@@ -507,6 +504,19 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 >
                                     <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
                                     <span>Importer lignes budgétaires</span>
+                                </Link>
+
+                                {/* NOUVEAU MENU : Taux de Change Journaliers */}
+                                <Link
+                                    href={route('finance.exchange-rates.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('finance.exchange-rates.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <Coins className="w-4 h-4 text-emerald-400" />
+                                    <span>Taux de Change Journaliers</span>
                                 </Link>
 
                                 <Link

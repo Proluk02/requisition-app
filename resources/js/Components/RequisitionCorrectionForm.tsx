@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { router, usePage } from '@inertiajs/react';
 import { PageProps } from '@/types';
-import { X, Save, AlertCircle, Paperclip, Search, Check } from 'lucide-react';
+import { X, Save, AlertCircle, Paperclip, Search, Check, Lock, AlertTriangle } from 'lucide-react';
 
 export interface LigneCorrection {
     id: string;
@@ -45,10 +45,13 @@ interface Props {
 export default function RequisitionCorrectionForm({ requisition, budgetLines = [], onClose, onSuccess }: Props) {
     const { cashRegisters } = usePage<PageProps & { cashRegisters: { name: string; devise: string }[] }>().props;
 
+    const initialCaisseObj = cashRegisters?.find(c => c.name === requisition.caisse);
+    const initialDevise = initialCaisseObj ? initialCaisseObj.devise : (requisition.devise || 'USD');
+
     const [data, setData] = useState({
         nature_requisition: requisition.nature,
         caisse_decaissement: requisition.caisse,
-        devise: requisition.devise as 'USD' | 'FC' | 'EUR',
+        devise: initialDevise,
         observation: requisition.observation || '',
         articles: requisition.lignes.map((l) => ({
             id: l.id,
@@ -68,7 +71,6 @@ export default function RequisitionCorrectionForm({ requisition, budgetLines = [
 
     const isService = data.nature_requisition === 'Service';
 
-    // Recherche et formatage des montants
     const money = (amount: number, currency: string) => `${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${currency}`;
 
     const getBudgetLineObject = (code: string) => {
@@ -77,6 +79,15 @@ export default function RequisitionCorrectionForm({ requisition, budgetLines = [
         return budgetLines.find(
             (l) => l.normalizedCode === normalized && (!requisition.project_id || l.project_id === requisition.project_id)
         ) || null;
+    };
+
+    const handleCaisseChange = (caisseNom: string) => {
+        const caisseObj = cashRegisters?.find(c => c.name === caisseNom);
+        setData({
+            ...data,
+            caisse_decaissement: caisseNom,
+            devise: caisseObj ? caisseObj.devise : data.devise,
+        });
     };
 
     const updateArticle = (index: number, field: string, value: any) => {
@@ -89,12 +100,20 @@ export default function RequisitionCorrectionForm({ requisition, budgetLines = [
         return data.articles.reduce((acc, curr) => acc + curr.quantiteOuDuree * curr.prixUnitaire, 0);
     }, [data.articles]);
 
+    const hasDepassement = useMemo(() => {
+        return data.articles.some((art) => {
+            const bLine = getBudgetLineObject(art.code_all_budget);
+            if (!bLine) return false;
+            const total = art.quantiteOuDuree * art.prixUnitaire;
+            return total > bLine.solde;
+        });
+    }, [data.articles, budgetLines]);
+
     const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault(); // On bloque le comportement par défaut (GET du navigateur)
+        e.preventDefault();
         setProcessing(true);
         setErrors({});
 
-        // Vérification Front-End
         const missingCodes = data.articles.some(a => !a.code_all_budget.trim());
         if (missingCodes) {
             setErrors({ general: "Toutes les lignes doivent impérativement avoir un code d'imputation budgétaire valide." });
@@ -102,7 +121,13 @@ export default function RequisitionCorrectionForm({ requisition, budgetLines = [
             return;
         }
 
-        // Requête POST avec _method = PATCH pour Laravel (Gestion propre des fichiers avec Inertia)
+        // BLOCAGE EN CAS DE DÉPASSEMENT
+        if (hasDepassement) {
+            setErrors({ general: "Soumission bloquée : Le montant requis dépasse le solde disponible sur au moins une des lignes budgétaires." });
+            setProcessing(false);
+            return;
+        }
+
         router.post(route('requisitions.update', requisition.id), {
             _method: 'patch',
             nature_requisition: data.nature_requisition,
@@ -117,19 +142,16 @@ export default function RequisitionCorrectionForm({ requisition, budgetLines = [
                 quantiteOuDuree: art.quantiteOuDuree,
                 unite: art.unite,
                 prixUnitaire: art.prixUnitaire,
-                // On prépare les justificatifs tels qu'attendus par le contrôleur (articles.*.justificatifs.*.file)
                 justificatifs: art.justificatifs.map(file => ({
                     file: file,
                     description: file.name
                 })),
             })),
         }, {
-            forceFormData: true, // Obligatoire pour envoyer des fichiers en PATCH via Inertia/Laravel
+            forceFormData: true,
             preserveScroll: true,
             onSuccess: () => onSuccess(),
             onError: (errs) => {
-                // Laravel retourne des erreurs du type "articles.0.code_all_budget"
-                // On récupère la première erreur pour l'afficher
                 const firstError = Object.values(errs)[0];
                 setErrors({ general: firstError || "Une erreur est survenue lors de l'enregistrement." });
             },
@@ -156,6 +178,13 @@ export default function RequisitionCorrectionForm({ requisition, budgetLines = [
                     </button>
                 </header>
 
+                {hasDepassement && (
+                    <div className="p-3 bg-red-100 border border-red-400 rounded text-xs text-red-900 font-bold flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+                        <span>Attention : Une ou plusieurs lignes dépassent le solde budgétaire disponible. Vous devez réduire les montants avant de pouvoir resoumettre.</span>
+                    </div>
+                )}
+
                 {requisition.motifRejet && (
                     <div className="rounded border border-red-200 bg-red-50 p-3 text-xs text-red-900 shrink-0 flex items-start gap-2">
                         <AlertCircle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
@@ -175,13 +204,12 @@ export default function RequisitionCorrectionForm({ requisition, budgetLines = [
                 <div className="flex-1 overflow-visible min-h-0 flex flex-col">
                     <form onSubmit={handleSubmit} className="flex flex-col h-full space-y-4">
                         
-                        {/* Paramètres Généraux */}
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-gray-50 border border-[#E2E8F0] p-4 rounded shrink-0">
                             <div>
                                 <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1.5">Caisse *</label>
                                 <select
                                     value={data.caisse_decaissement}
-                                    onChange={(e) => setData({ ...data, caisse_decaissement: e.target.value })}
+                                    onChange={(e) => handleCaisseChange(e.target.value)}
                                     className="w-full border border-gray-300 rounded p-2 text-xs font-semibold bg-white focus:outline-none focus:border-[#04326D]"
                                     required
                                 >
@@ -203,17 +231,18 @@ export default function RequisitionCorrectionForm({ requisition, budgetLines = [
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1.5">Devise *</label>
-                                <select
+                                <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1.5 flex items-center justify-between">
+                                    <span>Devise *</span>
+                                    <span className="text-[9px] text-gray-400 font-normal flex items-center gap-0.5">
+                                        <Lock className="w-2.5 h-2.5 text-emerald-600" /> Liée caisse
+                                    </span>
+                                </label>
+                                <input
+                                    type="text"
                                     value={data.devise}
-                                    onChange={(e) => setData({ ...data, devise: e.target.value as 'USD' | 'FC' | 'EUR' })}
-                                    className="w-full border border-gray-300 rounded p-2 text-xs font-semibold bg-white focus:outline-none focus:border-[#04326D]"
-                                    required
-                                >
-                                    <option value="USD">USD</option>
-                                    <option value="FC">Francs Congolais (FC)</option>
-                                    <option value="EUR">Euros (EUR)</option>
-                                </select>
+                                    disabled
+                                    className="w-full border border-gray-300 bg-gray-100 rounded p-2 text-xs font-mono font-bold text-gray-700 cursor-not-allowed"
+                                />
                             </div>
                             <div>
                                 <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1.5">Observation globale</label>
@@ -227,7 +256,6 @@ export default function RequisitionCorrectionForm({ requisition, budgetLines = [
                             </div>
                         </div>
 
-                        {/* TABLEAU DES LIGNES avec LISTE DÉROULANTE GÉANTE */}
                         <div className="flex-1 border border-[#B2BED6] rounded flex flex-col overflow-visible shadow-sm">
                             <table className="w-full text-left text-xs">
                                 <thead className="bg-[#0B192C] text-white font-bold sticky top-0 z-[50]">
@@ -245,8 +273,8 @@ export default function RequisitionCorrectionForm({ requisition, budgetLines = [
                                         const currentCode = art.code_all_budget || '';
                                         const matchedLine = getBudgetLineObject(currentCode);
                                         const totalLigne = art.quantiteOuDuree * art.prixUnitaire;
+                                        const depassement = matchedLine && totalLigne > matchedLine.solde;
 
-                                        // Filtre STRICT au Front-End par Projet 
                                         const filteredSuggestions = budgetLines.filter((b) => {
                                             if (requisition.project_id && b.project_id && b.project_id !== requisition.project_id) {
                                                 return false;
@@ -257,7 +285,7 @@ export default function RequisitionCorrectionForm({ requisition, budgetLines = [
                                         });
 
                                         return (
-                                            <tr key={art.id}>
+                                            <tr key={art.id} className={depassement ? 'bg-red-50/80' : ''}>
                                                 <td className="p-2.5 align-top">
                                                     <textarea
                                                         value={art.activite}
@@ -332,9 +360,11 @@ export default function RequisitionCorrectionForm({ requisition, budgetLines = [
                                                                 ))}
                                                             </div>
                                                         )}
-                                                        <div className="text-[10px] text-gray-500 mt-1.5 px-1 font-medium leading-tight">
+                                                        <div className="text-[10px] text-gray-500 mt-1.5 px-1 font-medium leading-tight flex items-center justify-between">
                                                             {matchedLine ? (
-                                                                <span className="text-emerald-700 font-bold">✓ {matchedLine.libelle}</span>
+                                                                <span className={depassement ? "text-red-700 font-bold" : "text-emerald-700 font-bold"}>
+                                                                    {depassement ? `⚠️ Dépassement (${money(matchedLine.solde, matchedLine.devise)} dispo)` : `✓ ${matchedLine.libelle}`}
+                                                                </span>
                                                             ) : 'Aucun code valide sélectionné'}
                                                         </div>
                                                     </div>
@@ -397,11 +427,15 @@ export default function RequisitionCorrectionForm({ requisition, budgetLines = [
                             </button>
                             <button
                                 type="submit"
-                                disabled={processing}
-                                className="inline-flex items-center gap-1.5 px-6 py-2.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold shadow-md text-xs transition disabled:opacity-50"
+                                disabled={processing || hasDepassement}
+                                className={`inline-flex items-center gap-1.5 px-6 py-2.5 text-white rounded font-bold shadow-md text-xs transition ${
+                                    hasDepassement 
+                                        ? 'bg-gray-400 cursor-not-allowed opacity-60' 
+                                        : 'bg-[#04326D] hover:bg-[#06428f]'
+                                }`}
                             >
                                 <Save className="w-4 h-4" />
-                                <span>{processing ? 'Enregistrement en cours...' : 'Valider & Resoumettre la demande'}</span>
+                                <span>{hasDepassement ? 'Resoumission bloquée (Dépassement)' : processing ? 'Enregistrement en cours...' : 'Valider & Resoumettre la demande'}</span>
                             </button>
                         </div>
                     </form>

@@ -14,7 +14,10 @@ import {
     Wrench,
     FileText,
     Trash2,
+    Lock
 } from 'lucide-react';
+
+type DeviseType = 'EUR' | 'USD' | 'FC';
 
 interface JustificatifItem {
     id: string;
@@ -82,9 +85,13 @@ export default function CreateRequisition({
         return `${projectCode}/${mois}/001`;
     }, [projectCode]);
 
-    const initialCaisse = caisses.length > 0 ? caisses[0].name : '';
-    const [caisseDecaissement, setCaisseDecaissement] = useState<string>(initialCaisse);
-    const [devise, setDevise] = useState<'USD' | 'FC' | 'EUR'>('USD');
+    // SYNCHRONISATION INITIALE STRICTE CAISSE <-> DEVISE TYPÉE POUR SUPPRIMER TS(2345)
+    const initialCaisse = caisses.length > 0 ? caisses[0] : null;
+    const [caisseDecaissement, setCaisseDecaissement] = useState<string>(initialCaisse ? initialCaisse.name : '');
+    const [devise, setDevise] = useState<DeviseType>(
+        (initialCaisse?.devise as DeviseType) || 'EUR'
+    );
+
     const [observation, setObservation] = useState<string>('');
     const [datePaiement, setDatePaiement] = useState<string>('');
     const [dateLivraison, setDateLivraison] = useState<string>('');
@@ -119,6 +126,17 @@ export default function CreateRequisition({
     const montantEnLettres = useMemo(() => {
         return numberToWordsFR(montantTotal, devise);
     }, [montantTotal, devise]);
+
+    // RÈGLE STRICTE : Changer de caisse adapte automatiquement et fige la devise de la réquisition
+    const handleCaisseChange = (caisseNom: string) => {
+        setCaisseDecaissement(caisseNom);
+        const caisseObj = caisses.find((c) => c.name === caisseNom);
+        if (caisseObj) {
+            const rawDevise = caisseObj.devise.toUpperCase();
+            const normalizedDevise: DeviseType = (rawDevise === 'FC' || rawDevise === 'CDF') ? 'FC' : (rawDevise === 'USD' ? 'USD' : 'EUR');
+            setDevise(normalizedDevise);
+        }
+    };
 
     const handleNatureChange = (nature: 'Achat' | 'Service') => {
         setNatureRequisition(nature);
@@ -436,7 +454,7 @@ export default function CreateRequisition({
                                 ) : (
                                     <select
                                         value={caisseDecaissement}
-                                        onChange={(e) => setCaisseDecaissement(e.target.value)}
+                                        onChange={(e) => handleCaisseChange(e.target.value)}
                                         className="w-full border border-outline-variant rounded-md p-2 text-xs font-bold text-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                                         required
                                     >
@@ -449,19 +467,22 @@ export default function CreateRequisition({
                                 )}
                             </div>
 
+                            {/* DEVISE LIÉE STRICTEMENT À LA CAISSE (SANS ERREUR TS2345) */}
                             <div>
-                                <label className="block font-semibold text-gray-700 mb-1.5">
-                                    Devise
+                                <label className="block font-semibold text-gray-700 mb-1.5 flex items-center justify-between">
+                                    <span>Devise de paiement</span>
+                                    <span className="text-[10px] text-gray-400 font-normal flex items-center gap-1">
+                                        <Lock className="w-3 h-3 text-emerald-600" /> Liée à la caisse
+                                    </span>
                                 </label>
-                                <select
-                                    value={devise}
-                                    onChange={(e) => setDevise(e.target.value as any)}
-                                    className="w-full border border-outline-variant rounded-md p-2 text-xs font-bold text-primary focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
-                                >
-                                    <option value="USD">USD ($ — Dollar Américain)</option>
-                                    <option value="FC">FC (CDF — Franc Congolais)</option>
-                                    <option value="EUR">EUR (€ — Euro)</option>
-                                </select>
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        value={devise === 'EUR' ? 'EUR (€ — Euro)' : devise === 'USD' ? 'USD ($ — Dollar Américain)' : 'FC (CDF — Franc Congolais)'}
+                                        disabled
+                                        className="w-full border border-emerald-300 bg-emerald-50/60 rounded-md p-2 text-xs font-mono font-bold text-emerald-900 cursor-not-allowed shadow-inner"
+                                    />
+                                </div>
                             </div>
                         </div>
 

@@ -6,6 +6,7 @@ use App\Models\BudgetLine;
 use App\Models\CashMovement;
 use App\Models\CashRegister;
 use App\Models\CashRegisterSession;
+use App\Models\DailyExchangeRate;
 use App\Models\Requisition;
 use App\Models\RequisitionSignature;
 use App\Models\User;
@@ -28,10 +29,9 @@ class CashierController extends Controller
         $user = $request->user();
         abort_unless($user->hasRole('cashier') || $user->hasRole('admin'), 403, 'Accès réservé au guichet caisse.');
 
+        // Strictement les caisses affectées à ce caissier
         $userCaisses = $this->getUserCaisses($user);
 
-        // NOUVEAU : On charge TOUTES les données de TOUTES les caisses pour React
-        // Ainsi, la bascule en Frontend sera instantanée, sans aucune requête serveur !
         $caissesData = $userCaisses->map(function ($caisse) {
             $activeSession = CashRegisterSession::where('cash_register_id', $caisse->id)
                 ->whereIn('status', ['ouverte', 'en_attente_autorisation'])
@@ -70,6 +70,10 @@ class CashierController extends Controller
                 ];
             }
 
+            $pendingCount = Requisition::where('status', 'decaissement_caisse')
+                ->whereRaw('LOWER(TRIM(caisse_decaissement)) = ?', [strtolower(trim($caisse->name))])
+                ->count();
+
             return [
                 'id' => $caisse->id,
                 'name' => $caisse->name,
@@ -79,6 +83,7 @@ class CashierController extends Controller
                 'is_active' => (bool) $caisse->is_active,
                 'is_ouverte' => $caisse->isOuverte(),
                 'is_approvisionnee' => (bool) $caisse->is_approvisionnee,
+                'pending_count' => $pendingCount,
                 'activeSession' => $activeSession ? [
                     'id' => $activeSession->id,
                     'status' => $activeSession->status,
@@ -94,61 +99,82 @@ class CashierController extends Controller
             ];
         });
 
-        $totalAttenteUSD = (float) Requisition::where('status', 'decaissement_caisse')->where('devise', 'USD')->sum('montant_total');
-        $totalAttenteFC = (float) Requisition::where('status', 'decaissement_caisse')->whereIn('devise', ['FC', 'CDF'])->sum('montant_total');
+        // Totaux calculés STRICTEMENT sur les caisses affectées au caissier
+        $caisseNames = $userCaisses->pluck('name')->map(fn ($n) => strtolower(trim($n)))->all();
+
+        $totalAttenteUSD = (float) Requisition::where('status', 'decaissement_caisse')
+            ->where('devise', 'USD')
+            ->whereIn(DB::raw('LOWER(TRIM(caisse_decaissement))'), $caisseNames)
+            ->sum('montant_total');
+
+        $totalAttenteFC = (float) Requisition::where('status', 'decaissement_caisse')
+            ->whereIn('devise', ['FC', 'CDF'])
+            ->whereIn(DB::raw('LOWER(TRIM(caisse_decaissement))'), $caisseNames)
+            ->sum('montant_total');
+
+        $totalAttenteEUR = (float) Requisition::where('status', 'decaissement_caisse')
+            ->where('devise', 'EUR')
+            ->whereIn(DB::raw('LOWER(TRIM(caisse_decaissement))'), $caisseNames)
+            ->sum('montant_total');
 
         return Inertia::render('Cashier/Dashboard', [
             'caisses' => $caissesData,
             'stats' => [
                 'totalAttenteUSD' => $totalAttenteUSD,
                 'totalAttenteFC' => $totalAttenteFC,
+                'totalAttenteEUR' => $totalAttenteEUR,
             ],
         ]);
     }
 
     /**
      * Module 2 : Bons à Décaisser.
+     * Affiche EXCLUSIVEMENT les réquisitions affectées à la caisse sélectionnée du caissier.
      */
     public function disbursements(Request $request): Response
     {
         $user = $request->user();
         abort_unless($user->hasRole('cashier') || $user->hasRole('admin'), 403);
 
+        // Strictement les caisses affectées à ce caissier
         $userCaisses = $this->getUserCaisses($user);
         $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
-        $selectedCaisse = CashRegister::with('activeSession')->find($selectedCaisseId) ?? $userCaisses->first();
+        $selectedCaisse = $userCaisses->firstWhere('id', $selectedCaisseId) ?? $userCaisses->first();
 
-        $queryADecaisser = Requisition::with(['user', 'demandes.justificatifs', 'project'])
-            ->where('status', 'decaissement_caisse')
-            ->orderByDesc('updated_at');
+        $aDecaisser = collect();
 
         if ($selectedCaisse) {
-            $queryADecaisser->where('caisse_decaissement', $selectedCaisse->name);
+            // Réquisitions autorisées STRICTEMENT sur cette caisse affectée
+            $aDecaisser = Requisition::with(['user', 'demandes.justificatifs', 'project'])
+                ->where('status', 'decaissement_caisse')
+                ->whereRaw('LOWER(TRIM(caisse_decaissement)) = ?', [strtolower(trim($selectedCaisse->name))])
+                ->orderByDesc('updated_at')
+                ->get()
+                ->map(fn (Requisition $r) => [
+                    'id' => (string) $r->id,
+                    'numero' => $r->numero_requisition,
+                    'projet' => $r->projet,
+                    'initiateurNom' => $r->user?->name ?? 'Agent',
+                    'initiateurRole' => $r->user?->role ?? 'Staff',
+                    'nature' => $r->nature_requisition,
+                    'devise' => $r->devise,
+                    'montantTotal' => (float) $r->montant_total,
+                    'montantTotalEur' => (float) ($r->montant_total_eur ?? 0.0),
+                    'caisseAttribuee' => $r->caisse_decaissement ?? $selectedCaisse->name,
+                    'observation' => $r->observation,
+                    'is_urgent' => (bool) $r->is_urgent,
+                    'dateSoumission' => $r->created_at ? $r->created_at->format('d/m/Y') : '',
+                    'lignes' => $r->demandes->map(fn ($d) => [
+                        'id' => (string) $d->id,
+                        'activite' => $d->activite,
+                        'codeAllocation' => $d->code_allocation ?? $d->code_all_budget,
+                        'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
+                        'unite' => $d->unite ?? '',
+                        'prixUnitaire' => (float) $d->frais_unitaire,
+                        'total' => (float) $d->total_ligne,
+                    ])->values()->all(),
+                ]);
         }
-
-        $aDecaisser = $queryADecaisser->get()->map(fn (Requisition $r) => [
-            'id' => (string) $r->id,
-            'numero' => $r->numero_requisition,
-            'projet' => $r->projet,
-            'initiateurNom' => $r->user?->name ?? 'Agent',
-            'initiateurRole' => $r->user?->role ?? 'Staff',
-            'nature' => $r->nature_requisition,
-            'devise' => $r->devise,
-            'montantTotal' => (float) $r->montant_total,
-            'caisseAttribuee' => $r->caisse_decaissement ?? 'Caisse principale',
-            'observation' => $r->observation,
-            'is_urgent' => (bool) $r->is_urgent,
-            'dateSoumission' => $r->created_at ? $r->created_at->format('d/m/Y') : '',
-            'lignes' => $r->demandes->map(fn ($d) => [
-                'id' => (string) $d->id,
-                'activite' => $d->activite,
-                'codeAllocation' => $d->code_allocation ?? $d->code_all_budget,
-                'quantiteOuDuree' => (float) ($d->quantite ?: $d->duree ?: 0),
-                'unite' => $d->unite ?? '',
-                'prixUnitaire' => (float) $d->frais_unitaire,
-                'total' => (float) $d->total_ligne,
-            ])->values()->all(),
-        ]);
 
         $recentDisbursementsQuery = CashMovement::with(['cashRegister', 'cashier'])
             ->where('type', 'sortie')
@@ -161,14 +187,24 @@ class CashierController extends Controller
 
         $recentDisbursements = $recentDisbursementsQuery->get()->map(fn (CashMovement $m) => $this->transformMovement($m));
 
-        return Inertia::render('Cashier/Disbursements/Index', [
-            'userCaisses' => $userCaisses->map(fn ($c) => [
+        // Liste des caisses DU CAISSIER avec compteur pour savoir sur laquelle basculer
+        $caissesOptions = $userCaisses->map(function ($c) {
+            $count = Requisition::where('status', 'decaissement_caisse')
+                ->whereRaw('LOWER(TRIM(caisse_decaissement)) = ?', [strtolower(trim($c->name))])
+                ->count();
+
+            return [
                 'id' => $c->id,
                 'name' => $c->name,
                 'devise' => $c->devise,
                 'solde_actuel' => (float) ($c->solde_actuel ?? 0.0),
                 'is_ouverte' => $c->isOuverte(),
-            ]),
+                'pending_count' => $count,
+            ];
+        });
+
+        return Inertia::render('Cashier/Disbursements/Index', [
+            'userCaisses' => $caissesOptions,
             'selectedCaisse' => $selectedCaisse ? [
                 'id' => $selectedCaisse->id,
                 'name' => $selectedCaisse->name,
@@ -182,7 +218,8 @@ class CashierController extends Controller
     }
 
     /**
-     * BLOCAGE STRICT : Si solde_actuel <= 0 ou < montant, décaissement rejeté.
+     * DÉCAISSEMENT EFFECTIF :
+     * Vérification stricte : le caissier doit être affecté à la caisse de la réquisition.
      */
     public function disburse(Request $request, Requisition $requisition)
     {
@@ -191,7 +228,7 @@ class CashierController extends Controller
         abort_unless($requisition->status === 'decaissement_caisse', 403, 'Réquisition non autorisée au décaissement.');
 
         $cashRegister = CashRegister::query()
-            ->where('name', $requisition->caisse_decaissement)
+            ->whereRaw('LOWER(TRIM(name)) = ?', [strtolower(trim($requisition->caisse_decaissement))])
             ->where('is_active', true)
             ->first();
 
@@ -200,6 +237,12 @@ class CashierController extends Controller
                 'error',
                 "Impossible de décaisser : la caisse « {$requisition->caisse_decaissement} » est introuvable ou inactive."
             );
+        }
+
+        // VÉRIFICATION STRICTE DE L'AFFECTATION DU CAISSIER À CETTE CAISSE
+        if (! $user->hasRole('admin')) {
+            $isAssigned = $cashRegister->cashiers()->where('users.id', $user->id)->exists();
+            abort_unless($isAssigned, 403, "Action refusée : Vous n'êtes pas affecté à la caisse « {$requisition->caisse_decaissement} ».");
         }
 
         $session = $cashRegister->activeSession;
@@ -258,6 +301,7 @@ class CashierController extends Controller
                 $lockedRequisition->observation ?? ''
             );
 
+            // 1. Débit physique de la caisse (en devise de la caisse)
             CashMovement::create([
                 'cash_register_id' => $cashRegister->id,
                 'session_id' => $session->id,
@@ -280,19 +324,27 @@ class CashierController extends Controller
                 'signature_caissier' => $user->name,
             ]);
 
+            // 2. Conversion au taux journalier actif
+            $activeRate = DailyExchangeRate::getActiveRate();
+            $conversionTotal = DailyExchangeRate::convertToEur($montantDecaisse, $lockedRequisition->devise, $activeRate);
+            $totalRequisitionEur = $conversionTotal['montant_eur'];
+
+            // 3. Déduction réelle sur les lignes budgétaires en Euro (€)
             foreach ($lockedRequisition->demandes as $demande) {
                 $codeAllocation = trim((string) ($demande->code_allocation ?: $demande->code_all_budget));
-                $ligneTotal = (float) $demande->total_ligne;
+                $ligneTotalOrigine = (float) $demande->total_ligne;
 
                 if (! empty($codeAllocation)) {
+                    $conversionLigne = DailyExchangeRate::convertToEur($ligneTotalOrigine, $lockedRequisition->devise, $activeRate);
+                    $ligneTotalEur = $conversionLigne['montant_eur'];
+
                     $budgetLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
-                        ->where('code', $codeAllocation)
+                        ->whereRaw('LOWER(TRIM(code)) = ?', [BudgetLine::normalizeCode($codeAllocation)])
                         ->lockForUpdate()
                         ->first();
 
                     if ($budgetLine) {
-                        $budgetLine->decrement('montant_engage', min((float) $budgetLine->montant_engage, $ligneTotal));
-                        $budgetLine->increment('montant_decaisse', $ligneTotal);
+                        $budgetLine->increment('montant_decaisse', $ligneTotalEur);
                         $budgetLine->update([
                             'solde' => round($budgetLine->budget_initial - $budgetLine->montant_decaisse, 2),
                         ]);
@@ -300,23 +352,29 @@ class CashierController extends Controller
                 }
             }
 
+            // 4. Clôture de la réquisition avec conservation des taux
             $lockedRequisition->update([
                 'status' => 'decaisse',
                 'cashier_id' => $user->id,
                 'mode_paiement' => $validated['mode_paiement'],
                 'reference_paiement' => $numeroBSC,
                 'date_decaissement' => $now,
+                'taux_eur_usd' => $conversionTotal['taux_eur_usd'],
+                'taux_eur_cdf' => $conversionTotal['taux_eur_cdf'],
+                'montant_total_eur' => $totalRequisitionEur,
             ]);
 
+            // 5. Débit physique de la caisse
             $cashRegister->decrement('solde_actuel', $montantDecaisse);
             $session->increment('total_sorties', $montantDecaisse);
 
+            // 6. Signature électronique du caissier
             $this->enregistrerSignature(
                 requisition: $lockedRequisition,
                 user: $user,
                 roleSignataire: 'cashier',
                 action: 'disbursed',
-                commentaire: "Bon de Sortie Caisse {$numeroBSC} émis. Paiement en {$validated['mode_paiement']}."
+                commentaire: "Bon de Sortie Caisse {$numeroBSC} émis. Paiement en {$validated['mode_paiement']}. Déduit du budget au taux journalier (Équivalent : {$totalRequisitionEur} EUR)."
             );
 
             $this->notifierUtilisateur(
@@ -326,7 +384,7 @@ class CashierController extends Controller
             );
         });
 
-        return Redirect::back()->with('success', 'Bon de Sortie Caisse émis et débité avec succès.');
+        return Redirect::back()->with('success', 'Bon de Sortie Caisse émis. Caisse débitée et consommation budgétaire déduite en Euro avec succès.');
     }
 
     /**
@@ -339,7 +397,7 @@ class CashierController extends Controller
 
         $userCaisses = $this->getUserCaisses($user);
         $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
-        $selectedCaisse = CashRegister::with('activeSession')->find($selectedCaisseId) ?? $userCaisses->first();
+        $selectedCaisse = $userCaisses->firstWhere('id', $selectedCaisseId) ?? $userCaisses->first();
 
         $receiptsQuery = CashMovement::with(['cashRegister', 'cashier'])
             ->where('type', 'entree')
@@ -373,7 +431,7 @@ class CashierController extends Controller
     }
 
     /**
-     * Module 4 : Grand Livre de Caisse mensuel (Historique exact et sans fuite du solde actuel).
+     * Module 4 : Grand Livre de Caisse mensuel.
      */
     public function ledger(Request $request): Response
     {
@@ -398,7 +456,6 @@ class CashierController extends Controller
         if ($selectedCaisse) {
             $dateDebutMois = "{$year}-{$month}-01";
 
-            // Récupération de la dernière session fermée STRICTEMENT avant le 1er du mois demandé
             $derniereSessionAvant = CashRegisterSession::where('cash_register_id', $selectedCaisse->id)
                 ->where('status', 'fermee')
                 ->whereDate('date_session', '<', $dateDebutMois)
@@ -406,7 +463,6 @@ class CashierController extends Controller
                 ->first();
 
             if ($derniereSessionAvant && $derniereSessionAvant->solde_fermeture !== null) {
-                // Solde de clôture antérieur + flux intermédiaires éventuels jusqu'au 1er du mois
                 $fluxIntermediaires = CashMovement::where('cash_register_id', $selectedCaisse->id)
                     ->where('status_validation', 'valide')
                     ->whereDate('date_mouvement', '>', $derniereSessionAvant->date_session)
@@ -417,8 +473,6 @@ class CashierController extends Controller
                     + (float) $fluxIntermediaires->where('type', 'entree')->sum('montant')
                     - (float) $fluxIntermediaires->where('type', 'sortie')->sum('montant');
             } else {
-                // Aucune session fermée avant ce mois : cumul strict des mouvements antérieurs réels
-                // Si la date est antérieure à toute activité, le solde initial est STRICTEMENT 0.00 (jamais solde_actuel !)
                 $entreesAvant = (float) CashMovement::where('cash_register_id', $selectedCaisse->id)
                     ->where('status_validation', 'valide')
                     ->whereDate('date_mouvement', '<', $dateDebutMois)
@@ -613,7 +667,7 @@ class CashierController extends Controller
     }
 
     /**
-     * Module Journal Quotidien de Caisse (A4) avec gestion fidèle des dates antérieures.
+     * Module Journal Quotidien de Caisse (A4).
      */
     public function journalDuJour(Request $request): Response
     {
@@ -622,7 +676,7 @@ class CashierController extends Controller
 
         $userCaisses = $this->getUserCaisses($user);
         $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
-        $selectedCaisse = CashRegister::find($selectedCaisseId) ?? $userCaisses->first();
+        $selectedCaisse = $userCaisses->firstWhere('id', $selectedCaisseId) ?? $userCaisses->first();
 
         $selectedDate = $request->input('date', now()->toDateString());
 
@@ -634,23 +688,19 @@ class CashierController extends Controller
         $latestSessionDate = null;
 
         if ($selectedCaisse) {
-            // Recherche de la session de la date ciblée
             $session = CashRegisterSession::with(['cashier', 'authorizedBy'])
                 ->where('cash_register_id', $selectedCaisse->id)
                 ->whereDate('date_session', $selectedDate)
                 ->first();
 
-            // Date de la dernière session existante enregistrée pour cette caisse
             $latestSession = CashRegisterSession::where('cash_register_id', $selectedCaisse->id)
                 ->latest('date_session')
                 ->first();
             $latestSessionDate = $latestSession?->date_session?->toDateString();
 
             if ($session && $session->solde_ouverture !== null) {
-                // 1. Session existante ce jour-là
                 $openingBalanceResolved = (float) $session->solde_ouverture;
             } else {
-                // 2. Pas de session ce jour-là : chercher la session fermée immédiatement antérieure
                 $lastClosed = CashRegisterSession::where('cash_register_id', $selectedCaisse->id)
                     ->where('status', 'fermee')
                     ->whereDate('date_session', '<', $selectedDate)
@@ -660,12 +710,10 @@ class CashierController extends Controller
                 if ($lastClosed && $lastClosed->solde_fermeture !== null) {
                     $openingBalanceResolved = (float) $lastClosed->solde_fermeture;
                 } else {
-                    // Si la date est antérieure à toute session de caisse : STRICTEMENT 0.00
                     $openingBalanceResolved = 0.0;
                 }
             }
 
-            // Mouvements rattachés à la journée
             $movementsQuery = CashMovement::with('cashier')
                 ->where('cash_register_id', $selectedCaisse->id);
 
@@ -739,6 +787,9 @@ class CashierController extends Controller
         ]);
     }
 
+    /**
+     * Récupération STRICTE des caisses affectées au caissier.
+     */
     protected function getUserCaisses(User $user)
     {
         return $user->hasRole('admin')

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\BudgetLine;
 use App\Models\CashRegister;
+use App\Models\DailyExchangeRate;
 use App\Models\Demande;
 use App\Models\DemandeJustificatif;
 use App\Models\Project;
@@ -348,6 +349,14 @@ class RequisitionController extends Controller
             'caisse_decaissement.exists' => 'La caisse sélectionnée est introuvable.',
         ]);
 
+        // 1. VÉRIFICATION STRICTE DE COHÉRENCE CAISSE <-> DEVISE
+        $caisse = CashRegister::where('name', $validated['caisse_decaissement'])->firstOrFail();
+        abort_unless(
+            $caisse->devise === $validated['devise'],
+            422,
+            "Incohérence : la caisse « {$caisse->name} » fonctionne en {$caisse->devise}. La réquisition ne peut pas être créée en {$validated['devise']}."
+        );
+
         $project = Project::where('name', $validated['projet'])->firstOrFail();
         $user = $request->user();
         abort_unless(
@@ -372,6 +381,9 @@ class RequisitionController extends Controller
         $numeroChronologique = sprintf('%s/%s/%03d', $initialesProjet, $moisCourant, $ordre);
         $isUrgent = $request->boolean('is_urgent');
 
+        // 2. CONVERSION DE RÉFÉRENCE EN EURO (€) SUR BASE DU TAUX DU JOUR
+        $conversion = DailyExchangeRate::convertToEur((float) $validated['montant_total'], $validated['devise']);
+
         $requisition = Requisition::create([
             'user_id' => $user->id,
             'project_id' => $project->id,
@@ -382,7 +394,11 @@ class RequisitionController extends Controller
             'caisse_decaissement' => $validated['caisse_decaissement'],
             'devise' => $validated['devise'],
             'observation' => $validated['observation'] ?? null,
+            'derniere_observation' => null,
             'montant_total' => $validated['montant_total'],
+            'montant_total_eur' => $conversion['montant_eur'],
+            'taux_eur_usd' => $conversion['taux_eur_usd'],
+            'taux_eur_cdf' => $conversion['taux_eur_cdf'],
             'is_urgent' => $isUrgent,
             'date_paiement' => $validated['date_paiement'] ?? null,
             'date_livraison' => $validated['date_livraison'] ?? null,
@@ -498,9 +514,17 @@ class RequisitionController extends Controller
                     'password' => 'Signature refusée : Code PIN (ou mot de passe) incorrect.',
                 ]);
             }
+
+            // Vérification stricte caisse <-> devise de la réquisition
+            $caisse = CashRegister::where('name', $validated['caisse_decaissement'])->first();
+            if ($caisse && $caisse->devise !== $requisition->devise) {
+                return Redirect::back()->withErrors([
+                    'caisse_decaissement' => "La caisse sélectionnée ({$caisse->name}) fonctionne en {$caisse->devise}, alors que la réquisition est en {$requisition->devise}.",
+                ]);
+            }
         }
 
-        DB::transaction(function () use ($validated, $requisition, $user) {
+        $resultat = DB::transaction(function () use ($validated, $requisition, $user) {
             $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
 
             abort_unless(
@@ -512,18 +536,56 @@ class RequisitionController extends Controller
 
             if ($validated['decision'] === 'approve') {
                 $demandes = $lockedRequisition->demandes()->lockForUpdate()->get()->keyBy('id');
+                $activeRate = DailyExchangeRate::getActiveRate();
+
+                // 1. CONTRÔLE ET BLOCAGE STRICT DES DÉPASSEMENTS BUDGÉTAIRES
+                foreach ($validated['allocations'] as $allocation) {
+                    $demande = $demandes->get($allocation['demande_id']);
+                    if (! $demande) {
+                        continue;
+                    }
+
+                    $codeNorm = BudgetLine::normalizeCode($allocation['code_allocation']);
+                    $budgetLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
+                        ->whereRaw('LOWER(TRIM(code)) = ?', [$codeNorm])
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (! $budgetLine) {
+                        return [
+                            'success' => false,
+                            'error' => "Le code budgétaire « {$allocation['code_allocation']} » est introuvable pour ce projet.",
+                        ];
+                    }
+
+                    // Calcul de l'équivalent en Euro selon la devise de la ligne budgétaire
+                    $conversionLigne = DailyExchangeRate::convertToEur((float) $demande->total_ligne, $lockedRequisition->devise, $activeRate);
+                    $montantRequisEur = $conversionLigne['montant_eur'];
+
+                    // Si la ligne budgétaire est en EUR et que le montant la dépasse
+                    $soldeDisponible = (float) $budgetLine->solde;
+                    if ($montantRequisEur > $soldeDisponible) {
+                        return [
+                            'success' => false,
+                            'error' => "Blocage automatique : La ligne « {$demande->activite} » nécessite {$montantRequisEur} EUR ({$demande->total_ligne} {$lockedRequisition->devise}), ce qui dépasse le solde disponible sur la ligne {$budgetLine->code} ({$soldeDisponible} EUR). Validation impossible.",
+                        ];
+                    }
+                }
+
+                // 2. ENREGISTREMENT DES ALLOCATIONS SI AUCUN DÉPASSEMENT
                 foreach ($validated['allocations'] as $allocation) {
                     $demande = $demandes->get($allocation['demande_id']);
                     if ($demande) {
+                        $codeNorm = BudgetLine::normalizeCode($allocation['code_allocation']);
+                        $libelle = BudgetLine::query()
+                            ->where('project_id', $lockedRequisition->project_id)
+                            ->whereRaw('LOWER(TRIM(code)) = ?', [$codeNorm])
+                            ->value('libelle') ?? 'code non specifie';
+
                         $demande->update([
                             'code_allocation' => trim($allocation['code_allocation']),
                             'code_all_budget' => trim($allocation['code_allocation']),
-                            'libelle_allocation' => BudgetLine::query()
-                                ->where('project_id', $lockedRequisition->project_id)
-                                ->whereRaw('LOWER(TRIM(code)) = ?', [
-                                    BudgetLine::normalizeCode($allocation['code_allocation']),
-                                ])
-                                ->value('libelle') ?? 'code non specifie',
+                            'libelle_allocation' => $libelle,
                         ]);
                     }
                 }
@@ -532,7 +594,7 @@ class RequisitionController extends Controller
                     ? $validated['observation']
                     : "Visa MP accordé. Caisse : {$validated['caisse_decaissement']}";
 
-                // STATUT : visa_mp (transmis STRICTEMENT au PAM)
+                // STATUT : visa_mp (Transmis STRICTEMENT au PAM)
                 $lockedRequisition->update([
                     'status' => 'visa_mp',
                     'caisse_decaissement' => $validated['caisse_decaissement'],
@@ -561,7 +623,6 @@ class RequisitionController extends Controller
                     );
                 }
 
-                // Notifie UNIQUEMENT le PAM (Programme Administration Manager)
                 $this->notifierRole(
                     roleCible: 'admin_manager',
                     projectId: null,
@@ -570,7 +631,7 @@ class RequisitionController extends Controller
                     urgent: (bool) $lockedRequisition->is_urgent
                 );
 
-                return;
+                return ['success' => true];
             }
 
             // REJET DU PM => RETOUR AU BÉNÉFICIAIRE
@@ -592,7 +653,16 @@ class RequisitionController extends Controller
                 titre: 'Réquisition retournée par le MP',
                 message: "Votre réquisition {$lockedRequisition->numero_requisition} a été retournée : {$validated['motif_rejet']}"
             );
+
+            return ['success' => true];
         });
+
+        if (isset($resultat['success']) && ! $resultat['success']) {
+            return Redirect::back()->withErrors([
+                'general' => $resultat['error'],
+                'pin' => $resultat['error'],
+            ]);
+        }
 
         return Redirect::back()->with(
             $validated['decision'] === 'approve' ? 'success' : 'error',
