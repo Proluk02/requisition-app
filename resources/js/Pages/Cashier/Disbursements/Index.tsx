@@ -16,6 +16,9 @@ import {
     AlertCircle,
     X,
     AlertTriangle,
+    Info,
+    FileText,
+    ShieldCheck,
 } from 'lucide-react';
 
 interface CaisseOption {
@@ -89,14 +92,54 @@ export default function DisbursementsIndex({
 
     const [activeTab, setActiveTab] = useState<'a_decaisser' | 'historique'>('a_decaisser');
     const [search, setSearch] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
 
     const [disburseReq, setDisburseReq] = useState<RequisitionItem | null>(null);
     const [printBSC, setPrintBSC] = useState<MovementBSC | null>(null);
+    const [confirmStep, setConfirmStep] = useState(false);
+
+    useEffect(() => {
+        const offStart = router.on('start', () => setIsLoading(true));
+        const offFinish = router.on('finish', () => setIsLoading(false));
+        return () => {
+            offStart();
+            offFinish();
+        };
+    }, []);
 
     useEffect(() => {
         if (!printBSC) return;
         void openPrintPreview('bon-sortie-caisse-print').then(() => setPrintBSC(null));
     }, [printBSC]);
+
+    // ESC pour fermer la modale + reset du confirm step
+    useEffect(() => {
+        if (!disburseReq) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setDisburseReq(null);
+                setConfirmStep(false);
+            }
+        };
+        window.addEventListener('keydown', onKey);
+        document.body.style.overflow = 'hidden';
+        return () => {
+            window.removeEventListener('keydown', onKey);
+            document.body.style.overflow = '';
+        };
+    }, [disburseReq]);
+
+    // Ctrl/Cmd + K focus la recherche
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                document.querySelector<HTMLInputElement>('input[data-search-input]')?.focus();
+            }
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, []);
 
     const [modePaiement, setModePaiement] = useState('Espèces');
     const [refPaiement, setRefPaiement] = useState('');
@@ -122,6 +165,13 @@ export default function DisbursementsIndex({
         setNote('');
         setPin('');
         setPinError(null);
+        setConfirmStep(false);
+    };
+
+    const handleCloseDisburse = () => {
+        setDisburseReq(null);
+        setConfirmStep(false);
+        setPinError(null);
     };
 
     const soldeDisponible = selectedCaisse?.solde_actuel ?? 0;
@@ -131,6 +181,11 @@ export default function DisbursementsIndex({
     const handleSubmitDisburse = (e: React.FormEvent) => {
         e.preventDefault();
         if (!disburseReq || isFondsInsuffisants || isCaisseAZero) return;
+
+        if (!confirmStep) {
+            setConfirmStep(true);
+            return;
+        }
 
         setSubmitting(true);
         setPinError(null);
@@ -146,9 +201,13 @@ export default function DisbursementsIndex({
             },
             {
                 preserveScroll: true,
-                onFinish: () => setSubmitting(false),
-                onSuccess: () => setDisburseReq(null),
+                onFinish: () => {
+                    setSubmitting(false);
+                    setConfirmStep(false);
+                },
+                onSuccess: () => handleCloseDisburse(),
                 onError: (errs) => {
+                    setConfirmStep(false);
                     setPinError(errs.pin || Object.values(errs)[0] || 'Erreur lors du décaissement.');
                 },
             }
@@ -166,6 +225,14 @@ export default function DisbursementsIndex({
             r.initiateurNom.toLowerCase().includes(search.toLowerCase())
         );
     }, [aDecaisser, search]);
+
+    const filteredBSC = useMemo(() => {
+        return recentDisbursements.filter((b) =>
+            b.numero_piece.toLowerCase().includes(search.toLowerCase()) ||
+            b.tiers_nom.toLowerCase().includes(search.toLowerCase()) ||
+            b.imputation.toLowerCase().includes(search.toLowerCase())
+        );
+    }, [recentDisbursements, search]);
 
     return (
         <AppLayout>
@@ -191,6 +258,10 @@ export default function DisbursementsIndex({
                     #bon-sortie-caisse-print { display: none; }
                 }
             `}</style>
+
+            {isLoading && (
+                <div className="fixed top-0 left-0 right-0 h-0.5 bg-[#04326D] z-[100] animate-pulse" />
+            )}
 
             <div className="space-y-6 no-print-area">
                 <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
@@ -258,6 +329,19 @@ export default function DisbursementsIndex({
                     </div>
                 )}
 
+                {/* Encart pédagogique */}
+                <details className="bg-blue-50/60 border border-blue-200 rounded text-xs text-blue-900">
+                    <summary className="cursor-pointer font-bold px-3.5 py-2 flex items-center gap-1.5 select-none">
+                        <Info className="w-3.5 h-3.5" />
+                        <span>Qu'est-ce qu'un Bon de Sortie Caisse (BSC) ?</span>
+                    </summary>
+                    <div className="px-3.5 pb-3 leading-relaxed text-[11.5px]">
+                        Le <strong>BSC</strong> est le document officiel qui prouve la sortie d'argent de la caisse.
+                        Il est généré automatiquement après validation du PIN caissier et sert de preuve comptable.
+                        Le bénéficiaire doit le signer à la réception des fonds. Vous pouvez le réimprimer à tout moment depuis l'onglet <em>Bons de Sortie Récents</em>.
+                    </div>
+                </details>
+
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="border-b border-[#E2E8F0] px-4 pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white">
                         <div className="flex gap-2">
@@ -297,8 +381,9 @@ export default function DisbursementsIndex({
                         <div className="relative pb-2 sm:pb-0 w-full sm:w-64">
                             <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                             <input
+                                data-search-input
                                 type="text"
-                                placeholder="Rechercher numéro, projet, nom..."
+                                placeholder="Rechercher (Ctrl+K)..."
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
                                 className="w-full pl-8 pr-3 py-1.5 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D]"
@@ -323,12 +408,15 @@ export default function DisbursementsIndex({
                                     {filteredADecaisser.length === 0 ? (
                                         <tr>
                                             <td colSpan={6} className="py-12 text-center text-gray-400 italic">
-                                                Aucune réquisition en attente de décaissement pour cette caisse ({selectedCaisse?.name}).
+                                                {search
+                                                    ? `Aucun résultat pour « ${search} ».`
+                                                    : `Aucune réquisition en attente de décaissement pour cette caisse (${selectedCaisse?.name}).`}
                                             </td>
                                         </tr>
                                     ) : (
                                         filteredADecaisser.map((req) => {
                                             const isManqueFonds = soldeDisponible < req.montantTotal;
+                                            const manque = req.montantTotal - soldeDisponible;
                                             return (
                                                 <tr key={req.id} className="hover:bg-[#F9F9FF] transition">
                                                     <td className="py-3.5 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
@@ -341,8 +429,15 @@ export default function DisbursementsIndex({
                                                     <td className="py-3.5 px-4 whitespace-nowrap font-bold text-gray-800">
                                                         {req.initiateurNom}
                                                     </td>
-                                                    <td className="py-3.5 px-4 text-right font-mono font-bold whitespace-nowrap text-sm text-[#0B192C]">
-                                                        {money(req.montantTotal, req.devise)}
+                                                    <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                                                        <p className="font-mono font-bold text-sm text-[#0B192C]">
+                                                            {money(req.montantTotal, req.devise)}
+                                                        </p>
+                                                        {isManqueFonds && (
+                                                            <p className="text-[10px] text-red-600 font-bold mt-0.5">
+                                                                Manque {money(manque, req.devise)}
+                                                            </p>
+                                                        )}
                                                     </td>
                                                     <td className="py-3.5 px-4 text-center whitespace-nowrap">
                                                         {req.is_urgent ? (
@@ -354,18 +449,26 @@ export default function DisbursementsIndex({
                                                         )}
                                                     </td>
                                                     <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleOpenDisburse(req)}
-                                                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded font-bold text-xs shadow-sm transition active:scale-[0.98] ${
-                                                                isManqueFonds
-                                                                    ? 'bg-amber-600 hover:bg-amber-700 text-white'
-                                                                    : 'bg-[#10B981] hover:bg-[#059669] text-white'
-                                                            }`}
-                                                        >
-                                                            <ArrowUpRight className="w-3.5 h-3.5" />
-                                                            <span>{isManqueFonds ? 'Bloqué (Fonds insuffisants)' : 'Décaisser & Émettre BSC'}</span>
-                                                        </button>
+                                                        {isManqueFonds ? (
+                                                            <button
+                                                                type="button"
+                                                                disabled
+                                                                title={`Solde insuffisant : il manque ${money(manque, req.devise)}. Approvisionnez la caisse via un BEC.`}
+                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded font-bold text-xs bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed"
+                                                            >
+                                                                <Lock className="w-3.5 h-3.5" />
+                                                                <span>Fonds insuffisants</span>
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleOpenDisburse(req)}
+                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded font-bold text-xs shadow-sm transition active:scale-[0.98] bg-[#10B981] hover:bg-[#059669] text-white"
+                                                            >
+                                                                <ArrowUpRight className="w-3.5 h-3.5" />
+                                                                <span>Décaisser & Émettre BSC</span>
+                                                            </button>
+                                                        )}
                                                     </td>
                                                 </tr>
                                             );
@@ -390,14 +493,16 @@ export default function DisbursementsIndex({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
-                                    {recentDisbursements.length === 0 ? (
+                                    {filteredBSC.length === 0 ? (
                                         <tr>
                                             <td colSpan={6} className="py-12 text-center text-gray-400 italic">
-                                                Aucun Bon de Sortie Caisse émis récemment.
+                                                {search
+                                                    ? `Aucun résultat pour « ${search} ».`
+                                                    : 'Aucun Bon de Sortie Caisse émis récemment.'}
                                             </td>
                                         </tr>
                                     ) : (
-                                        recentDisbursements.map((bsc) => (
+                                        filteredBSC.map((bsc) => (
                                             <tr key={bsc.id} className="hover:bg-[#F9F9FF] transition">
                                                 <td className="py-3.5 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
                                                     {bsc.numero_piece}
@@ -436,8 +541,11 @@ export default function DisbursementsIndex({
 
             {/* MODALE : Décaissement */}
             {disburseReq && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
-                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-lg w-full p-6 space-y-4 animate-slide-down">
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in"
+                    onClick={(e) => e.target === e.currentTarget && handleCloseDisburse()}
+                >
+                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-lg w-full p-6 space-y-4 animate-slide-down max-h-[92vh] overflow-y-auto">
                         <header className="flex items-start justify-between border-b pb-3">
                             <div>
                                 <h3 className="text-sm font-bold text-[#0B192C] uppercase tracking-wide">
@@ -449,8 +557,9 @@ export default function DisbursementsIndex({
                             </div>
                             <button
                                 type="button"
-                                onClick={() => setDisburseReq(null)}
-                                className="text-gray-400 hover:text-gray-600 text-lg font-bold"
+                                onClick={handleCloseDisburse}
+                                aria-label="Fermer"
+                                className="text-gray-400 hover:text-gray-600 font-bold"
                             >
                                 <X className="w-5 h-5" />
                             </button>
@@ -494,6 +603,20 @@ export default function DisbursementsIndex({
                             </div>
                         )}
 
+                        {confirmStep && (
+                            <div className="p-3 bg-amber-50 border-2 border-amber-400 rounded text-amber-950 text-xs space-y-1">
+                                <div className="flex items-center gap-1.5 font-bold">
+                                    <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0" />
+                                    <span>Confirmation finale requise</span>
+                                </div>
+                                <p className="leading-snug text-[11px]">
+                                    Vous allez débiter <strong>{money(disburseReq.montantTotal, disburseReq.devise)}</strong> de la caisse.
+                                    Cette opération est <strong>irréversible</strong> et générera automatiquement un BSC.
+                                    Cliquez à nouveau sur le bouton rouge pour confirmer.
+                                </p>
+                            </div>
+                        )}
+
                         <form onSubmit={handleSubmitDisburse} className="space-y-3.5 text-xs">
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
@@ -501,7 +624,7 @@ export default function DisbursementsIndex({
                                     <select
                                         value={modePaiement}
                                         onChange={(e) => setModePaiement(e.target.value)}
-                                        disabled={isFondsInsuffisants}
+                                        disabled={isFondsInsuffisants || confirmStep}
                                         className="w-full border border-[#B2BED6] rounded p-2 text-xs font-bold text-[#0B192C] bg-white focus:outline-none focus:border-[#04326D] disabled:bg-gray-100"
                                     >
                                         <option value="Espèces">Espèces (Cash)</option>
@@ -519,7 +642,7 @@ export default function DisbursementsIndex({
                                         placeholder="ex: CHQ-002158"
                                         value={refPaiement}
                                         onChange={(e) => setRefPaiement(e.target.value)}
-                                        disabled={isFondsInsuffisants}
+                                        disabled={isFondsInsuffisants || confirmStep}
                                         className="w-full border border-[#B2BED6] rounded p-2 text-xs font-mono focus:outline-none focus:border-[#04326D] disabled:bg-gray-100"
                                     />
                                 </div>
@@ -531,9 +654,21 @@ export default function DisbursementsIndex({
                                     type="text"
                                     value={montantLettres}
                                     onChange={(e) => setMontantLettres(e.target.value)}
-                                    disabled={isFondsInsuffisants}
+                                    disabled={isFondsInsuffisants || confirmStep}
                                     className="w-full border border-[#B2BED6] rounded p-2 text-xs font-semibold focus:outline-none focus:border-[#04326D] disabled:bg-gray-100"
                                     required
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block font-bold text-gray-700 mb-1">Note / Observation (optionnelle)</label>
+                                <input
+                                    type="text"
+                                    value={note}
+                                    onChange={(e) => setNote(e.target.value)}
+                                    disabled={isFondsInsuffisants || confirmStep}
+                                    placeholder="Précision pour la traçabilité..."
+                                    className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D] disabled:bg-gray-100"
                                 />
                             </div>
 
@@ -553,7 +688,7 @@ export default function DisbursementsIndex({
                                         className="w-full pl-8 pr-3 py-2 border border-amber-300 bg-white rounded text-xs font-mono tracking-widest text-[#0B192C] focus:outline-none focus:ring-1 focus:ring-amber-500 disabled:bg-gray-100"
                                         autoFocus
                                         required
-                                        disabled={isFondsInsuffisants}
+                                        disabled={isFondsInsuffisants || confirmStep}
                                     />
                                 </div>
                             </div>
@@ -561,7 +696,7 @@ export default function DisbursementsIndex({
                             <div className="flex justify-end gap-2 pt-2 border-t">
                                 <button
                                     type="button"
-                                    onClick={() => setDisburseReq(null)}
+                                    onClick={handleCloseDisburse}
                                     className="px-3.5 py-1.5 border border-[#B2BED6] rounded text-xs font-semibold text-gray-600 hover:bg-gray-50"
                                 >
                                     Fermer
@@ -569,9 +704,19 @@ export default function DisbursementsIndex({
                                 <button
                                     type="submit"
                                     disabled={submitting || isFondsInsuffisants}
-                                    className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] disabled:opacity-40 disabled:cursor-not-allowed text-white rounded text-xs font-bold shadow transition"
+                                    className={`px-4 py-1.5 text-white rounded text-xs font-bold shadow transition disabled:opacity-40 disabled:cursor-not-allowed ${
+                                        confirmStep
+                                            ? 'bg-red-600 hover:bg-red-700'
+                                            : 'bg-[#10B981] hover:bg-[#059669]'
+                                    }`}
                                 >
-                                    {submitting ? 'Validation...' : isFondsInsuffisants ? 'Fonds Insuffisants (Rejet)' : 'Valider & Décaisser'}
+                                    {submitting
+                                        ? 'Validation...'
+                                        : isFondsInsuffisants
+                                        ? 'Fonds Insuffisants (Rejet)'
+                                        : confirmStep
+                                        ? `Confirmer ${money(disburseReq.montantTotal, disburseReq.devise)}`
+                                        : 'Valider & Décaisser'}
                                 </button>
                             </div>
                         </form>

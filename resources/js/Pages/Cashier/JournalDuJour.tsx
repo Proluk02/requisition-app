@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Head, router, Link } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
@@ -13,6 +13,9 @@ import {
     RotateCcw,
     History,
     CheckCircle2,
+    User,
+    ArrowRight,
+    Info,
 } from 'lucide-react';
 
 interface CaisseOption {
@@ -93,6 +96,16 @@ export default function JournalDuJour({
 }: Props) {
     const [caisseId, setCaisseId] = useState(selectedCaisse?.id ?? '');
     const [date, setDate] = useState(selectedDate);
+    const [isLoading, setIsLoading] = useState(false);
+
+    useEffect(() => {
+        const offStart = router.on('start', () => setIsLoading(true));
+        const offFinish = router.on('finish', () => setIsLoading(false));
+        return () => {
+            offStart();
+            offFinish();
+        };
+    }, []);
 
     const handleFilterChange = (cId = caisseId, d = date) => {
         router.get(
@@ -111,6 +124,15 @@ export default function JournalDuJour({
     const totalEntrees = session ? session.total_entrees : totalEntreesJour;
     const totalSorties = session ? session.total_sorties : totalSortiesJour;
     const soldeTheorique = session ? session.solde_theorique : soldeTheoriqueJour;
+
+    // Détail par mode de paiement
+    const detailParMode = mouvements.reduce((acc, m) => {
+        const key = m.mode_paiement || 'Non spécifié';
+        if (!acc[key]) acc[key] = { entrees: 0, sorties: 0 };
+        if (m.type === 'entree') acc[key].entrees += m.montant;
+        else acc[key].sorties += m.montant;
+        return acc;
+    }, {} as Record<string, { entrees: number; sorties: number }>);
 
     return (
         <AppLayout>
@@ -133,6 +155,10 @@ export default function JournalDuJour({
                     }
                 }
             `}</style>
+
+            {isLoading && (
+                <div className="fixed top-0 left-0 right-0 h-0.5 bg-[#04326D] z-[100] animate-pulse" />
+            )}
 
             <div className="space-y-6">
                 <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0] no-print-area">
@@ -208,12 +234,11 @@ export default function JournalDuJour({
                             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow-sm transition"
                         >
                             <Printer className="w-3.5 h-3.5" />
-                            <span>Imprimer Journal (A4)</span>
+                            <span>Imprimer ce journal</span>
                         </button>
                     </div>
                 </header>
 
-                {/* BANDEAU UX : Date passée sans aucune session ouverte */}
                 {isPastDateWithoutSession && (
                     <div className="p-4 rounded-lg bg-amber-50/80 border border-amber-200 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print-area shadow-sm">
                         <div className="flex items-start gap-3">
@@ -257,7 +282,6 @@ export default function JournalDuJour({
                     </div>
                 )}
 
-                {/* BANDEAU UX : Aujourd'hui mais pas encore ouvert */}
                 {isToday && !session && (
                     <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 text-blue-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print-area shadow-sm">
                         <div className="flex items-center gap-3">
@@ -273,17 +297,57 @@ export default function JournalDuJour({
                         </div>
                         <Link
                             href={route('cashier.dashboard', { caisse_id: caisseId })}
-                            className="px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold transition self-end sm:self-center shadow-sm"
+                            className="px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold transition self-end sm:self-center shadow-sm inline-flex items-center gap-1.5"
                         >
-                            Ouvrir la session caisse
+                            <span>Ouvrir la session caisse</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
                         </Link>
                     </div>
                 )}
 
-                {/* Document imprimable */}
+                {/* Bandeau caissier */}
+                {session && (
+                    <div className="no-print-area flex flex-wrap items-center gap-3 text-xs text-gray-700 bg-white border border-[#B2BED6] rounded p-3">
+                        <div className="flex items-center gap-1.5">
+                            <User className="w-3.5 h-3.5 text-[#04326D]" />
+                            <span className="font-semibold">Caissier :</span>
+                            <strong className="text-[#0B192C]">{session.cashier_nom ?? '—'}</strong>
+                        </div>
+                        <span className="text-gray-300">•</span>
+                        <div>
+                            <span className="font-semibold">Statut :</span>{' '}
+                            <strong
+                                className={
+                                    session.status === 'fermee' ? 'text-gray-700' : 'text-emerald-700'
+                                }
+                            >
+                                {session.status === 'fermee' ? 'Clôturée' : 'Ouverte'}
+                            </strong>
+                        </div>
+                        {session.opened_at && (
+                            <>
+                                <span className="text-gray-300">•</span>
+                                <span>
+                                    Ouverture à <strong>{session.opened_at}</strong>
+                                </span>
+                            </>
+                        )}
+                        {session.closed_at && (
+                            <>
+                                <span className="text-gray-300">•</span>
+                                <span>
+                                    Clôture à <strong>{session.closed_at}</strong>
+                                </span>
+                            </>
+                        )}
+                    </div>
+                )}
+
                 <div
                     id="journal-print-document"
-                    className="bg-white border border-[#B2BED6] rounded shadow-sm p-8 space-y-6 max-w-4xl mx-auto text-black"
+                    className={`bg-white border border-[#B2BED6] rounded shadow-sm p-8 space-y-6 max-w-4xl mx-auto text-black transition-opacity ${
+                        isLoading ? 'opacity-50 pointer-events-none' : ''
+                    }`}
                 >
                     <div className="flex justify-between items-start border-b-2 border-black pb-4">
                         <div>
@@ -301,13 +365,15 @@ export default function JournalDuJour({
                             <span className="text-xs font-mono font-bold block">
                                 Date : {session?.date_session ?? new Date(selectedDate).toLocaleDateString('fr-FR')}
                             </span>
-                            <span className={`text-[11px] font-bold uppercase block mt-0.5 ${
-                                session
-                                    ? session.status === 'fermee'
-                                        ? 'text-gray-700'
-                                        : 'text-emerald-700'
-                                    : 'text-amber-800'
-                            }`}>
+                            <span
+                                className={`text-[11px] font-bold uppercase block mt-0.5 ${
+                                    session
+                                        ? session.status === 'fermee'
+                                            ? 'text-gray-700'
+                                            : 'text-emerald-700'
+                                        : 'text-amber-800'
+                                }`}
+                            >
                                 {session
                                     ? session.status === 'fermee'
                                         ? 'Session Clôturée'
@@ -318,7 +384,6 @@ export default function JournalDuJour({
                     </div>
 
                     <div className="space-y-6 text-xs text-black">
-                        {/* 1. Ouverture du Guichet */}
                         <div className="border border-black p-3 space-y-1.5 bg-gray-50/30">
                             <span className="font-bold uppercase tracking-wider block text-[11px] underline">
                                 1. Ouverture du Guichet
@@ -355,7 +420,6 @@ export default function JournalDuJour({
                             </div>
                         </div>
 
-                        {/* 2. Mouvements de la Journée */}
                         <div className="space-y-2">
                             <span className="font-bold uppercase tracking-wider block text-[11px] underline">
                                 2. Mouvements de la Journée ({mouvements.length})
@@ -372,7 +436,6 @@ export default function JournalDuJour({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-300">
-                                    {/* Ligne 0 : Solde d'ouverture historique exact */}
                                     <tr className="bg-amber-50/40 font-bold">
                                         <td className="p-2 border-r border-black font-mono text-center text-[10px]">
                                             REPORT
@@ -382,10 +445,10 @@ export default function JournalDuJour({
                                         </td>
                                         <td className="p-2 border-r border-black italic text-gray-700">
                                             {session
-                                                ? "Report de la session précédente"
+                                                ? 'Report de la session précédente'
                                                 : soldeOuverture === 0
-                                                ? "Caisse sans antécédent (0,00)"
-                                                : "Solde historique reporté"}
+                                                ? 'Caisse sans antécédent (0,00)'
+                                                : 'Solde historique reporté'}
                                         </td>
                                         <td className="p-2 text-right border-r border-black font-mono">—</td>
                                         <td className="p-2 text-right border-r border-black font-mono">—</td>
@@ -394,13 +457,12 @@ export default function JournalDuJour({
                                         </td>
                                     </tr>
 
-                                    {/* Mouvements chronologiques */}
                                     {mouvements.length === 0 ? (
                                         <tr>
                                             <td colSpan={6} className="p-3 text-center text-gray-500 italic">
                                                 {session
-                                                    ? "Aucun mouvement de caisse enregistré pendant cette session."
-                                                    : "Aucune session ouverte ni opération effectuée pour cette journée."}
+                                                    ? 'Aucun mouvement de caisse enregistré pendant cette session.'
+                                                    : 'Aucune session ouverte ni opération effectuée pour cette journée.'}
                                             </td>
                                         </tr>
                                     ) : (
@@ -448,9 +510,35 @@ export default function JournalDuJour({
                                     </tr>
                                 </tfoot>
                             </table>
+
+                            {mouvements.length === 0 && session && (
+                                <div className="text-center text-[11px] text-gray-500 italic flex items-center justify-center gap-1.5">
+                                    <Info className="w-3.5 h-3.5" />
+                                    <span>Aucun mouvement pour cette session.</span>
+                                    <Link
+                                        href={route('cashier.receipts.index', { caisse_id: caisseId })}
+                                        className="text-[#04326D] underline font-bold no-print-area"
+                                    >
+                                        Enregistrer un BEC →
+                                    </Link>
+                                </div>
+                            )}
+
+                            {Object.keys(detailParMode).length > 0 && (
+                                <div className="text-[10px] text-gray-600 border-t border-dashed pt-2 mt-2">
+                                    <strong>Détail par mode de paiement :</strong>{' '}
+                                    {Object.entries(detailParMode).map(([mode, vals], idx) => (
+                                        <span key={mode}>
+                                            {idx > 0 && ' • '}
+                                            <strong>{mode}</strong>
+                                            {vals.entrees > 0 && ` (+${money(vals.entrees, devise)})`}
+                                            {vals.sorties > 0 && ` (−${money(vals.sorties, devise)})`}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
-                        {/* 3. Synthèse de Clôture & Rapprochement */}
                         <div className="border border-black p-4 space-y-3 bg-gray-50/50">
                             <span className="font-bold uppercase tracking-wider block text-[11px] underline">
                                 3. Arrêté de Caisse & Rapprochement
@@ -477,8 +565,16 @@ export default function JournalDuJour({
                                     </p>
                                     <p className="border-t pt-1 font-bold">
                                         Écart constaté :{' '}
-                                        <strong className={`font-mono text-sm ${session?.ecart === 0 || !session?.ecart ? 'text-emerald-800' : 'text-red-700'}`}>
-                                            {session?.ecart !== null && session?.ecart !== undefined ? money(session.ecart, devise) : '0,00 ' + devise}
+                                        <strong
+                                            className={`font-mono text-sm ${
+                                                session?.ecart === 0 || !session?.ecart
+                                                    ? 'text-emerald-800'
+                                                    : 'text-red-700'
+                                            }`}
+                                        >
+                                            {session?.ecart !== null && session?.ecart !== undefined
+                                                ? money(session.ecart, devise)
+                                                : '0,00 ' + devise}
                                         </strong>
                                     </p>
                                 </div>
@@ -491,7 +587,6 @@ export default function JournalDuJour({
                             )}
                         </div>
 
-                        {/* Signatures */}
                         <div className="grid grid-cols-2 gap-8 pt-8 text-center text-xs">
                             <div className="space-y-16 border-t border-black pt-2">
                                 <p className="font-bold uppercase tracking-wider">Le Caissier Titulaire</p>

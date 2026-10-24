@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Head, router } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
@@ -11,6 +11,8 @@ import {
     Download,
     RotateCcw,
     Info,
+    FileSpreadsheet,
+    Search,
 } from 'lucide-react';
 
 interface CaisseOption {
@@ -68,11 +70,35 @@ export default function LedgerIndex({
     mouvements = [],
 }: Props) {
     const [period, setPeriod] = useState(selectedPeriod);
+    const [searchProjet, setSearchProjet] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
     const devise = selectedCaisse?.devise ?? '';
+
+    useEffect(() => {
+        const offStart = router.on('start', () => setIsLoading(true));
+        const offFinish = router.on('finish', () => setIsLoading(false));
+        return () => {
+            offStart();
+            offFinish();
+        };
+    }, []);
 
     const currentMonthPeriod = new Date().toISOString().slice(0, 7);
     const isCurrentMonth = period === currentMonthPeriod;
+    const isFutureMonth = period > currentMonthPeriod;
     const hasZeroActivity = soldeInitialMois === 0 && mouvements.length === 0;
+
+    const filteredMouvements = useMemo(() => {
+        if (!searchProjet.trim()) return mouvements;
+        const q = searchProjet.toLowerCase();
+        return mouvements.filter(
+            (m) =>
+                m.projet.toLowerCase().includes(q) ||
+                m.imputation.toLowerCase().includes(q) ||
+                m.designation.toLowerCase().includes(q) ||
+                m.numero_piece.toLowerCase().includes(q)
+        );
+    }, [mouvements, searchProjet]);
 
     const handleFilterChange = (caisseId: string, newPeriod: string) => {
         router.get(
@@ -103,6 +129,10 @@ export default function LedgerIndex({
                     }
                 }
             `}</style>
+
+            {isLoading && (
+                <div className="fixed top-0 left-0 right-0 h-0.5 bg-[#04326D] z-[100] animate-pulse" />
+            )}
 
             <div className="space-y-6">
                 <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0] no-print-area">
@@ -171,9 +201,10 @@ export default function LedgerIndex({
                             <a
                                 href={route('cashier.ledger.export', { caisse_id: selectedCaisse.id, period })}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow-sm transition"
+                                title="Télécharger au format CSV compatible Excel"
                             >
-                                <Download className="w-3.5 h-3.5" />
-                                <span>Exporter Excel (.csv)</span>
+                                <FileSpreadsheet className="w-3.5 h-3.5" />
+                                <span>Exporter CSV</span>
                             </a>
                         )}
 
@@ -188,8 +219,16 @@ export default function LedgerIndex({
                     </div>
                 </header>
 
-                {/* BANDEAU UX : Mois sans activité */}
-                {hasZeroActivity && (
+                {isFutureMonth && (
+                    <div className="p-3.5 rounded bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center gap-2 no-print-area">
+                        <Info className="w-4 h-4 text-amber-700 shrink-0" />
+                        <span>
+                            Vous consultez une période <strong>future</strong> ({period}). Aucun mouvement ne peut y être enregistré.
+                        </span>
+                    </div>
+                )}
+
+                {hasZeroActivity && !isFutureMonth && (
                     <div className="p-3.5 rounded bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-center justify-between no-print-area">
                         <div className="flex items-center gap-2">
                             <Info className="w-4 h-4 text-blue-700 shrink-0" />
@@ -204,7 +243,7 @@ export default function LedgerIndex({
                                     setPeriod(currentMonthPeriod);
                                     handleFilterChange(selectedCaisse?.id ?? '', currentMonthPeriod);
                                 }}
-                                className="font-bold underline text-blue-800 hover:text-blue-950"
+                                className="font-bold underline text-blue-800 hover:text-blue-950 whitespace-nowrap ml-3"
                             >
                                 Revenir au mois en cours
                             </button>
@@ -212,7 +251,6 @@ export default function LedgerIndex({
                     </div>
                 )}
 
-                {/* Synthèse du mois */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 no-print-area">
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
@@ -248,10 +286,27 @@ export default function LedgerIndex({
                     </div>
                 </div>
 
-                {/* Tableau officiel du Grand Livre */}
+                <div className="relative no-print-area">
+                    <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                        type="text"
+                        placeholder="Filtrer les écritures (projet, imputation, désignation, N° pièce)..."
+                        value={searchProjet}
+                        onChange={(e) => setSearchProjet(e.target.value)}
+                        className="w-full sm:w-96 pl-8 pr-3 py-1.5 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D]"
+                    />
+                    {searchProjet && (
+                        <span className="ml-2 text-[11px] text-gray-500">
+                            {filteredMouvements.length} résultat(s) sur {mouvements.length}
+                        </span>
+                    )}
+                </div>
+
                 <div
                     id="grand-livre-print-document"
-                    className="bg-white border border-gray-400 p-6 space-y-4 max-w-full overflow-x-auto text-black"
+                    className={`bg-white border border-gray-400 p-6 space-y-4 max-w-full overflow-x-auto text-black transition-opacity ${
+                        isLoading ? 'opacity-50 pointer-events-none' : ''
+                    }`}
                 >
                     <div className="flex items-start justify-between border-b pb-3">
                         <div className="text-[11px] leading-tight space-y-0.5">
@@ -287,7 +342,6 @@ export default function LedgerIndex({
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-300">
-                            {/* Ligne 1 : Solde d'ouverture historique */}
                             <tr className="font-bold bg-amber-50/30">
                                 <td className="p-1.5 border border-black text-center font-mono">01/{period.split('-')[1]}/{period.split('-')[0]}</td>
                                 <td className="p-1.5 border border-black text-center">1</td>
@@ -305,16 +359,22 @@ export default function LedgerIndex({
                                 </td>
                             </tr>
 
-                            {/* Écritures du mois ou ligne vide explicite */}
-                            {mouvements.length === 0 ? (
+                            {filteredMouvements.length === 0 ? (
                                 <tr>
                                     <td colSpan={10} className="p-4 text-center text-gray-500 italic bg-gray-50/40">
-                                        Aucune écriture comptable enregistrée au cours de cette période.
+                                        {searchProjet
+                                            ? `Aucune écriture ne correspond à « ${searchProjet} ».`
+                                            : 'Aucune écriture comptable enregistrée au cours de cette période.'}
                                     </td>
                                 </tr>
                             ) : (
-                                mouvements.map((m, idx) => (
-                                    <tr key={m.id} className="hover:bg-gray-50">
+                                filteredMouvements.map((m, idx) => (
+                                    <tr
+                                        key={m.id}
+                                        className={`hover:bg-gray-50 ${
+                                            m.entree > 0 ? 'border-l-2 border-l-emerald-500' : 'border-l-2 border-l-red-500'
+                                        }`}
+                                    >
                                         <td className="p-1.5 border border-black text-center whitespace-nowrap">{m.date_mouvement}</td>
                                         <td className="p-1.5 border border-black text-center">{idx + 2}</td>
                                         <td className="p-1.5 border border-black">{m.projet}</td>
@@ -329,7 +389,6 @@ export default function LedgerIndex({
                                 ))
                             )}
 
-                            {/* Ligne de clôture */}
                             <tr className="font-bold bg-gray-100">
                                 <td className="p-1.5 border border-black text-center font-mono">Fin/{period.split('-')[1]}</td>
                                 <td className="p-1.5 border border-black" colSpan={5}></td>
@@ -342,7 +401,6 @@ export default function LedgerIndex({
                                 </td>
                             </tr>
 
-                            {/* Ligne Totaux */}
                             <tr className="font-black bg-gray-200 uppercase">
                                 <td className="p-1.5 border border-black text-right" colSpan={7}>
                                     TOTAL

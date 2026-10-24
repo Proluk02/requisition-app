@@ -18,6 +18,8 @@ import {
     FileSpreadsheet,
     Upload,
     Coins,
+    Info,
+    FileCheck2,
 } from 'lucide-react';
 
 interface CaisseOption {
@@ -69,11 +71,45 @@ export default function ReceiptsIndex({
     const [modalOpen, setModalOpen] = useState(false);
     const [search, setSearch] = useState('');
     const [printBEC, setPrintBEC] = useState<MovementBEC | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+
+    useEffect(() => {
+        const offStart = router.on('start', () => setIsLoading(true));
+        const offFinish = router.on('finish', () => setIsLoading(false));
+        return () => {
+            offStart();
+            offFinish();
+        };
+    }, []);
 
     useEffect(() => {
         if (!printBEC) return;
         void openPrintPreview('bon-entree-caisse-print').then(() => setPrintBEC(null));
     }, [printBEC]);
+
+    // ESC sur la modale + scroll lock
+    useEffect(() => {
+        if (!modalOpen) return;
+        const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setModalOpen(false);
+        window.addEventListener('keydown', onKey);
+        document.body.style.overflow = 'hidden';
+        return () => {
+            window.removeEventListener('keydown', onKey);
+            document.body.style.overflow = '';
+        };
+    }, [modalOpen]);
+
+    // Ctrl/Cmd + K focus recherche
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                document.querySelector<HTMLInputElement>('input[data-search-input]')?.focus();
+            }
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, []);
 
     const form = useForm<{
         tiers_nom: string;
@@ -147,6 +183,8 @@ export default function ReceiptsIndex({
         (r.bordereau_banque_ref && r.bordereau_banque_ref.toLowerCase().includes(search.toLowerCase()))
     );
 
+    const canCreateBEC = selectedCaisse?.is_ouverte ?? false;
+
     return (
         <AppLayout>
             <Head title="Bons d'Entrée Caisse — Approvisionnements" />
@@ -171,6 +209,10 @@ export default function ReceiptsIndex({
                     #bon-entree-caisse-print { display: none; }
                 }
             `}</style>
+
+            {isLoading && (
+                <div className="fixed top-0 left-0 right-0 h-0.5 bg-[#04326D] z-[100] animate-pulse" />
+            )}
 
             <div className="space-y-6 no-print-area">
                 <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
@@ -210,18 +252,38 @@ export default function ReceiptsIndex({
                         <button
                             type="button"
                             onClick={() => {
+                                if (!canCreateBEC) return;
                                 form.reset();
                                 form.setData('is_approvisionnement_initial', !selectedCaisse?.is_approvisionnee);
                                 form.setData('is_approvisionnement', !selectedCaisse?.is_approvisionnee);
                                 setModalOpen(true);
                             }}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow-sm transition"
+                            disabled={!canCreateBEC}
+                            title={!canCreateBEC ? "Ouvrez d'abord la session de caisse pour enregistrer un BEC." : undefined}
+                            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded font-bold text-xs shadow-sm transition ${
+                                canCreateBEC
+                                    ? 'bg-[#04326D] hover:bg-[#06428f] text-white'
+                                    : 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                            }`}
                         >
-                            <Plus className="w-4 h-4 text-emerald-400" />
+                            {canCreateBEC ? (
+                                <Plus className="w-4 h-4 text-emerald-400" />
+                            ) : (
+                                <Lock className="w-4 h-4" />
+                            )}
                             <span>Nouveau Bon d'Entrée (BEC)</span>
                         </button>
                     </div>
                 </header>
+
+                {!canCreateBEC && selectedCaisse && (
+                    <div className="p-3.5 rounded bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center gap-2">
+                        <Info className="w-4 h-4 text-amber-700 shrink-0" />
+                        <span>
+                            La session de caisse n'est pas ouverte. Vous devez d'abord ouvrir le guichet depuis le tableau de bord pour enregistrer un BEC.
+                        </span>
+                    </div>
+                )}
 
                 {flash?.success && (
                     <div className="p-3.5 rounded bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold flex items-center gap-2">
@@ -236,6 +298,16 @@ export default function ReceiptsIndex({
                     </div>
                 )}
 
+                <details className="bg-blue-50/60 border border-blue-200 rounded text-xs text-blue-900">
+                    <summary className="cursor-pointer font-bold px-3.5 py-2 flex items-center gap-1.5 select-none">
+                        <Info className="w-3.5 h-3.5" />
+                        <span>Qu'est-ce qu'un Bon d'Entrée Caisse (BEC) ?</span>
+                    </summary>
+                    <div className="px-3.5 pb-3 leading-relaxed text-[11.5px]">
+                        Le <strong>BEC</strong> enregistre toute entrée d'argent en caisse : approvisionnement depuis la banque, dotation initiale, ou recettes. Un approvisionnement exige un <strong>bordereau bancaire</strong> justificatif. Le PIN caissier est requis pour valider l'écriture.
+                    </div>
+                </details>
+
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="p-4 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <span className="text-xs font-bold uppercase tracking-wider text-[#0B192C]">
@@ -244,8 +316,9 @@ export default function ReceiptsIndex({
                         <div className="relative w-full sm:w-72">
                             <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                             <input
+                                data-search-input
                                 type="text"
-                                placeholder="Rechercher pièce, bordereau, déposant..."
+                                placeholder="Rechercher (Ctrl+K)..."
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
                                 className="w-full pl-8 pr-3 py-1.5 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D]"
@@ -271,7 +344,9 @@ export default function ReceiptsIndex({
                                 {filteredReceipts.length === 0 ? (
                                     <tr>
                                         <td colSpan={8} className="py-12 text-center text-gray-400 italic">
-                                            Aucun Bon d'Entrée Caisse enregistré pour ce guichet.
+                                            {search
+                                                ? `Aucun résultat pour « ${search} ».`
+                                                : "Aucun Bon d'Entrée Caisse enregistré pour ce guichet."}
                                         </td>
                                     </tr>
                                 ) : (
@@ -335,9 +410,12 @@ export default function ReceiptsIndex({
                 </div>
             </div>
 
-            {/* MODALE : Enregistrement Bon d'Entrée Caisse avec Bordereau Bancaire */}
+            {/* MODALE : Enregistrement Bon d'Entrée Caisse */}
             {modalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in"
+                    onClick={(e) => e.target === e.currentTarget && setModalOpen(false)}
+                >
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-lg w-full p-6 space-y-4 max-h-[92vh] overflow-y-auto animate-slide-down">
                         <header className="flex items-start justify-between border-b pb-3">
                             <div>
@@ -351,24 +429,25 @@ export default function ReceiptsIndex({
                             <button
                                 type="button"
                                 onClick={() => setModalOpen(false)}
-                                className="text-gray-400 hover:text-gray-600 text-lg font-bold"
+                                aria-label="Fermer"
+                                className="text-gray-400 hover:text-gray-600 font-bold"
                             >
                                 <X className="w-5 h-5" />
                             </button>
                         </header>
 
                         <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
-                            {/* Type d'approvisionnement */}
                             <div className="p-3 bg-blue-50/60 border border-blue-200 rounded space-y-2">
                                 <label className="flex items-center gap-2 cursor-pointer font-bold text-[#04326D]">
                                     <input
                                         type="checkbox"
                                         checked={form.data.is_approvisionnement}
                                         onChange={(e) => {
+                                            const checked = e.target.checked;
                                             form.setData({
                                                 ...form.data,
-                                                is_approvisionnement: e.target.checked,
-                                                motif: e.target.checked
+                                                is_approvisionnement: checked,
+                                                motif: checked
                                                     ? 'Approvisionnement fond de caisse via retrait banque'
                                                     : '',
                                             });
@@ -424,7 +503,6 @@ export default function ReceiptsIndex({
                                 />
                             </div>
 
-                            {/* Section bordereau bancaire si approvisionnement */}
                             {form.data.is_approvisionnement && (
                                 <div className="p-3 bg-amber-50/50 border border-amber-300 rounded space-y-2.5">
                                     <div className="grid grid-cols-2 gap-3">
@@ -454,6 +532,22 @@ export default function ReceiptsIndex({
                                             />
                                         </div>
                                     </div>
+                                    {form.data.bordereau_file && (
+                                        <div className="flex items-center gap-1.5 text-[10.5px] text-emerald-800 font-bold">
+                                            <FileCheck2 className="w-3.5 h-3.5" />
+                                            <span>
+                                                {form.data.bordereau_file.name} — {(form.data.bordereau_file.size / 1024).toFixed(0)} Ko
+                                            </span>
+                                        </div>
+                                    )}
+                                    {form.progress && (
+                                        <div className="w-full bg-gray-200 rounded h-1.5 overflow-hidden">
+                                            <div
+                                                className="bg-[#04326D] h-full transition-all"
+                                                style={{ width: `${form.progress.percentage}%` }}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
@@ -482,7 +576,6 @@ export default function ReceiptsIndex({
                                 </div>
                             </div>
 
-                            {/* PIN de confirmation */}
                             <div className="p-3 bg-amber-50 border border-amber-300 rounded space-y-1.5">
                                 <label className="block text-[11px] font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
                                     <KeyRound className="w-3.5 h-3.5 text-amber-800" />
@@ -511,9 +604,9 @@ export default function ReceiptsIndex({
                                 <button
                                     type="submit"
                                     disabled={form.processing}
-                                    className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition"
+                                    className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition disabled:opacity-50"
                                 >
-                                    {form.processing ? 'Enregistrement...' : 'Enregistrer le Bon d’Entrée'}
+                                    {form.processing ? 'Enregistrement...' : "Enregistrer le Bon d'Entrée"}
                                 </button>
                             </div>
                         </form>
@@ -521,7 +614,6 @@ export default function ReceiptsIndex({
                 </div>
             )}
 
-            {/* FORMAT D'IMPRESSION DU BON D'ENTREE CAISSE (Photos 1 & 7) */}
             {printBEC && (
                 <div id="bon-entree-caisse-print" className="p-6 border-2 border-black font-serif text-black space-y-4">
                     <div className="flex items-start justify-between border-b-2 border-black pb-2">

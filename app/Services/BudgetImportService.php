@@ -11,6 +11,7 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class BudgetImportService
 {
+
     public function import(UploadedFile $file, string $projectId): array
     {
         $project = Project::find($projectId);
@@ -20,7 +21,6 @@ class BudgetImportService
 
         $extension = strtolower($file->getClientOriginalExtension());
         $path = $file->getRealPath();
-
         $rows = [];
 
         if (in_array($extension, ['xlsx', 'xls'], true)) {
@@ -28,24 +28,13 @@ class BudgetImportService
                 $spreadsheet = IOFactory::load($path);
                 $worksheet = $spreadsheet->getActiveSheet();
                 $rows = $worksheet->toArray(null, true, true, false);
-            } elseif ($extension === 'xlsx') {
-                $rows = $this->parseXlsxNative($path);
-                if (empty($rows)) {
-                    return [
-                        'success' => false,
-                        'message' => 'Impossible de lire le fichier .xlsx. Convertissez le fichier en .csv.',
-                        'imported' => 0,
-                        'updated' => 0,
-                        'errors' => ['Lecture du fichier .xlsx impossible.'],
-                    ];
-                }
             } else {
                 return [
                     'success' => false,
-                    'message' => 'Pour le format ancien .xls, veuillez enregistrer votre fichier au format .xlsx ou .csv avant de l’importer.',
+                    'message' => 'Veuillez enregistrer votre fichier au format .csv avant de l’importer.',
                     'imported' => 0,
                     'updated' => 0,
-                    'errors' => ['Format .xls binaire non pris en charge'],
+                    'errors' => ['Module PhpSpreadsheet absent. Utilisez le format .csv.'],
                 ];
             }
         } elseif ($extension === 'csv' || $extension === 'txt') {
@@ -53,10 +42,10 @@ class BudgetImportService
         } else {
             return [
                 'success' => false,
-                'message' => 'Le format du fichier n’est pas pris en charge.',
+                'message' => 'Format non pris en charge. Formats acceptés : .xlsx, .xls et .csv.',
                 'imported' => 0,
                 'updated' => 0,
-                'errors' => ['Formats acceptés : .xlsx, .xls, .csv et .txt.'],
+                'errors' => ['Format de fichier invalide.'],
             ];
         }
 
@@ -66,40 +55,28 @@ class BudgetImportService
                 'message' => 'Le fichier est vide ou ne contient aucune ligne de données.',
                 'imported' => 0,
                 'updated' => 0,
-                'errors' => ['Format de fichier invalide ou vide.'],
+                'errors' => ['Fichier vide.'],
             ];
         }
 
         $headers = array_map(fn ($h) => strtolower(trim((string) $h)), array_shift($rows));
         $headerMap = $this->mapHeaders($headers);
-        $requiredHeaders = [
-            'category_code',
-            'subcategory_code',
-            'descript_code',
-            'split_code',
-            'code',
-            'libelle',
-            'budget_initial',
-            'donor',
-        ];
+
+        // Seules 3 colonnes sont strictement indispensables : CODE, DESCRIPTION et BALANCE
+        $requiredHeaders = ['code', 'libelle', 'balance'];
         $missingHeaders = array_values(array_diff($requiredHeaders, array_keys($headerMap)));
 
         if ($missingHeaders !== []) {
             $headerNames = [
-                'category_code' => 'CATEGORY',
-                'subcategory_code' => 'SUBCATEGORY',
-                'descript_code' => 'DESCRIPT',
-                'split_code' => 'SPLIT',
                 'code' => 'CODE',
-                'libelle' => 'LIBELLE',
-                'budget_initial' => 'BUDGET_INITIAL',
-                'donor' => 'DONATEUR',
+                'libelle' => 'DESCRIPTION (ou LIBELLE)',
+                'balance' => 'BALANCE (ou BUDGET)',
             ];
             $missingNames = array_map(fn ($header) => $headerNames[$header], $missingHeaders);
 
             return [
                 'success' => false,
-                'message' => 'Les colonnes obligatoires suivantes sont absentes : '.implode(', ', $missingNames).'.',
+                'message' => 'Colonnes obligatoires manquantes dans votre fichier : ' . implode(', ', $missingNames) . '.',
                 'imported' => 0,
                 'updated' => 0,
                 'errors' => $missingNames,
@@ -120,31 +97,25 @@ class BudgetImportService
                     continue;
                 }
 
-                $cat = $this->getValue($row, $headerMap['category_code'] ?? null);
-                $subcat = $this->getValue($row, $headerMap['subcategory_code'] ?? null);
-                $desc = $this->getValue($row, $headerMap['descript_code'] ?? null);
-                $split = $this->getValue($row, $headerMap['split_code'] ?? null);
-                $directCode = $this->getValue($row, $headerMap['code'] ?? null);
-
-                $code = $directCode ?: BudgetLine::buildCode($cat, $subcat, $desc, $split);
-
+                $code = trim((string) $this->getValue($row, $headerMap['code'] ?? null));
                 if (empty($code)) {
-                    $errors[] = "Ligne {$rowNumber} ignorée : impossible de déterminer le code budgétaire.";
-
+                    $errors[] = "Ligne {$rowNumber} ignorée : le code budgétaire est vide.";
                     continue;
                 }
 
                 $libelle = $this->getValue($row, $headerMap['libelle'] ?? null) ?: "Ligne budgétaire {$code}";
 
+                // Devise : EUR par défaut conforme aux exigences SFP
                 $rawDevise = $this->getValue($row, $headerMap['devise'] ?? null);
-                $devise = ! empty($rawDevise) ? strtoupper($rawDevise) : 'EUR';
+                $devise = ! empty($rawDevise) ? strtoupper(trim($rawDevise)) : 'EUR';
                 if (! in_array($devise, ['EUR', 'USD', 'FC', 'CDF'], true)) {
                     $devise = 'EUR';
                 }
 
-                $rawBudget = $this->getValue($row, $headerMap['budget_initial'] ?? null);
+                $rawBudget = $this->getValue($row, $headerMap['balance'] ?? null);
                 $budgetInitial = $this->sanitizeAmount($rawBudget);
 
+                // Donateur optionnel
                 $donorName = $this->getValue($row, $headerMap['donor'] ?? null);
                 $donorId = null;
                 if (! empty($donorName)) {
@@ -160,10 +131,6 @@ class BudgetImportService
                 if ($existingLine) {
                     $existingLine->update([
                         'donor_id' => $donorId ?: $existingLine->donor_id,
-                        'category_code' => $cat ?: $existingLine->category_code,
-                        'subcategory_code' => $subcat ?: $existingLine->subcategory_code,
-                        'descript_code' => $desc ?: $existingLine->descript_code,
-                        'split_code' => $split ?: $existingLine->split_code,
                         'libelle' => $libelle,
                         'devise' => $devise,
                         'budget_initial' => $budgetInitial,
@@ -175,10 +142,6 @@ class BudgetImportService
                         'project_id' => $projectId,
                         'donor_id' => $donorId,
                         'code' => $code,
-                        'category_code' => $cat,
-                        'subcategory_code' => $subcat,
-                        'descript_code' => $desc,
-                        'split_code' => $split,
                         'libelle' => $libelle,
                         'devise' => $devise,
                         'budget_initial' => $budgetInitial,
@@ -194,7 +157,7 @@ class BudgetImportService
 
             return [
                 'success' => true,
-                'message' => "Importation terminée : {$importedCount} ligne(s) créée(s), {$updatedCount} mise(s) à jour.",
+                'message' => "Importation réussie : {$importedCount} ligne(s) créée(s), {$updatedCount} mise(s) à jour.",
                 'imported' => $importedCount,
                 'updated' => $updatedCount,
                 'errors' => $errors,
@@ -204,114 +167,12 @@ class BudgetImportService
 
             return [
                 'success' => false,
-                'message' => "Échec de l'importation : ".$e->getMessage(),
+                'message' => "Erreur lors de l'importation : " . $e->getMessage(),
                 'imported' => 0,
                 'updated' => 0,
                 'errors' => [$e->getMessage()],
             ];
         }
-    }
-
-    protected function parseXlsxNative(string $path): array
-    {
-        if (! class_exists(\ZipArchive::class)) {
-            return [];
-        }
-
-        $zip = new \ZipArchive;
-        if ($zip->open($path) !== true) {
-            return [];
-        }
-
-        $sharedStrings = [];
-        $sharedStringsXml = $zip->getFromName('xl/sharedStrings.xml');
-        if ($sharedStringsXml !== false) {
-            $xml = simplexml_load_string($sharedStringsXml);
-            if ($xml) {
-                foreach ($xml->si as $si) {
-                    if (isset($si->t)) {
-                        $sharedStrings[] = (string) $si->t;
-                    } elseif (isset($si->r)) {
-                        $text = '';
-                        foreach ($si->r as $r) {
-                            $text .= (string) $r->t;
-                        }
-                        $sharedStrings[] = $text;
-                    } else {
-                        $sharedStrings[] = '';
-                    }
-                }
-            }
-        }
-
-        $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
-        if ($sheetXml === false) {
-            for ($i = 0; $i < $zip->numFiles; $i++) {
-                $name = $zip->getNameIndex($i);
-                if (str_starts_with($name, 'xl/worksheets/sheet') && str_ends_with($name, '.xml')) {
-                    $sheetXml = $zip->getFromName($name);
-                    break;
-                }
-            }
-        }
-
-        $zip->close();
-
-        if (! $sheetXml) {
-            return [];
-        }
-
-        $xml = simplexml_load_string($sheetXml);
-        if (! $xml || ! isset($xml->sheetData->row)) {
-            return [];
-        }
-
-        $rows = [];
-        foreach ($xml->sheetData->row as $row) {
-            $rowData = [];
-            $lastColIndex = -1;
-
-            foreach ($row->c as $c) {
-                $ref = (string) $c['r'];
-                preg_match('/^([A-Z]+)/', $ref, $matches);
-                $colLetter = $matches[1] ?? 'A';
-                $colIndex = $this->columnLetterToIndex($colLetter);
-
-                while ($lastColIndex + 1 < $colIndex) {
-                    $rowData[] = null;
-                    $lastColIndex++;
-                }
-
-                $type = (string) $c['t'];
-                $val = isset($c->v) ? (string) $c->v : '';
-
-                if ($type === 's' && isset($sharedStrings[(int) $val])) {
-                    $cellValue = $sharedStrings[(int) $val];
-                } elseif ($type === 'inlineStr' && isset($c->is->t)) {
-                    $cellValue = (string) $c->is->t;
-                } else {
-                    $cellValue = $val;
-                }
-
-                $rowData[] = $cellValue;
-                $lastColIndex = $colIndex;
-            }
-
-            $rows[] = $rowData;
-        }
-
-        return $rows;
-    }
-
-    protected function columnLetterToIndex(string $col): int
-    {
-        $index = 0;
-        $length = strlen($col);
-        for ($i = 0; $i < $length; $i++) {
-            $index = $index * 26 + (ord($col[$i]) - 64);
-        }
-
-        return $index - 1;
     }
 
     protected function parseCsv(string $path): array
@@ -322,9 +183,7 @@ class BudgetImportService
         }
 
         $handle = fopen($path, 'r');
-        if (! $handle) {
-            return $rows;
-        }
+        if (! $handle) return $rows;
 
         $firstLine = fgets($handle);
         rewind($handle);
@@ -345,23 +204,15 @@ class BudgetImportService
         foreach ($headers as $index => $header) {
             $clean = preg_replace('/[^a-z0-9]/', '', strtolower(ltrim($header, "\xEF\xBB\xBF")));
 
-            if (in_array($clean, ['code', 'codebudget', 'codebudgetaire', 'codeligne'], true)) {
+            if (in_array($clean, ['code', 'codebudget', 'codeligne'], true)) {
                 $map['code'] = $index;
-            } elseif (in_array($clean, ['category', 'categorycode', 'cat', 'codecat'], true)) {
-                $map['category_code'] = $index;
-            } elseif (in_array($clean, ['subcategory', 'subcategorycode', 'subcat', 'codesubcat'], true)) {
-                $map['subcategory_code'] = $index;
-            } elseif (in_array($clean, ['descript', 'descriptcode', 'desc', 'codedesc'], true)) {
-                $map['descript_code'] = $index;
-            } elseif (in_array($clean, ['split', 'splitcode', 'codesplit'], true)) {
-                $map['split_code'] = $index;
-            } elseif (in_array($clean, ['libelle', 'description', 'intitule', 'activite', 'ligne'], true)) {
+            } elseif (in_array($clean, ['description', 'libelle', 'intitule', 'activite'], true)) {
                 $map['libelle'] = $index;
-            } elseif (in_array($clean, ['budget', 'budgetinitial', 'montant', 'initial', 'alloue'], true)) {
-                $map['budget_initial'] = $index;
+            } elseif (in_array($clean, ['balance', 'budget', 'budgetinitial', 'montant', 'solde'], true)) {
+                $map['balance'] = $index;
             } elseif (in_array($clean, ['devise', 'currency', 'monnaie'], true)) {
                 $map['devise'] = $index;
-            } elseif (in_array($clean, ['donor', 'donateur', 'bailleur', 'partenaire'], true)) {
+            } elseif (in_array($clean, ['donateur', 'donor', 'bailleur', 'partenaire'], true)) {
                 $map['donor'] = $index;
             }
         }
@@ -371,24 +222,16 @@ class BudgetImportService
 
     protected function getValue(array $row, ?int $index): ?string
     {
-        if ($index === null || ! isset($row[$index])) {
-            return null;
-        }
-
+        if ($index === null || ! isset($row[$index])) return null;
         $val = trim((string) $row[$index]);
-
         return $val !== '' ? $val : null;
     }
 
     protected function sanitizeAmount(?string $val): float
     {
-        if (empty($val)) {
-            return 0.0;
-        }
-
+        if (empty($val)) return 0.0;
         $clean = str_replace([' ', "\xc2\xa0", '$', 'FC', 'CDF', 'EUR', '€'], '', $val);
         $clean = str_replace(',', '.', $clean);
-
         return (float) $clean;
     }
 
