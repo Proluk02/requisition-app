@@ -33,7 +33,6 @@ class RoleAndDataSeeder extends Seeder
             ]);
         }
 
-
         $projects = [
             [
                 'name' => 'USIMAMIZI BORA',
@@ -95,8 +94,6 @@ class RoleAndDataSeeder extends Seeder
             ]);
         }
 
-  
-
         $admin = User::updateOrCreate(
             [
                 'email' => 'prolukeka@gmail.com',
@@ -113,7 +110,6 @@ class RoleAndDataSeeder extends Seeder
         );
 
         $admin->syncRoles(['admin']);
-
 
         $staff = User::updateOrCreate(
             [
@@ -135,4 +131,3 @@ class RoleAndDataSeeder extends Seeder
         $staff->syncRoles(['beneficiary']);
     }
 }
-

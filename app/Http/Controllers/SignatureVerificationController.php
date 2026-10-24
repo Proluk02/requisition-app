@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\RequisitionSignature;
-use Illuminate\Http\Request;
 use Inertia\Inertia;
 
 class SignatureVerificationController extends Controller
@@ -18,7 +17,7 @@ class SignatureVerificationController extends Controller
             ->where('signature_hash', $hash)
             ->first();
 
-        if (!$signature) {
+        if (! $signature) {
             return Inertia::render('Signature/Verify', [
                 'valid' => false,
                 'message' => 'Aucune signature ne correspond à ce code.',

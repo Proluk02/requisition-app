@@ -114,7 +114,7 @@ class DashboardController extends Controller
             'budget_total_fc' => $budgetTotalFC,
             'budget_solde_fc' => $budgetSoldeFC,
             'budget_consomme_fc' => $budgetConsommeFC,
-            'req_en_attente' => $requisitions->whereIn('status', ['draft'])->count(),
+            'req_en_attente' => $requisitions->whereIn('status', ['draft', 'returned_to_project_manager'])->count(),
             'req_validees' => $requisitions->whereNotIn('status', ['draft', 'returned_to_project_manager', 'rejetee', 'returned_to_beneficiary', 'returned_to_urgent_initiator'])->count(),
             'req_a_corriger' => $requisitions->whereIn('status', ['returned_to_project_manager'])->count(),
         ];
@@ -161,6 +161,7 @@ class DashboardController extends Controller
 
         $projectsStats = Project::all()->map(function ($p) use ($allPeriodRequisitions) {
             $projReqs = $allPeriodRequisitions->filter(fn ($r) => $r->project_id === $p->id || $r->projet === $p->name);
+
             return [
                 'id' => $p->id,
                 'name' => $p->name,
@@ -172,6 +173,7 @@ class DashboardController extends Controller
 
         $caissesStats = CashRegister::all()->map(function ($caisse) use ($allPeriodRequisitions) {
             $caisseReqs = $allPeriodRequisitions->filter(fn ($r) => $r->caisse_decaissement === $caisse->name);
+
             return [
                 'caisse' => $caisse->name,
                 'count' => $caisseReqs->count(),
@@ -196,6 +198,7 @@ class DashboardController extends Controller
                 'montantTotal' => (float) $r->montant_total,
                 'caisseAttribuee' => $r->caisse_decaissement ?? 'Caisse principale',
                 'observation' => $r->observation,
+                'derniere_observation' => $r->derniere_observation,
                 'is_urgent' => (bool) $r->is_urgent,
                 'is_decaissee' => $r->status === 'decaisse',
                 'statusCode' => $r->status,
@@ -243,6 +246,7 @@ class DashboardController extends Controller
 
         $projects = Project::all()->map(function ($p) {
             $reqs = Requisition::where('project_id', $p->id)->orWhere('projet', $p->name)->get();
+
             return [
                 'id' => $p->id,
                 'name' => $p->name,
@@ -251,7 +255,7 @@ class DashboardController extends Controller
                 'total_usd' => (float) $reqs->where('devise', 'USD')->sum('montant_total'),
                 'total_fc' => (float) $reqs->whereIn('devise', ['FC', 'CDF'])->sum('montant_total'),
                 'decaisse_usd' => (float) $reqs->where('status', 'decaisse')->where('devise', 'USD')->sum('montant_total'),
-                'en_attente_count' => $reqs->whereIn('status', ['draft', 'visa_mp', 'controle_finance', 'visa_admin'])->count(),
+                'en_attente_count' => $reqs->whereIn('status', ['draft', 'visa_mp', 'visa_pam', 'visa_admin'])->count(),
             ];
         });
 
@@ -266,6 +270,7 @@ class DashboardController extends Controller
 
         $caisses = CashRegister::with('activeSession')->get()->map(function ($c) {
             $reqs = Requisition::where('caisse_decaissement', $c->name)->get();
+
             return [
                 'nom' => $c->name,
                 'total_dossiers' => $reqs->count(),
@@ -302,9 +307,10 @@ class DashboardController extends Controller
                 'status' => $r->status,
                 'dateSoumission' => $r->created_at?->format('d/m/Y H:i') ?? '',
                 'observation' => $r->observation,
+                'derniere_observation' => $r->derniere_observation,
                 'needsWaiver' => $r->status === 'urgent_direction',
                 'canApprove' => $r->status === 'visa_admin',
-                'statusLabel' => $this->mapWorkflowLevel($r->status)['label']
+                'statusLabel' => $this->mapWorkflowLevel($r->status)['label'],
             ]);
 
         return Inertia::render('Director/UrgentRequisitions', [
@@ -315,6 +321,7 @@ class DashboardController extends Controller
     public function finance(Request $request)
     {
         abort_unless($request->user()?->hasRole('finance'), 403);
+
         return $this->renderFinanceDashboard($request->user());
     }
 
@@ -328,7 +335,7 @@ class DashboardController extends Controller
 
         $budgetLinesByKey = [];
         foreach ($allBudgetLinesModels as $line) {
-            $key = ($line->project_id ?? 'all') . '_' . BudgetLine::normalizeCode($line->code);
+            $key = ($line->project_id ?? 'all').'_'.BudgetLine::normalizeCode($line->code);
             $budgetLinesByKey[$key] = $line;
             $budgetLinesByKey[BudgetLine::normalizeCode($line->code)] = $line;
         }
@@ -383,7 +390,10 @@ class DashboardController extends Controller
             'cashRegisters' => $cashRegisters,
             'allBudgetLines' => $allBudgetLines,
             'pendingSessions' => $pendingSessions,
-            'requisitions' => $requisitions->map(function (Requisition $r) use ($budgetLinesByKey, $user) {
+            'requisitions' => $requisitions->map(function (Requisition $r) use ($budgetLinesByKey) {
+                // SÉCURITÉ : La Finance ne peut décider QUE si le statut est STRICTEMENT 'visa_pam' !
+                $canDecideFinance = $r->status === 'visa_pam';
+
                 return [
                     'id' => (string) $r->id,
                     'numero' => $r->numero_requisition,
@@ -397,27 +407,28 @@ class DashboardController extends Controller
                     'montantTotal' => (float) $r->montant_total,
                     'caisseAttribuee' => $r->caisse_decaissement ?? 'Caisse principale',
                     'observation' => $r->observation,
+                    'derniere_observation' => $r->derniere_observation,
                     'is_urgent' => (bool) $r->is_urgent,
                     'statusCode' => $r->status,
                     'statusLabel' => match ($r->status) {
-                        'visa_mp' => 'À viser par les Finances',
-                        'returned_to_finance' => 'À corriger par les Finances',
-                        'returned_to_project_manager' => 'Renvoyée au Manager de Projet',
-                        'returned_to_admin_manager' => 'Renvoyée au PAM',
+                        'draft' => 'En attente Visa MP',
+                        'visa_mp' => 'En attente du visa PAM (Étape 2)',
+                        'visa_pam' => 'À viser par les Finances',
                         'controle_finance' => 'Validée par les Finances',
+                        'returned_to_project_manager' => 'Renvoyée au Chef de Projet',
                         'visa_admin' => 'Transmise à la Direction',
                         'decaissement_caisse' => 'Prête pour la Caisse',
                         'decaisse' => 'Décaissée',
                         default => ucfirst(str_replace('_', ' ', $r->status)),
                     },
-                    'canDecide' => $r->status === 'visa_mp',
-                    'canCorrect' => $r->status === 'returned_to_finance',
+                    'canDecide' => $canDecideFinance,
+                    'canCorrect' => false,
                     'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
                     'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
                     'signatures' => $this->formatSignatures($r->signatures),
                     'lignes' => $r->demandes->map(function (Demande $d) use ($budgetLinesByKey, $r) {
                         $codeNorm = BudgetLine::normalizeCode($d->code_allocation ?: $d->code_all_budget);
-                        $lookupKey = ($r->project_id ?? 'all') . '_' . $codeNorm;
+                        $lookupKey = ($r->project_id ?? 'all').'_'.$codeNorm;
                         $lineModel = $budgetLinesByKey[$lookupKey] ?? ($budgetLinesByKey[$codeNorm] ?? null);
 
                         return [
@@ -449,6 +460,7 @@ class DashboardController extends Controller
     public function adminManager(Request $request)
     {
         abort_unless($request->user()?->hasRole('admin_manager'), 403);
+
         return $this->renderAdminManagerDashboard($request->user());
     }
 
@@ -458,9 +470,10 @@ class DashboardController extends Controller
             ->orderByDesc('created_at')
             ->get();
 
+        // Le PAM examine STRICTEMENT les réquisitions au statut 'visa_mp'
         $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
             ->where(function ($query) use ($user) {
-                $query->whereIn('status', ['controle_finance'])
+                $query->where('status', 'visa_mp')
                     ->orWhere(function ($urgentQuery) use ($user) {
                         $urgentQuery->where('status', 'returned_to_urgent_initiator')
                             ->where('user_id', $user->id);
@@ -469,36 +482,35 @@ class DashboardController extends Controller
             ->orderByDesc('created_at')
             ->get();
 
-        // 1. Statistiques globales et financières pour le PAM
         $adminStats = [
-            'en_attente_visa' => $allRequisitions->where('status', 'controle_finance')->count(),
+            'en_attente_visa' => $allRequisitions->where('status', 'visa_mp')->count(),
             'urgences_count' => $allRequisitions->where('is_urgent', true)->whereNotIn('status', ['decaisse', 'cloture', 'rejetee'])->count(),
             'total_dossiers' => $allRequisitions->count(),
-            'validees_count' => $allRequisitions->whereIn('status', ['visa_admin', 'decaissement_caisse', 'decaisse', 'cloture'])->count(),
-            'renvoyees_finance_count' => $allRequisitions->where('status', 'returned_to_finance')->count(),
+            'validees_count' => $allRequisitions->whereIn('status', ['visa_pam', 'visa_admin', 'decaissement_caisse', 'decaisse', 'cloture'])->count(),
+            'renvoyees_pm_count' => $allRequisitions->where('status', 'returned_to_project_manager')->count(),
             'total_usd' => (float) $allRequisitions->where('devise', 'USD')->sum('montant_total'),
             'total_fc' => (float) $allRequisitions->whereIn('devise', ['FC', 'CDF'])->sum('montant_total'),
             'decaisse_usd' => (float) $allRequisitions->where('status', 'decaisse')->where('devise', 'USD')->sum('montant_total'),
             'decaisse_fc' => (float) $allRequisitions->where('status', 'decaisse')->whereIn('devise', ['FC', 'CDF'])->sum('montant_total'),
         ];
 
-        // 2. Synthèse détaillée par projet
         $projectsStats = Project::all()->map(function ($p) use ($allRequisitions) {
             $projReqs = $allRequisitions->filter(fn ($r) => $r->project_id === $p->id || $r->projet === $p->name);
+
             return [
                 'id' => $p->id,
                 'name' => $p->name,
                 'full_name' => $p->full_name,
                 'count' => $projReqs->count(),
-                'en_attente_pam' => $projReqs->where('status', 'controle_finance')->count(),
+                'en_attente_pam' => $projReqs->where('status', 'visa_mp')->count(),
                 'total_usd' => (float) $projReqs->where('devise', 'USD')->sum('montant_total'),
                 'total_fc' => (float) $projReqs->whereIn('devise', ['FC', 'CDF'])->sum('montant_total'),
             ];
         });
 
-        // 3. Synthèse des caisses
         $caissesStats = CashRegister::with('activeSession')->get()->map(function ($c) use ($allRequisitions) {
             $caisseReqs = $allRequisitions->filter(fn ($r) => $r->caisse_decaissement === $c->name);
+
             return [
                 'id' => $c->id,
                 'name' => $c->name,
@@ -562,13 +574,15 @@ class DashboardController extends Controller
                 'montantTotal' => (float) $r->montant_total,
                 'caisseAttribuee' => $r->caisse_decaissement ?? 'Caisse principale',
                 'observation' => $r->observation,
+                'derniere_observation' => $r->derniere_observation,
                 'is_urgent' => (bool) $r->is_urgent,
                 'statusCode' => $r->status,
                 'statusLabel' => match ($r->status) {
                     'returned_to_urgent_initiator' => 'Urgence à corriger par son initiateur',
+                    'visa_mp' => 'Examen administratif en attente (PAM)',
                     default => 'Contrôle Administratif en attente',
                 },
-                'canDecide' => $r->status === 'controle_finance',
+                'canDecide' => $r->status === 'visa_mp',
                 'canCorrect' => ($r->status === 'returned_to_urgent_initiator' && (string) $r->user_id === (string) $user->id),
                 'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
                 'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
@@ -599,24 +613,25 @@ class DashboardController extends Controller
         return match ($status) {
             'draft' => ['step' => 1, 'label' => 'En attente du Manager de Projet', 'color' => 'gray'],
             'returned_to_beneficiary', 'returned_to_urgent_initiator' => ['step' => 1, 'label' => 'À corriger par l’initiateur', 'color' => 'red'],
+            'returned_to_project_manager' => ['step' => 2, 'label' => 'À arbitrer par le Manager de Projet', 'color' => 'red'],
             'urgent_direction' => ['step' => 1, 'label' => 'Dérogation Urgente', 'color' => 'red'],
-            'visa_mp' => ['step' => 2, 'label' => 'Visa MP Accordé', 'color' => 'blue'],
-            'returned_to_project_manager' => ['step' => 2, 'label' => 'À corriger par le Manager de Projet', 'color' => 'red'],
-            'controle_finance' => ['step' => 3, 'label' => 'Contrôle Finances Validé', 'color' => 'purple'],
-            'returned_to_finance' => ['step' => 3, 'label' => 'À corriger par les Finances', 'color' => 'red'],
-            'visa_admin' => ['step' => 4, 'label' => 'En attente Bon à Payer', 'color' => 'amber'],
-            'returned_to_admin_manager' => ['step' => 4, 'label' => 'À corriger par le PAM', 'color' => 'red'],
+            'visa_mp' => ['step' => 2, 'label' => 'En attente du PAM', 'color' => 'blue'],
+            'visa_pam' => ['step' => 3, 'label' => 'En attente des Finances', 'color' => 'purple'],
+            'controle_finance' => ['step' => 3, 'label' => 'Contrôle Finances validé', 'color' => 'purple'],
+            'returned_to_finance', 'returned_to_admin_manager' => ['step' => 3, 'label' => 'À arbitrer par le Manager de Projet', 'color' => 'red'],
+            'visa_admin' => ['step' => 4, 'label' => 'En attente Bon à Payer (Direction)', 'color' => 'amber'],
             'decaissement_caisse' => ['step' => 5, 'label' => 'Approuvé (À décaisser)', 'color' => 'emerald'],
             'decaisse' => ['step' => 6, 'label' => 'Décaissé', 'color' => 'green'],
             'cloture' => ['step' => 7, 'label' => 'Clôturé', 'color' => 'black'],
             'rejetee' => ['step' => 0, 'label' => 'Rejeté', 'color' => 'red'],
-            default => ['step' => 1, 'label' => ucfirst($status), 'color' => 'gray'],
+            default => ['step' => 1, 'label' => ucfirst(str_replace('_', ' ', $status)), 'color' => 'gray'],
         };
     }
 
     private function buildStats($requisitions): array
     {
         $validees = $requisitions->filter(fn ($req) => in_array($req->status, ['decaissement_caisse', 'decaisse', 'cloture'], true));
+
         return [
             'enCoursCount' => $requisitions->whereIn('status', [
                 'draft',
@@ -627,6 +642,7 @@ class DashboardController extends Controller
                 'returned_to_urgent_initiator',
                 'urgent_direction',
                 'visa_mp',
+                'visa_pam',
                 'controle_finance',
                 'visa_admin',
             ])->count(),
@@ -645,15 +661,17 @@ class DashboardController extends Controller
     {
         return $requisitions->map(function ($r) {
             $status = $this->mapWorkflowStatus($r->status);
+
             return [
                 'id' => $r->id,
                 'code' => $r->numero_requisition,
                 'motif' => $r->observation ?: 'Aucun motif',
+                'derniere_observation' => $r->derniere_observation,
                 'projet' => $r->projet,
                 'project_id' => $r->project_id,
                 'is_urgent' => (bool) $r->is_urgent,
                 'dateSoumission' => $r->created_at?->format('d M Y') ?? '',
-                'montant' => number_format($r->montant_total, 2, '.', ' ') . ' ' . $r->devise,
+                'montant' => number_format($r->montant_total, 2, '.', ' ').' '.$r->devise,
                 'devise' => $r->devise,
                 'articlesCount' => $r->demandes->count(),
                 'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
@@ -670,23 +688,26 @@ class DashboardController extends Controller
 
     private function buildProjectManagerRequisitionList($requisitions, string $managerId, $budgetLines): array
     {
-        return $requisitions->map(function ($r) use ($managerId, $budgetLines) {
-            $isFinanceReturned = $r->status === 'returned_to_project_manager';
-            
-            // CORRECTION CRUCIALE : returned_to_finance est retiré pour ne jamais renvoyer la réquisition au PM
+        return $requisitions->map(function ($r) use ($budgetLines) {
+            $isReturnedToPm = in_array($r->status, [
+                'returned_to_project_manager',
+                'returned_to_finance',
+                'returned_to_admin_manager',
+            ], true);
+
             $isInitiatorCorrection = in_array($r->status, [
                 'returned_to_beneficiary',
                 'returned_to_urgent_initiator',
             ], true);
-            
+
             $statut = match (true) {
-                $isFinanceReturned => 'a_corriger',
+                $isReturnedToPm => 'a_corriger',
                 $isInitiatorCorrection => 'a_corriger_initiateur',
                 $r->status === 'draft' => 'en_attente_mp',
                 $r->status === 'rejetee' => 'rejete_mp',
                 default => 'valide_mp',
             };
-            
+
             return [
                 'id' => (string) $r->id,
                 'user_id' => $r->user_id,
@@ -701,6 +722,7 @@ class DashboardController extends Controller
                 'caisseSouhaitee' => $r->caisse_decaissement ?? 'Caisse principale',
                 'caisseAttribuee' => $r->caisse_decaissement,
                 'observation' => $r->observation,
+                'derniere_observation' => $r->derniere_observation,
                 'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
                 'is_urgent' => (bool) $r->is_urgent,
                 'statut' => $statut,
@@ -708,12 +730,13 @@ class DashboardController extends Controller
                 'statusLabel' => match ($r->status) {
                     'draft' => 'En attente Visa MP',
                     'returned_to_beneficiary' => 'À corriger par le bénéficiaire',
-                    'returned_to_project_manager' => 'À corriger par le Chef de Projet',
-                    'returned_to_finance' => 'À corriger par les Finances',
-                    'returned_to_admin_manager' => 'À corriger par le PAM',
+                    'returned_to_project_manager' => 'À arbitrer par le Chef de Projet',
+                    'returned_to_finance' => 'À arbitrer par le Chef de Projet',
+                    'returned_to_admin_manager' => 'À arbitrer par le Chef de Projet',
                     'returned_to_urgent_initiator' => 'Urgence à corriger par l’initiateur',
-                    'visa_mp' => 'Transmis aux Finances',
-                    'controle_finance' => 'Transmis au PAM',
+                    'visa_mp' => 'Transmis au PAM',
+                    'visa_pam' => 'Transmis aux Finances',
+                    'controle_finance' => 'Validée Finances',
                     'visa_admin' => 'Transmis à la Direction',
                     'urgent_direction' => 'Urgence en attente de la Direction',
                     'decaissement_caisse' => 'En attente de la Caisse',
@@ -722,10 +745,10 @@ class DashboardController extends Controller
                     'rejetee' => 'Rejetée',
                     default => 'Validé MP',
                 },
-                'canDecide' => in_array($r->status, ['draft', 'returned_to_project_manager'], true),
-                'canCorrect' => $r->status === 'returned_to_project_manager',
-                'financeReturned' => $isFinanceReturned,
-                'needsCorrection' => $isFinanceReturned,
+                'canDecide' => in_array($r->status, ['draft', 'returned_to_project_manager', 'returned_to_finance'], true),
+                'canCorrect' => $isReturnedToPm,
+                'financeReturned' => $isReturnedToPm,
+                'needsCorrection' => $isReturnedToPm,
                 'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
                 'signatures' => $this->formatSignatures($r->signatures),
                 'lignes' => $r->demandes->map(function ($d) use ($budgetLines, $r) {
@@ -774,13 +797,12 @@ class DashboardController extends Controller
         return match ($status) {
             'draft' => ['key' => 'visa_mp', 'label' => 'En attente du Manager de Projet', 'validator' => 'Manager Projet'],
             'returned_to_beneficiary', 'returned_to_urgent_initiator' => ['key' => 'brouillon', 'label' => 'À corriger par l’initiateur', 'validator' => 'Initiateur'],
-            'returned_to_project_manager' => ['key' => 'visa_mp', 'label' => 'À corriger par le Manager de Projet', 'validator' => 'Manager Projet'],
-            'returned_to_finance' => ['key' => 'controle_finance', 'label' => 'À corriger par les Finances', 'validator' => 'Manager Finances'],
-            'returned_to_admin_manager' => ['key' => 'visa_admin', 'label' => 'À corriger par le PAM', 'validator' => 'Manager Admin'],
+            'returned_to_project_manager', 'returned_to_finance', 'returned_to_admin_manager' => ['key' => 'visa_mp', 'label' => 'À arbitrer par le Manager de Projet', 'validator' => 'Manager Projet'],
             'urgent_direction' => ['key' => 'approbation_direction', 'label' => 'Dérogation urgente', 'validator' => 'Directrice'],
-            'visa_mp' => ['key' => 'controle_finance', 'label' => 'Visa MP accordé', 'validator' => 'Manager Finances'],
-            'controle_finance' => ['key' => 'visa_admin', 'label' => 'Contrôle Finances validé', 'validator' => 'Manager Admin'],
-            'visa_admin' => ['key' => 'approbation_direction', 'label' => 'Visa administratif accordé', 'validator' => 'Directrice Générale'],
+            'visa_mp' => ['key' => 'visa_pam', 'label' => 'En attente du PAM', 'validator' => 'Manager Admin (PAM)'],
+            'visa_pam' => ['key' => 'controle_finance', 'label' => 'En attente des Finances', 'validator' => 'Manager Finances'],
+            'controle_finance' => ['key' => 'visa_admin', 'label' => 'Contrôle Finances validé', 'validator' => 'Manager Finances'],
+            'visa_admin' => ['key' => 'approbation_direction', 'label' => 'En attente de la Directrice', 'validator' => 'Directrice Générale'],
             'approbation_direction' => ['key' => 'approbation_direction', 'label' => 'Approbation Direction', 'validator' => 'Directrice Générale'],
             'decaissement_caisse' => ['key' => 'caisse_pret', 'label' => 'Caisse (Prêt)', 'validator' => 'Caisse'],
             'decaisse' => ['key' => 'caisse_pret', 'label' => 'Décaissé', 'validator' => 'Caisse'],

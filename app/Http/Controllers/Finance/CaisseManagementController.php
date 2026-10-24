@@ -33,6 +33,7 @@ class CaisseManagementController extends Controller
             ->get()
             ->map(function (CashRegister $c) {
                 $reqsCount = Requisition::where('caisse_decaissement', $c->name)->count();
+
                 return [
                     'id' => $c->id,
                     'name' => $c->name,
@@ -214,8 +215,8 @@ class CaisseManagementController extends Controller
         abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
 
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:100', 'unique:cash_registers,name,' . $cashRegister->id],
-            'code' => ['required', 'string', 'max:50', 'unique:cash_registers,code,' . $cashRegister->id],
+            'name' => ['required', 'string', 'max:100', 'unique:cash_registers,name,'.$cashRegister->id],
+            'code' => ['required', 'string', 'max:50', 'unique:cash_registers,code,'.$cashRegister->id],
             'devise' => ['required', 'in:USD,FC'],
             'is_active' => ['required', 'boolean'],
             'cashier_ids' => ['nullable', 'array'],

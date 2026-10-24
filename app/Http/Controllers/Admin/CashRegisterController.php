@@ -83,8 +83,8 @@ class CashRegisterController extends Controller
     public function update(Request $request, CashRegister $cashRegister): RedirectResponse
     {
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:100', 'unique:cash_registers,name,' . $cashRegister->id],
-            'code' => ['required', 'string', 'max:50', 'unique:cash_registers,code,' . $cashRegister->id],
+            'name' => ['required', 'string', 'max:100', 'unique:cash_registers,name,'.$cashRegister->id],
+            'code' => ['required', 'string', 'max:50', 'unique:cash_registers,code,'.$cashRegister->id],
             'devise' => ['required', 'in:USD,FC'],
             'is_active' => ['required', 'boolean'],
             'cashier_ids' => ['nullable', 'array'],

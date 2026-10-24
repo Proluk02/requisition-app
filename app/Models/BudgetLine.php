@@ -17,7 +17,7 @@ class BudgetLine extends Model
     protected $keyType = 'string';
 
     protected $fillable = [
-        'project_id', 
+        'project_id',
         'donor_id',
         'code',
         'category_code',
@@ -72,6 +72,7 @@ class BudgetLine extends Model
             fn ($part) => trim((string) $part),
             array_filter([$cat, $subcat, $desc, $split], fn ($p) => filled($p))
         );
+
         return implode('.', $parts);
     }
 

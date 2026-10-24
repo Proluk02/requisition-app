@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Head, Link, router } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
-import { RequisitionSuivi, WorkflowStep, DetailArticle } from '@/types/requisitionsList';
+import { RequisitionSuivi, DetailArticle } from '@/types/requisitionsList';
 import { numberToWordsFR } from '@/lib/numberToWords';
 import OfficialPrintSheet from '@/Components/OfficialPrintSheet';
 import SignatureHistory from '@/Components/Director/SignatureHistory';
@@ -166,7 +166,6 @@ export default function RequisitionsIndex({
     };
 
     const renderEtapeBadge = (etape: string, isUrgent: boolean, statusCode?: string) => {
-        // 1. Rejet adressé directement à l'initiateur (Seul cas où le demandeur doit agir)
         if (statusCode === 'returned_to_beneficiary' || statusCode === 'returned_to_urgent_initiator') {
             return (
                 <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-red-100 text-red-800 border border-red-200 shadow-sm">
@@ -175,20 +174,18 @@ export default function RequisitionsIndex({
             );
         }
 
-        // 2. Rejet interne : renvoyé au Manager de Projet par les finances
         if (statusCode === 'returned_to_project_manager') {
             return (
                 <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
-                    En révision (Chef de Projet)
+                    En arbitrage (Chef de Projet)
                 </span>
             );
         }
 
-        // 3. Rejet interne : renvoyé aux finances par le PAM ou la Directrice
         if (statusCode === 'returned_to_finance') {
             return (
                 <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300">
-                    En révision (Finances)
+                    En révision (Chef de Projet)
                 </span>
             );
         }
@@ -204,17 +201,19 @@ export default function RequisitionsIndex({
         const badges: Record<string, string> = {
             brouillon: 'bg-gray-100 text-gray-700 border-gray-200',
             visa_mp: 'bg-amber-50 text-[#F58F20] border-amber-200',
+            visa_pam: 'bg-blue-50 text-[#04326D] border-blue-200',
             controle_finance: 'bg-purple-50 text-purple-700 border-purple-200',
             visa_admin: 'bg-amber-50 text-amber-600 border-amber-200',
-            approbation_direction: 'bg-blue-50 text-blue-700 border-blue-200',
+            approbation_direction: 'bg-emerald-50 text-emerald-700 border-emerald-200',
             decaissement_caisse: 'bg-emerald-50 text-emerald-800 border border-emerald-200',
             cloture: 'bg-gray-800 text-white border border-gray-800',
         };
         const labels: Record<string, string> = {
             brouillon: 'En attente Chef Projet',
-            visa_mp: 'Visa Chef Projet',
-            controle_finance: 'Contrôle Finances',
-            visa_admin: 'Administration',
+            visa_mp: 'En examen PAM',
+            visa_pam: 'En contrôle Finances',
+            controle_finance: 'Contrôle Finances validé',
+            visa_admin: 'En attente Direction',
             approbation_direction: 'Approbation Direction',
             decaissement_caisse: 'Prêt pour Caisse',
             cloture: 'Clôturé',
@@ -254,7 +253,6 @@ export default function RequisitionsIndex({
             `}</style>
 
             <div className="space-y-6 no-print-zone">
-                {/* Header */}
                 <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-[#E2E8F0] pb-5">
                     <div>
                         <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1 flex items-center gap-1">
@@ -281,7 +279,6 @@ export default function RequisitionsIndex({
                     </Link>
                 </div>
 
-                {/* Filtres */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm p-4 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
                     <div className="relative w-full md:w-80">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
@@ -303,6 +300,7 @@ export default function RequisitionsIndex({
                             <option value="all">Toutes les étapes</option>
                             <option value="brouillon">En attente / À corriger</option>
                             <option value="visa_mp">Visa Manager Projet</option>
+                            <option value="visa_pam">Examen PAM</option>
                             <option value="controle_finance">Contrôle Finances</option>
                             <option value="visa_admin">Visa Administration</option>
                             <option value="approbation_direction">Approbation Direction</option>
@@ -348,7 +346,6 @@ export default function RequisitionsIndex({
                     </div>
                 </div>
 
-                {/* Tableau de résultats */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs border-collapse">
@@ -378,8 +375,6 @@ export default function RequisitionsIndex({
                                     </tr>
                                 ) : (
                                     filteredList.map((req) => {
-                                        // CORRECTION ESSENTIELLE : Seules les réquisitions en brouillon ou retournées AU BÉNÉFICIAIRE
-                                        // peuvent être modifiées par lui. Les retours internes vers le PM ou les Finances ne sont PAS modifiables par le bénéficiaire.
                                         const canEdit = req.statusCode === 'draft' 
                                             || req.statusCode === 'returned_to_beneficiary'
                                             || req.statusCode === 'returned_to_urgent_initiator';
@@ -521,7 +516,7 @@ export default function RequisitionsIndex({
                                 <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
                                 <div>
                                     <strong className="block uppercase tracking-wider text-[11px] mb-1 font-black text-red-800">
-                                        Dossier rejeté à corriger par vous :
+                                        Dossier retourné pour correction par vous :
                                     </strong>
                                     <p className="font-medium text-sm text-red-900 whitespace-pre-wrap">
                                         {(viewReq as any).motifRejet || viewReq.signatures?.filter(s => s.action === 'rejected').pop()?.commentaire || 'Veuillez corriger votre demande et la soumettre à nouveau.'}
@@ -535,24 +530,10 @@ export default function RequisitionsIndex({
                                 <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-amber-600" />
                                 <div>
                                     <strong className="block uppercase tracking-wider text-[11px] mb-1 font-black text-amber-800">
-                                        Dossier renvoyé au Manager de Projet pour révision budgétaire :
+                                        Dossier en arbitrage auprès du Manager de Projet :
                                     </strong>
                                     <p className="font-medium text-xs text-amber-900 whitespace-pre-wrap">
-                                        Le dossier est actuellement entre les mains de votre Chef de Projet suite au contrôle des Finances.
-                                    </p>
-                                </div>
-                            </div>
-                        )}
-
-                        {viewReq.statusCode === 'returned_to_finance' && (
-                            <div className="bg-purple-50 border border-purple-200 p-3.5 rounded flex gap-3 items-start shadow-sm">
-                                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-purple-600" />
-                                <div>
-                                    <strong className="block uppercase tracking-wider text-[11px] mb-1 font-black text-purple-800">
-                                        Dossier renvoyé au service financier pour régularisation :
-                                    </strong>
-                                    <p className="font-medium text-xs text-purple-900 whitespace-pre-wrap">
-                                        Ce dossier fait l'objet d'un ajustement administratif entre la Direction et les Finances. Aucune action n'est requise de votre part.
+                                        Le dossier est actuellement entre les mains de votre Chef de Projet suite à un retour hiérarchique.
                                     </p>
                                 </div>
                             </div>
@@ -689,7 +670,7 @@ export default function RequisitionsIndex({
                 </div>
             )}
 
-            {/* MODALE EDIT (FORMULAIRE DE CORRECTION) */}
+            {/* MODALE EDIT */}
             {editReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 no-print-zone animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-4xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto animate-slide-down">
@@ -717,7 +698,6 @@ export default function RequisitionsIndex({
                                 </div>
                             )}
 
-                            {/* AFFICHAGE EXPLICITE DU MOTIF DE REJET DANS LE FORMULAIRE */}
                             <div className="bg-red-50 border border-red-200 p-3.5 rounded flex gap-3 items-start shadow-sm">
                                 <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
                                 <div>

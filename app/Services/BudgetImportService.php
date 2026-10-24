@@ -15,8 +15,8 @@ class BudgetImportService
     {
         // Vérification de l'existence du projet
         $project = Project::find($projectId);
-        if (!$project) {
-            throw new \Exception("Le projet sélectionné est introuvable.");
+        if (! $project) {
+            throw new \Exception('Le projet sélectionné est introuvable.');
         }
 
         $extension = strtolower($file->getClientOriginalExtension());
@@ -29,8 +29,7 @@ class BudgetImportService
                 $spreadsheet = IOFactory::load($path);
                 $worksheet = $spreadsheet->getActiveSheet();
                 $rows = $worksheet->toArray(null, true, true, false);
-            } 
-            elseif ($extension === 'xlsx') {
+            } elseif ($extension === 'xlsx') {
                 $rows = $this->parseXlsxNative($path);
                 if (empty($rows)) {
                     return [
@@ -103,7 +102,7 @@ class BudgetImportService
 
             return [
                 'success' => false,
-                'message' => 'Les colonnes obligatoires suivantes sont absentes : ' . implode(', ', $missingNames) . '.',
+                'message' => 'Les colonnes obligatoires suivantes sont absentes : '.implode(', ', $missingNames).'.',
                 'imported' => 0,
                 'updated' => 0,
                 'errors' => $missingNames,
@@ -134,6 +133,7 @@ class BudgetImportService
 
                 if (empty($code)) {
                     $errors[] = "Ligne {$rowNumber} ignorée : impossible de déterminer le code budgétaire.";
+
                     continue;
                 }
 
@@ -206,7 +206,7 @@ class BudgetImportService
 
             return [
                 'success' => false,
-                'message' => "Échec de l'importation : " . $e->getMessage(),
+                'message' => "Échec de l'importation : ".$e->getMessage(),
                 'imported' => 0,
                 'updated' => 0,
                 'errors' => [$e->getMessage()],
@@ -220,7 +220,7 @@ class BudgetImportService
             return [];
         }
 
-        $zip = new \ZipArchive();
+        $zip = new \ZipArchive;
         if ($zip->open($path) !== true) {
             return [];
         }
@@ -312,6 +312,7 @@ class BudgetImportService
         for ($i = 0; $i < $length; $i++) {
             $index = $index * 26 + (ord($col[$i]) - 64);
         }
+
         return $index - 1;
     }
 
@@ -377,6 +378,7 @@ class BudgetImportService
         }
 
         $val = trim((string) $row[$index]);
+
         return $val !== '' ? $val : null;
     }
 

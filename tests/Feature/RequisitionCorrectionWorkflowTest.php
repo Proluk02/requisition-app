@@ -1,7 +1,7 @@
 <?php
 
-use App\Models\CashRegister;
 use App\Models\CashMovement;
+use App\Models\CashRegister;
 use App\Models\CashRegisterSession;
 use App\Models\Demande;
 use App\Models\DemandeJustificatif;
@@ -9,8 +9,9 @@ use App\Models\Project;
 use App\Models\Requisition;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+use Inertia\Testing\AssertableInertia;
 use Spatie\Permission\Models\Role;
 
 function workflowUser(string $role, ?Project $project = null): User
@@ -30,7 +31,7 @@ function workflowRequisition(User $initiator, Project $project, string $status, 
     return Requisition::create([
         'user_id' => $initiator->id,
         'project_id' => $project->id,
-        'numero_requisition' => 'WF-' . strtoupper(str_replace('_', '-', $status)),
+        'numero_requisition' => 'WF-'.strtoupper(str_replace('_', '-', $status)),
         'nature_requisition' => 'Achat',
         'projet' => $project->name,
         'caisse_decaissement' => 'EU',
@@ -497,7 +498,7 @@ it('shows the PAM a complete requisition history separately from its actionable 
 
     $this->actingAs($pam)
         ->get(route('dashboard'))
-        ->assertInertia(fn (\Inertia\Testing\AssertableInertia $page) => $page
+        ->assertInertia(fn (AssertableInertia $page) => $page
             ->component('AdminManager/Dashboard')
             ->has('requisitions', 1)
             ->has('historyRequisitions', 2)

@@ -51,7 +51,7 @@ class CashierSessionController extends Controller
             if (! $cashRegister->is_approvisionnee) {
                 return Redirect::back()->with(
                     'error',
-                    'Impossible d’ouvrir le guichet : Aucun fond de dotation initial n’a été validé par le Manager Finance. ' .
+                    'Impossible d’ouvrir le guichet : Aucun fond de dotation initial n’a été validé par le Manager Finance. '.
                     'Veuillez d’abord enregistrer un Bon d’Entrée Caisse d’approvisionnement initial avec preuve bancaire.'
                 );
             }
@@ -73,23 +73,23 @@ class CashierSessionController extends Controller
             'solde_ouverture' => max(0.0, $soldeOuverture),
             'status' => 'en_attente_autorisation',
             'observation_ouverture' => $validated['observation'] ?? ($origine === 'report_veille'
-                ? "Ouverture par report automatique de la clôture précédente (" . number_format($soldeOuverture, 2, ',', ' ') . " {$cashRegister->devise})."
-                : "Ouverture par dotation initiale validée (" . number_format($soldeOuverture, 2, ',', ' ') . " {$cashRegister->devise})."),
+                ? 'Ouverture par report automatique de la clôture précédente ('.number_format($soldeOuverture, 2, ',', ' ')." {$cashRegister->devise})."
+                : 'Ouverture par dotation initiale validée ('.number_format($soldeOuverture, 2, ',', ' ')." {$cashRegister->devise})."),
         ]);
 
         $this->notifierRole(
             roleCible: 'finance',
             titre: 'Alerte : Demande d’Ouverture de Guichet',
-            message: "Le caissier {$user->name} demande l’ouverture du guichet {$cashRegister->name} " .
-                     "(Fond calculé : " . number_format($session->solde_ouverture, 2, ',', ' ') . " {$cashRegister->devise} " .
+            message: "Le caissier {$user->name} demande l’ouverture du guichet {$cashRegister->name} ".
+                     '(Fond calculé : '.number_format($session->solde_ouverture, 2, ',', ' ')." {$cashRegister->devise} ".
                      "via {$origine}). Autorisation par PIN requise.",
             urgent: true
         );
 
         return Redirect::back()->with(
             'success',
-            "Demande d’ouverture transmise au Manager Finance. Fond d'ouverture : " .
-            number_format($session->solde_ouverture, 2, ',', ' ') . " {$cashRegister->devise}."
+            "Demande d’ouverture transmise au Manager Finance. Fond d'ouverture : ".
+            number_format($session->solde_ouverture, 2, ',', ' ')." {$cashRegister->devise}."
         );
     }
 
@@ -164,8 +164,8 @@ class CashierSessionController extends Controller
 
         if ($ecart !== 0.0 && empty(trim((string) ($validated['justification_ecart'] ?? '')))) {
             return Redirect::back()->withErrors([
-                'justification_ecart' => "Un écart de caisse de " . number_format($ecart, 2, ',', ' ') . " " .
-                    $session->cashRegister->devise . " a été constaté. Vous devez obligatoirement en préciser le motif pour clôturer.",
+                'justification_ecart' => 'Un écart de caisse de '.number_format($ecart, 2, ',', ' ').' '.
+                    $session->cashRegister->devise.' a été constaté. Vous devez obligatoirement en préciser le motif pour clôturer.',
             ]);
         }
 
@@ -191,8 +191,8 @@ class CashierSessionController extends Controller
                 $this->notifierRole(
                     roleCible: 'finance',
                     titre: '⚠️ ALERTE : Écart de Caisse Constaté',
-                    message: "Le guichet {$session->cashRegister->name} a été clôturé avec un écart de " .
-                             number_format($ecart, 2, ',', ' ') . " {$session->cashRegister->devise}. " .
+                    message: "Le guichet {$session->cashRegister->name} a été clôturé avec un écart de ".
+                             number_format($ecart, 2, ',', ' ')." {$session->cashRegister->devise}. ".
                              "Justification : {$validated['justification_ecart']}",
                     urgent: true
                 );
@@ -202,8 +202,8 @@ class CashierSessionController extends Controller
         return Redirect::back()->with(
             'success',
             $ecart === 0.0
-                ? "Session clôturée avec succès. Caisse parfaitement conforme."
-                : "Session clôturée. Écart consigné et transmis à la Finance."
+                ? 'Session clôturée avec succès. Caisse parfaitement conforme.'
+                : 'Session clôturée. Écart consigné et transmis à la Finance.'
         );
     }
 

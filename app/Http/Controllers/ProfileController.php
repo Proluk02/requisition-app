@@ -66,5 +66,4 @@ class ProfileController extends Controller
 
         return Redirect::route('profile.edit')->with('success', 'Code PIN de signature enregistré avec succès.');
     }
-
 }

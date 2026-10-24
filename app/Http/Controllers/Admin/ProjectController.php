@@ -76,7 +76,7 @@ class ProjectController extends Controller
     public function update(Request $request, Project $project): RedirectResponse
     {
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:100', 'unique:projects,name,' . $project->id],
+            'name' => ['required', 'string', 'max:100', 'unique:projects,name,'.$project->id],
             'full_name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'site_ids' => ['nullable', 'array'],

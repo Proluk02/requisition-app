@@ -10,7 +10,6 @@ use Inertia\Inertia;
 
 class PettyCashController extends Controller
 {
-
     public function index(Request $request)
     {
         $user = $request->user();

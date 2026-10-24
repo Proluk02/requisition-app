@@ -39,6 +39,7 @@ class ExpenseJustificationController extends Controller
 
         $requisitionsADecharger = $requisitionsQuery->get()->map(function (Requisition $r) {
             $bsc = CashMovement::where('requisition_id', $r->id)->where('type', 'sortie')->first();
+
             return [
                 'id' => $r->id,
                 'numero' => $r->numero_requisition,
@@ -166,7 +167,7 @@ class ExpenseJustificationController extends Controller
             );
         });
 
-        return Redirect::back()->with('success', "Formulaire de décharge enregistré avec succès.");
+        return Redirect::back()->with('success', 'Formulaire de décharge enregistré avec succès.');
     }
 
     /**
@@ -280,7 +281,7 @@ class ExpenseJustificationController extends Controller
             );
         });
 
-        return Redirect::back()->with('success', "Décharge apurée avec succès. Cycle de dépense définitivement clôturé.");
+        return Redirect::back()->with('success', 'Décharge apurée avec succès. Cycle de dépense définitivement clôturé.');
     }
 
     protected function notifierRole(string $roleCible, ?string $projectId, string $titre, string $message): void

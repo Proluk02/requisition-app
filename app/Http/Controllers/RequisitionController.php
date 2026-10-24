@@ -2,28 +2,29 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\CashRegister;
 use App\Models\BudgetLine;
+use App\Models\CashRegister;
 use App\Models\Demande;
 use App\Models\DemandeJustificatif;
 use App\Models\Project;
 use App\Models\Requisition;
 use App\Models\RequisitionSignature;
 use App\Models\User;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Endroid\QrCode\Encoding\Encoding;
+use Endroid\QrCode\ErrorCorrectionLevel;
+use Endroid\QrCode\QrCode;
+use Endroid\QrCode\RoundBlockSizeMode;
+use Endroid\QrCode\Writer\PngWriter;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\Support\Facades\Storage;
-use Barryvdh\DomPDF\Facade\Pdf;
-use Endroid\QrCode\QrCode;
-use Endroid\QrCode\Writer\PngWriter;
-use Endroid\QrCode\Encoding\Encoding;
-use Endroid\QrCode\ErrorCorrectionLevel;
-use Endroid\QrCode\RoundBlockSizeMode;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 
 class RequisitionController extends Controller
@@ -53,21 +54,23 @@ class RequisitionController extends Controller
                     'date_paiement' => $requisition->date_paiement?->format('d/m/Y'),
                     'date_livraison' => $requisition->date_livraison?->format('d/m/Y'),
                     'observation' => $requisition->observation,
+                    'derniere_observation' => $requisition->derniere_observation,
                     'statusCode' => $requisition->status,
                     'statusLabel' => match ($requisition->status) {
                         'returned_to_beneficiary' => 'À corriger par l’initiateur',
                         'returned_to_urgent_initiator' => 'À corriger par l’initiateur urgent',
-                        'returned_to_project_manager' => 'À corriger par le Chef de Projet',
-                        'returned_to_finance' => 'À corriger par les Finances',
-                        'returned_to_admin_manager' => 'À corriger par le PAM (Historique)',
+                        'returned_to_project_manager' => 'À arbitrer par le Chef de Projet',
+                        'returned_to_finance' => 'À arbitrer par le Chef de Projet',
+                        'returned_to_admin_manager' => 'À arbitrer par le Chef de Projet',
                         'draft' => 'En attente du Manager de Projet',
                         'urgent_direction' => 'En attente de la Directrice (urgence)',
-                        'visa_mp' => 'En attente des Finances',
-                        'controle_finance' => 'En attente du PAM',
+                        'visa_mp' => 'En attente du PAM',
+                        'visa_pam' => 'En attente des Finances',
+                        'controle_finance' => 'En attente des Finances',
                         'visa_admin' => 'En attente de la Directrice',
                         'decaissement_caisse' => 'En attente de la Caisse',
                         'decaisse' => 'Décaissée',
-                        default => ucfirst($requisition->status),
+                        default => ucfirst(str_replace('_', ' ', $requisition->status)),
                     },
                     'etapeActuelle' => $this->mapStatusToWorkflow($requisition->status),
 
@@ -79,8 +82,8 @@ class RequisitionController extends Controller
                             'code' => $sig->signature_code ?: 'BP-SIG-VAL',
                             'date' => $sig->signed_at->format('d/m/Y à H:i'),
                             'hash' => $sig->signature_hash,
-                            'hashShort' => substr($sig->signature_hash, 0, 16) . '...',
-                             'commentaire' => $sig->commentaire, 
+                            'hashShort' => substr($sig->signature_hash, 0, 16).'...',
+                            'commentaire' => $sig->commentaire,
                         ];
                     })->values()->all(),
 
@@ -124,7 +127,9 @@ class RequisitionController extends Controller
     public function showJustificatif(DemandeJustificatif $justificatif)
     {
         $user = Auth::user();
-        if (! $user) abort(403);
+        if (! $user) {
+            abort(403);
+        }
 
         $requisition = $justificatif->demande?->requisition;
         $isAuthorized = $requisition?->user_id === $user->id
@@ -134,7 +139,9 @@ class RequisitionController extends Controller
             || $user->hasRole('admin_manager')
             || $user->canApproveAsDirector();
 
-        if (! $isAuthorized) abort(403, 'Vous n’êtes pas autorisé à consulter ce fichier.');
+        if (! $isAuthorized) {
+            abort(403, 'Vous n’êtes pas autorisé à consulter ce fichier.');
+        }
         if (empty($justificatif->file_path) || ! Storage::disk('public')->exists($justificatif->file_path)) {
             abort(404, 'Fichier introuvable.');
         }
@@ -143,7 +150,7 @@ class RequisitionController extends Controller
 
         return response()->file($absolutePath, [
             'Content-Type' => $justificatif->mime_type ?: 'application/octet-stream',
-            'Content-Disposition' => 'inline; filename="' . ($justificatif->original_name ?: basename($absolutePath)) . '"',
+            'Content-Disposition' => 'inline; filename="'.($justificatif->original_name ?: basename($absolutePath)).'"',
         ]);
     }
 
@@ -191,7 +198,9 @@ class RequisitionController extends Controller
 
             foreach ($validated['articles'] as $articleIndex => $article) {
                 $demande = $demandes->get($article['id']);
-                if (! $demande) continue;
+                if (! $demande) {
+                    continue;
+                }
 
                 $quantiteOuDuree = (float) $article['quantiteOuDuree'];
                 $fraisUnitaire = (float) $article['prixUnitaire'];
@@ -214,7 +223,7 @@ class RequisitionController extends Controller
 
                 foreach ($request->file("articles.{$articleIndex}.justificatifs", []) as $justificatifIndex => $fileData) {
                     $uploadedFile = is_array($fileData) ? ($fileData['file'] ?? null) : $fileData;
-                    if (! $uploadedFile instanceof \Illuminate\Http\UploadedFile || ! $uploadedFile->isValid()) {
+                    if (! $uploadedFile instanceof UploadedFile || ! $uploadedFile->isValid()) {
                         continue;
                     }
 
@@ -242,10 +251,9 @@ class RequisitionController extends Controller
                 'status' => $resubmissionStatus,
             ]);
 
-            // Identification exacte de la signature de correction
             $correctionRole = match (true) {
-                $user->hasRole('finance') && $previousStatus === 'returned_to_finance' => 'finance',
-                $user->hasRole('project_manager') && $previousStatus === 'returned_to_project_manager' => 'project_manager',
+                $user->hasRole('project_manager') => 'project_manager',
+                $user->hasRole('finance') => 'finance',
                 default => 'initiator',
             };
 
@@ -267,8 +275,8 @@ class RequisitionController extends Controller
 
         $nextRole = match ($resubmissionStatus) {
             'draft' => 'project_manager',
-            'visa_mp' => 'finance',
-            'controle_finance' => 'admin_manager',
+            'visa_mp' => 'admin_manager',
+            'visa_pam' => 'finance',
             'visa_admin', 'urgent_direction' => 'director',
             default => null,
         };
@@ -278,7 +286,7 @@ class RequisitionController extends Controller
                 roleCible: $nextRole,
                 projectId: $nextRole === 'project_manager' ? $requisition->project_id : null,
                 titre: 'Réquisition corrigée et resoumise',
-                message: "La réquisition {$requisition->numero_requisition} a été corrigée et attend votre intervention.",
+                message: "La réquisition {$requisition->numero_requisition} a été corrigée et attend votre examen.",
                 urgent: (bool) $requisition->is_urgent
             );
         }
@@ -286,44 +294,30 @@ class RequisitionController extends Controller
         return Redirect::back()->with('success', 'Réquisition corrigée et resoumise à l’étape suivante.');
     }
 
-    /**
-     * RÈGLES STRICTES DE CORRECTION :
-     * Détermine si l'utilisateur a le droit de corriger ET le statut de destination.
-     * Si retourne NULL, l'utilisateur n'a pas le droit de corriger.
-     */
     private function correctionResubmissionStatus(User $user, Requisition $requisition): ?string
     {
         $isOwner = $requisition->user_id === $user->id;
 
-        // 1. Dérogation urgente
         if ($requisition->status === 'returned_to_urgent_initiator' && $isOwner) {
             return 'urgent_direction';
         }
 
-        // 2. Rejet du PM -> L'initiateur corrige et ça retourne au PM (draft)
         if ($isOwner && $requisition->status === 'returned_to_beneficiary') {
             return 'draft';
         }
 
-        // 3. Rejet de la Finance -> Le Chef de projet corrige et ça retourne à la finance (visa_mp)
+        // Le Chef de Projet corrige après n'importe quel rejet et transmet au PAM
         if ($user->hasRole('project_manager')
             && $user->project_id !== null
             && $user->project_id === $requisition->project_id
-            && $requisition->status === 'returned_to_project_manager') {
+            && in_array($requisition->status, ['returned_to_project_manager', 'returned_to_finance', 'returned_to_admin_manager'])) {
             return 'visa_mp';
         }
 
-        // 4. Rejet du PAM ou Directrice -> La Finance corrige et ça retourne au PAM (controle_finance)
-        if ($user->hasRole('finance') && $requisition->status === 'returned_to_finance') {
-            return 'controle_finance';
-        }
-
-        // 5. Modification libre tant que c'est un brouillon et qu'on est propriétaire
         if ($isOwner && $requisition->status === 'draft') {
             return 'draft';
         }
 
-        // Aucun autre droit de correction (y compris le PAM)
         return null;
     }
 
@@ -376,11 +370,7 @@ class RequisitionController extends Controller
             ->count() + 1;
 
         $numeroChronologique = sprintf('%s/%s/%03d', $initialesProjet, $moisCourant, $ordre);
-
         $isUrgent = $request->boolean('is_urgent');
-        
-        // Tout le monde commence en 'draft', y compris le PM, pour forcer l'arbitrage
-        $initialStatus = 'draft';
 
         $requisition = Requisition::create([
             'user_id' => $user->id,
@@ -396,7 +386,7 @@ class RequisitionController extends Controller
             'is_urgent' => $isUrgent,
             'date_paiement' => $validated['date_paiement'] ?? null,
             'date_livraison' => $validated['date_livraison'] ?? null,
-            'status' => $initialStatus,
+            'status' => 'draft',
         ]);
 
         $this->enregistrerSignature(
@@ -439,13 +429,17 @@ class RequisitionController extends Controller
             $rawJustificatifs = $request->input("lignes.{$ligneIndex}.justificatifs", []);
             $uploadedJustificatifs = $request->file("lignes.{$ligneIndex}.justificatifs", []);
 
-            if (! is_array($rawJustificatifs)) $rawJustificatifs = [$rawJustificatifs];
-            if (! is_array($uploadedJustificatifs)) $uploadedJustificatifs = [$uploadedJustificatifs];
+            if (! is_array($rawJustificatifs)) {
+                $rawJustificatifs = [$rawJustificatifs];
+            }
+            if (! is_array($uploadedJustificatifs)) {
+                $uploadedJustificatifs = [$uploadedJustificatifs];
+            }
 
             foreach ($rawJustificatifs as $justifIndex => $justifData) {
                 $uploadedFile = $uploadedJustificatifs[$justifIndex]['file'] ?? ($uploadedJustificatifs[$justifIndex] ?? null);
 
-                if (! $uploadedFile || ! $uploadedFile instanceof \Illuminate\Http\UploadedFile || ! $uploadedFile->isValid()) {
+                if (! $uploadedFile || ! $uploadedFile instanceof UploadedFile || ! $uploadedFile->isValid()) {
                     continue;
                 }
 
@@ -473,7 +467,7 @@ class RequisitionController extends Controller
 
         abort_unless($user?->hasRole('project_manager'), 403, 'Action réservée au Manager de Projet.');
         abort_unless($user->project_id !== null && $user->project_id === $requisition->project_id, 403, 'Cette réquisition appartient à un autre projet.');
-        
+
         abort_unless(in_array($requisition->status, ['draft', 'visa_mp', 'returned_to_project_manager']), 403,
             'La réquisition n\'est pas dans un statut en attente de l\'arbitrage du Manager de Projet.');
 
@@ -481,6 +475,7 @@ class RequisitionController extends Controller
             'decision' => ['required', 'in:approve,reject'],
             'pin' => ['nullable', 'string'],
             'password' => ['nullable', 'string'],
+            'observation' => ['nullable', 'string', 'max:5000'],
             'caisse_decaissement' => [
                 'required_if:decision,approve',
                 'nullable',
@@ -507,7 +502,7 @@ class RequisitionController extends Controller
 
         DB::transaction(function () use ($validated, $requisition, $user) {
             $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
-            
+
             abort_unless(
                 $lockedRequisition->project_id === $user->project_id
                     && in_array($lockedRequisition->status, ['draft', 'visa_mp', 'returned_to_project_manager']),
@@ -533,9 +528,15 @@ class RequisitionController extends Controller
                     }
                 }
 
+                $commentaireSignature = ! empty($validated['observation'])
+                    ? $validated['observation']
+                    : "Visa MP accordé. Caisse : {$validated['caisse_decaissement']}";
+
+                // STATUT : visa_mp (transmis STRICTEMENT au PAM)
                 $lockedRequisition->update([
-                    'status' => 'visa_mp', 
+                    'status' => 'visa_mp',
                     'caisse_decaissement' => $validated['caisse_decaissement'],
+                    'derniere_observation' => $validated['observation'] ?? null,
                 ]);
 
                 $this->enregistrerSignature(
@@ -543,7 +544,7 @@ class RequisitionController extends Controller
                     $user,
                     'project_manager',
                     'approved',
-                    "Visa MP accordé. Caisse : {$validated['caisse_decaissement']}"
+                    $commentaireSignature
                 );
 
                 $this->notifierUtilisateur(
@@ -556,23 +557,27 @@ class RequisitionController extends Controller
                     $this->notifierUtilisateur(
                         userId: $lockedRequisition->user_id,
                         titre: 'Visa Manager de Projet accordé',
-                        message: "Votre réquisition {$lockedRequisition->numero_requisition} a été visée par le MP et transmise aux Finances."
+                        message: "Votre réquisition {$lockedRequisition->numero_requisition} a été visée par le MP et transmise au PAM."
                     );
                 }
 
+                // Notifie UNIQUEMENT le PAM (Programme Administration Manager)
                 $this->notifierRole(
-                    roleCible: 'finance',
+                    roleCible: 'admin_manager',
                     projectId: null,
-                    titre: (bool) $lockedRequisition->is_urgent ? 'URGENT : Réquisition pour contrôle' : 'Nouvelle réquisition pour contrôle budgétaire',
-                    message: "La réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->projet}) est en attente de visa financier.",
+                    titre: (bool) $lockedRequisition->is_urgent ? 'URGENT : Réquisition pour visa administratif' : 'Nouvelle réquisition pour examen administratif (PAM)',
+                    message: "La réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->projet}) est en attente de visa du PAM.",
                     urgent: (bool) $lockedRequisition->is_urgent
                 );
 
                 return;
             }
 
-            // REJET DU PM => RETOUR STRICTEMENT A L'INITIATEUR (BÉNÉFICIAIRE)
-            $lockedRequisition->update(['status' => 'returned_to_beneficiary']);
+            // REJET DU PM => RETOUR AU BÉNÉFICIAIRE
+            $lockedRequisition->update([
+                'status' => 'returned_to_beneficiary',
+                'derniere_observation' => $validated['motif_rejet'],
+            ]);
 
             $this->enregistrerSignature(
                 $lockedRequisition,
@@ -584,30 +589,166 @@ class RequisitionController extends Controller
 
             $this->notifierUtilisateur(
                 userId: $lockedRequisition->user_id,
-                titre: 'Réquisition rejetée par le MP',
-                message: "Votre réquisition {$lockedRequisition->numero_requisition} a été rejetée : {$validated['motif_rejet']}"
+                titre: 'Réquisition retournée par le MP',
+                message: "Votre réquisition {$lockedRequisition->numero_requisition} a été retournée : {$validated['motif_rejet']}"
             );
         });
 
         return Redirect::back()->with(
             $validated['decision'] === 'approve' ? 'success' : 'error',
             $validated['decision'] === 'approve'
-                ? 'Visa Manager de Projet accordé avec certificat cryptographique.'
-                : 'Réquisition rejetée et retournée à l’initiateur.'
+                ? 'Visa Manager de Projet accordé. Dossier transmis au PAM.'
+                : 'Réquisition retournée à l’initiateur pour correction.'
         );
     }
 
-    public function financeDecision(Request $request, Requisition $requisition)
+    /**
+     * Examen et décision du PAM (Programme Administration Manager)
+     * Le PAM intervient STRICTEMENT lorsque le statut est 'visa_mp'
+     */
+    public function adminDecision(Request $request, Requisition $requisition)
     {
         $user = $request->user();
 
-        abort_unless($user?->hasRole('finance'), 403, 'Action réservée au Manager des Finances.');
-        abort_unless($requisition->status === 'visa_mp', 403, 'Cette réquisition n’est pas en attente de visa financier.');
+        abort_unless($user?->hasRole('admin_manager'), 403, 'Action réservée au Manager de l\'Administration (PAM).');
+
+        // VÉRIFICATION STRICTE : Le PAM n'intervient que sur 'visa_mp'
+        abort_unless(
+            $requisition->status === 'visa_mp',
+            403,
+            'Cette réquisition n’est pas en attente de visa du PAM.'
+        );
 
         $validated = $request->validate([
             'decision' => ['required', 'in:approve,reject'],
             'pin' => ['nullable', 'string'],
             'password' => ['nullable', 'string'],
+            'observation' => ['nullable', 'string', 'max:5000'],
+            'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
+        ]);
+
+        if ($validated['decision'] === 'approve') {
+            $secret = $validated['pin'] ?? $validated['password'] ?? $request->input('pin') ?? $request->input('password');
+
+            if (! $this->verifierSecretSignature($user, $secret)) {
+                return Redirect::back()->withErrors([
+                    'pin' => 'Signature refusée : Code PIN (ou mot de passe) administratif incorrect.',
+                    'password' => 'Signature refusée : Code PIN (ou mot de passe) administratif incorrect.',
+                ]);
+            }
+        }
+
+        DB::transaction(function () use ($validated, $requisition, $user) {
+            $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
+
+            abort_unless(
+                $lockedRequisition->status === 'visa_mp',
+                403,
+                'Cette réquisition n’est plus en attente de visa du PAM.'
+            );
+
+            if ($validated['decision'] === 'approve') {
+                $commentaireSignature = ! empty($validated['observation'])
+                    ? $validated['observation']
+                    : 'Visa de contrôle administratif (PAM) accordé.';
+
+                // STATUT : visa_pam (C'est ICI que le dossier est débloqué pour la Finance)
+                $lockedRequisition->update([
+                    'status' => 'visa_pam',
+                    'derniere_observation' => $validated['observation'] ?? null,
+                ]);
+
+                $this->enregistrerSignature(
+                    $lockedRequisition,
+                    $user,
+                    'admin_manager',
+                    'approved',
+                    $commentaireSignature
+                );
+
+                $this->notifierUtilisateur(
+                    userId: $user->id,
+                    titre: 'Visa PAM accordé',
+                    message: "Vous avez visé administrativement la réquisition {$lockedRequisition->numero_requisition}."
+                );
+
+                $this->notifierUtilisateur(
+                    userId: $lockedRequisition->user_id,
+                    titre: 'Visa Administratif (PAM) accordé',
+                    message: "Votre réquisition {$lockedRequisition->numero_requisition} a été visée par le PAM et transmise aux Finances."
+                );
+
+                // Notifie UNIQUEMENT la Finance maintenant que le PAM a validé
+                $this->notifierRole(
+                    roleCible: 'finance',
+                    projectId: null,
+                    titre: (bool) $lockedRequisition->is_urgent ? 'URGENT : Réquisition visée par le PAM' : 'Nouvelle réquisition pour contrôle financier',
+                    message: "La réquisition {$lockedRequisition->numero_requisition} ({$lockedRequisition->montant_total} {$lockedRequisition->devise}) est prête pour votre contrôle financier.",
+                    urgent: (bool) $lockedRequisition->is_urgent
+                );
+
+                return;
+            }
+
+            // REJET DU PAM => RETOUR SYSTEMATIQUE AU PROJECT MANAGER
+            $lockedRequisition->update([
+                'status' => 'returned_to_project_manager',
+                'derniere_observation' => $validated['motif_rejet'],
+            ]);
+
+            $this->enregistrerSignature(
+                $lockedRequisition,
+                $user,
+                'admin_manager',
+                'rejected',
+                $validated['motif_rejet']
+            );
+
+            $this->notifierUtilisateur(
+                userId: $lockedRequisition->user_id,
+                titre: 'Réquisition renvoyée par le PAM',
+                message: "La réquisition {$lockedRequisition->numero_requisition} a été retournée : {$validated['motif_rejet']}"
+            );
+
+            $this->notifierRole(
+                roleCible: 'project_manager',
+                projectId: $lockedRequisition->project_id,
+                titre: 'Réquisition retournée par le PAM',
+                message: "La réquisition {$lockedRequisition->numero_requisition} a été retournée par le PAM : {$validated['motif_rejet']}"
+            );
+        });
+
+        return Redirect::back()->with(
+            $validated['decision'] === 'approve' ? 'success' : 'error',
+            $validated['decision'] === 'approve'
+                ? 'Visa administratif (PAM) accordé avec succès. Transmis au service Finance.'
+                : 'Dossier renvoyé au Manager de Projet pour arbitrage.'
+        );
+    }
+
+    /**
+     * Contrôle budgétaire et visa de la Finance
+     * La Finance intervient STRICTEMENT lorsque le statut est 'visa_pam' (après visa du PAM)
+     */
+    public function financeDecision(Request $request, Requisition $requisition)
+    {
+        $user = $request->user();
+
+        abort_unless($user?->hasRole('finance'), 403, 'Action réservée au Manager des Finances.');
+
+        // VÉRIFICATION STRICTE : La Finance NE PEUT PAS intervenir sur 'visa_mp' !
+        // Elle intervient UNIQUEMENT après validation du PAM ('visa_pam').
+        abort_unless(
+            $requisition->status === 'visa_pam',
+            403,
+            'Cette réquisition n’a pas encore été visée par le PAM et ne peut être traitée par les Finances.'
+        );
+
+        $validated = $request->validate([
+            'decision' => ['required', 'in:approve,reject'],
+            'pin' => ['nullable', 'string'],
+            'password' => ['nullable', 'string'],
+            'observation' => ['nullable', 'string', 'max:5000'],
             'caisse_decaissement' => [
                 'nullable',
                 'string',
@@ -633,7 +774,12 @@ class RequisitionController extends Controller
 
         DB::transaction(function () use ($validated, $requisition, $user) {
             $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
-            abort_unless($lockedRequisition->status === 'visa_mp', 403, 'Cette réquisition n’est plus en attente de visa financier.');
+
+            abort_unless(
+                $lockedRequisition->status === 'visa_pam',
+                403,
+                'Cette réquisition n’est plus en attente de visa financier.'
+            );
 
             if ($validated['decision'] === 'approve') {
                 if (! empty($validated['caisse_decaissement'])) {
@@ -660,15 +806,21 @@ class RequisitionController extends Controller
                     }
                 }
 
-                $lockedRequisition->status = 'controle_finance';
+                // STATUT : visa_admin (transmis à la Directrice Générale)
+                $lockedRequisition->status = 'visa_admin';
+                $lockedRequisition->derniere_observation = $validated['observation'] ?? null;
                 $lockedRequisition->save();
+
+                $commentaireSignature = ! empty($validated['observation'])
+                    ? $validated['observation']
+                    : "Visa financier accordé. Caisse : {$lockedRequisition->caisse_decaissement}";
 
                 $this->enregistrerSignature(
                     $lockedRequisition,
                     $user,
                     'finance',
                     'approved',
-                    "Visa de contrôle financier et budgétaire accordé. Caisse : {$lockedRequisition->caisse_decaissement}"
+                    $commentaireSignature
                 );
 
                 $this->notifierUtilisateur(
@@ -680,104 +832,10 @@ class RequisitionController extends Controller
                 $this->notifierUtilisateur(
                     userId: $lockedRequisition->user_id,
                     titre: 'Visa Financier accordé',
-                    message: "Le visa financier a été accordé pour votre réquisition {$lockedRequisition->numero_requisition}."
+                    message: "Le visa financier a été accordé pour votre réquisition {$lockedRequisition->numero_requisition}. Transmise à la Direction."
                 );
 
-                $this->notifierRole(
-                    roleCible: 'admin_manager',
-                    projectId: null,
-                    titre: (bool) $lockedRequisition->is_urgent ? 'URGENT : Dossier en attente de visa' : 'Dossier en attente de visa administratif',
-                    message: "La réquisition {$lockedRequisition->numero_requisition} est prête pour visa administratif.",
-                    urgent: (bool) $lockedRequisition->is_urgent
-                );
-
-                return;
-            }
-
-            // REJET DES FINANCES => RETOUR STRICTEMENT AU PROJECT MANAGER
-            $lockedRequisition->update(['status' => 'returned_to_project_manager']);
-
-            $this->enregistrerSignature(
-                $lockedRequisition,
-                $user,
-                'finance',
-                'rejected',
-                $validated['motif_rejet']
-            );
-
-            $this->notifierUtilisateur(
-                userId: $lockedRequisition->user_id,
-                titre: 'Réquisition renvoyée par les Finances',
-                message: "La réquisition {$lockedRequisition->numero_requisition} a été renvoyée pour correction : {$validated['motif_rejet']}"
-            );
-            $this->notifierRole(
-                roleCible: 'project_manager',
-                projectId: $lockedRequisition->project_id,
-                titre: 'Réquisition à corriger après refus des Finances',
-                message: "La réquisition {$lockedRequisition->numero_requisition} doit être corrigée avant un nouvel examen financier."
-            );
-        });
-
-        return Redirect::back()->with(
-            $validated['decision'] === 'approve' ? 'success' : 'error',
-            $validated['decision'] === 'approve'
-                ? 'Visa financier certifié et corrections budgétaires enregistrées.'
-                : 'Dossier renvoyé au Manager de Projet pour correction budgétaire.'
-        );
-    }
-
-    public function adminDecision(Request $request, Requisition $requisition)
-    {
-        $user = $request->user();
-
-        abort_unless($user?->hasRole('admin_manager'), 403, 'Action réservée au Manager de l\'Administration.');
-        abort_unless($requisition->status === 'controle_finance', 403, 'Cette réquisition n’est pas en attente de visa administratif.');
-
-        $validated = $request->validate([
-            'decision' => ['required', 'in:approve,reject'],
-            'pin' => ['nullable', 'string'],
-            'password' => ['nullable', 'string'],
-            'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
-        ]);
-
-        if ($validated['decision'] === 'approve') {
-            $secret = $validated['pin'] ?? $validated['password'] ?? $request->input('pin') ?? $request->input('password');
-
-            if (! $this->verifierSecretSignature($user, $secret)) {
-                return Redirect::back()->withErrors([
-                    'pin' => 'Signature refusée : Code PIN (ou mot de passe) administratif incorrect.',
-                    'password' => 'Signature refusée : Code PIN (ou mot de passe) administratif incorrect.',
-                ]);
-            }
-        }
-
-        DB::transaction(function () use ($validated, $requisition, $user) {
-            $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
-            abort_unless($lockedRequisition->status === 'controle_finance', 403, 'Cette réquisition n’est plus en attente de visa administratif.');
-
-            if ($validated['decision'] === 'approve') {
-                $lockedRequisition->update(['status' => 'visa_admin']);
-
-                $this->enregistrerSignature(
-                    $lockedRequisition,
-                    $user,
-                    'admin_manager',
-                    'approved',
-                    'Visa de contrôle administratif accordé.'
-                );
-
-                $this->notifierUtilisateur(
-                    userId: $user->id,
-                    titre: 'Visa Administratif accordé',
-                    message: "Vous avez visé administrativement la réquisition {$lockedRequisition->numero_requisition}."
-                );
-
-                $this->notifierUtilisateur(
-                    userId: $lockedRequisition->user_id,
-                    titre: 'Visa Administratif accordé',
-                    message: "Votre réquisition {$lockedRequisition->numero_requisition} a franchi le contrôle administratif."
-                );
-
+                // Notifie UNIQUEMENT la Direction Générale
                 $this->notifierRole(
                     roleCible: 'director',
                     projectId: null,
@@ -789,35 +847,39 @@ class RequisitionController extends Controller
                 return;
             }
 
-            // REJET DU PAM => RETOUR STRICTEMENT AUX FINANCES
-            $lockedRequisition->update(['status' => 'returned_to_finance']);
+            // REJET DES FINANCES => RETOUR SYSTEMATIQUE AU PROJECT MANAGER
+            $lockedRequisition->update([
+                'status' => 'returned_to_project_manager',
+                'derniere_observation' => $validated['motif_rejet'],
+            ]);
 
             $this->enregistrerSignature(
                 $lockedRequisition,
                 $user,
-                'admin_manager',
+                'finance',
                 'rejected',
                 $validated['motif_rejet']
             );
 
             $this->notifierUtilisateur(
                 userId: $lockedRequisition->user_id,
-                titre: 'Réquisition renvoyée par l\'Administration',
-                message: "La réquisition {$lockedRequisition->numero_requisition} a été renvoyée : {$validated['motif_rejet']}"
+                titre: 'Réquisition retournée par les Finances',
+                message: "La réquisition {$lockedRequisition->numero_requisition} a été retournée : {$validated['motif_rejet']}"
             );
+
             $this->notifierRole(
-                roleCible: 'finance',
-                projectId: null,
-                titre: 'Réquisition à corriger après refus du PAM',
-                message: "La réquisition {$lockedRequisition->numero_requisition} doit être corrigée avant un nouvel examen administratif."
+                roleCible: 'project_manager',
+                projectId: $lockedRequisition->project_id,
+                titre: 'Réquisition retournée par les Finances',
+                message: "La réquisition {$lockedRequisition->numero_requisition} a été renvoyée par les Finances : {$validated['motif_rejet']}"
             );
         });
 
         return Redirect::back()->with(
             $validated['decision'] === 'approve' ? 'success' : 'error',
             $validated['decision'] === 'approve'
-                ? 'Visa administratif accordé avec succès. Transmis à la Directrice Générale pour approbation finale.'
-                : 'Dossier renvoyé aux Finances pour correction administrative.'
+                ? 'Visa financier validé avec succès. Transmis à la Directrice Générale.'
+                : 'Dossier renvoyé au Manager de Projet pour arbitrage.'
         );
     }
 
@@ -841,6 +903,7 @@ class RequisitionController extends Controller
             'decision' => ['required', 'in:approve,reject'],
             'pin' => ['nullable', 'string'],
             'password' => ['nullable', 'string'],
+            'observation' => ['nullable', 'string', 'max:5000'],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
         ]);
 
@@ -860,14 +923,19 @@ class RequisitionController extends Controller
             abort_unless($lockedRequisition->status === 'visa_admin', 403, 'Cette réquisition n’est plus en attente d’approbation finale.');
 
             $isInterim = ! $user->hasRole('director') && (bool) $user->is_director_interim;
-            $signataireNom = $isInterim ? ($user->name . ' (P.O. / Intérim)') : $user->name;
+            $signataireNom = $isInterim ? ($user->name.' (P.O. / Intérim)') : $user->name;
 
             if ($validated['decision'] === 'approve') {
-                $lockedRequisition->update(['status' => 'decaissement_caisse']);
+                $lockedRequisition->update([
+                    'status' => 'decaissement_caisse',
+                    'derniere_observation' => $validated['observation'] ?? null,
+                ]);
 
-                $commentaireSignature = $isInterim
+                $commentaireDefaut = $isInterim
                     ? 'Bon à payer accordé pour ordre / intérim par le Manager Administratif (PAM). Autorisation de décaissement transmise à la Caisse.'
                     : 'Bon à payer accordé. Autorisation de décaissement transmise à la Caisse.';
+
+                $commentaireSignature = ! empty($validated['observation']) ? $validated['observation'] : $commentaireDefaut;
 
                 $this->enregistrerSignature(
                     requisition: $lockedRequisition,
@@ -897,9 +965,10 @@ class RequisitionController extends Controller
                 return;
             }
 
-            // REJET DE LA DIRECTRICE => RETOUR STRICTEMENT AUX FINANCES
+            // REJET DE LA DIRECTRICE => RETOUR SYSTEMATIQUE AU PROJECT MANAGER
             $lockedRequisition->update([
-                'status' => 'returned_to_finance',
+                'status' => 'returned_to_project_manager',
+                'derniere_observation' => $validated['motif_rejet'],
             ]);
 
             $this->enregistrerSignature(
@@ -916,11 +985,12 @@ class RequisitionController extends Controller
                 titre: 'Réquisition refusée par la Direction',
                 message: "Votre réquisition {$lockedRequisition->numero_requisition} a été refusée : {$validated['motif_rejet']}"
             );
+
             $this->notifierRole(
-                roleCible: 'finance', 
-                projectId: null,
-                titre: 'Réquisition à corriger après refus de la Direction',
-                message: "La réquisition {$lockedRequisition->numero_requisition} doit être corrigée par les Finances avant une nouvelle soumission à la Direction."
+                roleCible: 'project_manager',
+                projectId: $lockedRequisition->project_id,
+                titre: 'Réquisition refusée par la Direction',
+                message: "La réquisition {$lockedRequisition->numero_requisition} a été refusée par la Direction : {$validated['motif_rejet']}"
             );
         });
 
@@ -932,7 +1002,7 @@ class RequisitionController extends Controller
                 ? ($isInterim
                     ? 'Bon à payer accordé pour ordre / intérim. Dossier transmis à la Caisse pour décaissement.'
                     : 'Bon à payer accordé avec succès. Dossier transmis à la Caisse pour décaissement.')
-                : 'Dossier rejeté par la Direction et renvoyé aux finances.'
+                : 'Dossier rejeté par la Direction et renvoyé au Manager de Projet.'
         );
     }
 
@@ -950,6 +1020,7 @@ class RequisitionController extends Controller
 
         $validated = $request->validate([
             'decision' => ['sometimes', 'in:approve,reject'],
+            'observation' => ['nullable', 'string', 'max:5000'],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
         ]);
         $decision = $validated['decision'] ?? 'approve';
@@ -958,17 +1029,24 @@ class RequisitionController extends Controller
             $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
             abort_unless($lockedRequisition->status === 'urgent_direction', 403, 'Cette réquisition n’est plus en attente de dérogation urgente.');
             $isInterim = ! $user->hasRole('director') && (bool) $user->is_director_interim;
-            $signataireNom = $isInterim ? ($user->name . ' (P.O. / Intérim)') : $user->name;
+            $signataireNom = $isInterim ? ($user->name.' (P.O. / Intérim)') : $user->name;
 
             if ($decision === 'approve') {
-                $lockedRequisition->update(['status' => 'decaissement_caisse']);
+                $lockedRequisition->update([
+                    'status' => 'decaissement_caisse',
+                    'derniere_observation' => $validated['observation'] ?? null,
+                ]);
+
+                $commentaire = ! empty($validated['observation'])
+                    ? $validated['observation']
+                    : ('Approbation URGENTE accordée. Décaissement transmis à la Caisse.'.($isInterim ? ' (Pour ordre / Intérim).' : '.'));
 
                 $this->enregistrerSignature(
                     requisition: $lockedRequisition,
                     user: $user,
                     roleSignataire: 'director',
                     action: 'approved',
-                    commentaire: 'Approbation URGENTE accordée. Décaissement transmis à la Caisse.' . ($isInterim ? ' (Pour ordre / Intérim).' : '.'),
+                    commentaire: $commentaire,
                     nomSignataireCustom: $signataireNom
                 );
 
@@ -988,7 +1066,11 @@ class RequisitionController extends Controller
                 return;
             }
 
-            $lockedRequisition->update(['status' => 'returned_to_urgent_initiator']);
+            $lockedRequisition->update([
+                'status' => 'returned_to_urgent_initiator',
+                'derniere_observation' => $validated['motif_rejet'],
+            ]);
+
             $this->enregistrerSignature(
                 requisition: $lockedRequisition,
                 user: $user,
@@ -1038,7 +1120,7 @@ class RequisitionController extends Controller
         ?string $nomSignataireCustom = null
     ): void {
         $now = now();
-        $hash = hash('sha256', $requisition->id . $user->id . $roleSignataire . $action . $now->toIso8601String() . config('app.key'));
+        $hash = hash('sha256', $requisition->id.$user->id.$roleSignataire.$action.$now->toIso8601String().config('app.key'));
 
         $rolePrefix = match ($roleSignataire) {
             'project_manager' => 'MP',
@@ -1072,7 +1154,7 @@ class RequisitionController extends Controller
         if ($projectId) {
             $query->where(function ($q) use ($projectId) {
                 $q->where('project_id', $projectId)
-                  ->orWhereHas('project', fn ($p) => $p->where('id', $projectId));
+                    ->orWhereHas('project', fn ($p) => $p->where('id', $projectId));
             });
         }
 
@@ -1108,15 +1190,13 @@ class RequisitionController extends Controller
 
     protected function mapStatusToWorkflow(string $status): string
     {
-        // Conservation de "returned_to_admin_manager" ici pour ne pas crasher sur les anciennes données
         return match ($status) {
             'draft' => 'visa_mp',
             'urgent_direction' => 'approbation_direction',
             'returned_to_beneficiary', 'returned_to_urgent_initiator' => 'brouillon',
-            'returned_to_project_manager' => 'visa_mp',
-            'returned_to_finance' => 'controle_finance',
-            'returned_to_admin_manager' => 'visa_admin',
-            'visa_mp' => 'controle_finance',
+            'returned_to_project_manager', 'returned_to_finance', 'returned_to_admin_manager' => 'visa_mp',
+            'visa_mp' => 'visa_pam',
+            'visa_pam' => 'controle_finance',
             'controle_finance' => 'visa_admin',
             'visa_admin' => 'approbation_direction',
             'approbation_direction' => 'approbation_direction',
@@ -1140,7 +1220,7 @@ class RequisitionController extends Controller
             roundBlockSizeMode: RoundBlockSizeMode::Margin,
         );
 
-        $writer = new PngWriter();
+        $writer = new PngWriter;
         $result = $writer->write($qrCode);
 
         return $result->getDataUri();
@@ -1156,9 +1236,9 @@ class RequisitionController extends Controller
         ]);
 
         $pdf = Pdf::loadView('pdf.requisition', compact('requisition'))
-            ->setPaper('a4', 'landscape'); 
+            ->setPaper('a4', 'landscape');
 
-        $nomFichier = 'Requisition_' . str_replace('/', '-', $requisition->numero_requisition) . '.pdf';
+        $nomFichier = 'Requisition_'.str_replace('/', '-', $requisition->numero_requisition).'.pdf';
 
         return $pdf->download($nomFichier);
     }

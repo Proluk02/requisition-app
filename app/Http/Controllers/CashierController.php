@@ -6,7 +6,6 @@ use App\Models\BudgetLine;
 use App\Models\CashMovement;
 use App\Models\CashRegister;
 use App\Models\CashRegisterSession;
-use App\Models\Demande;
 use App\Models\Requisition;
 use App\Models\RequisitionSignature;
 use App\Models\User;
@@ -221,9 +220,9 @@ class CashierController extends Controller
         if ($soldeDisponible < $montantDecaisse) {
             return Redirect::back()->with(
                 'error',
-                "Décaissement impossible : Fonds insuffisants en caisse. " .
-                "Solde disponible : " . number_format($soldeDisponible, 2, ',', ' ') . " {$cashRegister->devise}. " .
-                "Montant requis : " . number_format($montantDecaisse, 2, ',', ' ') . " {$cashRegister->devise}."
+                'Décaissement impossible : Fonds insuffisants en caisse. '.
+                'Solde disponible : '.number_format($soldeDisponible, 2, ',', ' ')." {$cashRegister->devise}. ".
+                'Montant requis : '.number_format($montantDecaisse, 2, ',', ' ')." {$cashRegister->devise}."
             );
         }
 
@@ -273,7 +272,7 @@ class CashierController extends Controller
                 'montant' => $montantDecaisse,
                 'devise' => $cashRegister->devise,
                 'montant_en_lettres' => trim($validated['montant_en_lettres']),
-                'motif' => 'En règlement de : ' . (trim($observation ?? '') ?: $lockedRequisition->nature_requisition),
+                'motif' => 'En règlement de : '.(trim($observation ?? '') ?: $lockedRequisition->nature_requisition),
                 'imputation' => $primaryImputation,
                 'mode_paiement' => $validated['mode_paiement'],
                 'reference_externe' => $validated['reference_paiement'] ?? $lockedRequisition->numero_requisition,
@@ -327,7 +326,7 @@ class CashierController extends Controller
             );
         });
 
-        return Redirect::back()->with('success', "Bon de Sortie Caisse émis et débité avec succès.");
+        return Redirect::back()->with('success', 'Bon de Sortie Caisse émis et débité avec succès.');
     }
 
     /**
@@ -548,11 +547,11 @@ class CashierController extends Controller
             ->orderBy('created_at')
             ->get();
 
-        $fileName = 'grand_livre_' . Str::slug($caisse->name) . "_{$year}_{$month}.csv";
+        $fileName = 'grand_livre_'.Str::slug($caisse->name)."_{$year}_{$month}.csv";
 
         return response()->streamDownload(function () use ($caisse, $year, $month, $soldeInitialMois, $movements) {
             $handle = fopen('php://output', 'w');
-            fputs($handle, "\xEF\xBB\xBF");
+            fwrite($handle, "\xEF\xBB\xBF");
 
             fputcsv($handle, ['Bon Pasteur A.S.B.L. - Système Centralisé des Coûts'], ';');
             fputcsv($handle, ["GRAND LIVRE CAISSE {$caisse->name} - {$month}/{$year} - Devise : {$caisse->devise}"], ';');
@@ -560,12 +559,12 @@ class CashierController extends Controller
 
             fputcsv($handle, [
                 'DATE', 'N°', 'PROJET', 'N°BON', 'PIECE / REF', 'IMPUTATION', 'DESIGNATION',
-                "ENTREE ({$caisse->devise})", "SORTIE ({$caisse->devise})", "SOLDE ({$caisse->devise})"
+                "ENTREE ({$caisse->devise})", "SORTIE ({$caisse->devise})", "SOLDE ({$caisse->devise})",
             ], ';');
 
             fputcsv($handle, [
                 "01/{$month}/{$year}", '1', '', '', '', '', "SOLDE D'OUVERTURE",
-                '', '', number_format($soldeInitialMois, 2, ',', ' ')
+                '', '', number_format($soldeInitialMois, 2, ',', ' '),
             ], ';');
 
             $solde = $soldeInitialMois;
@@ -595,18 +594,18 @@ class CashierController extends Controller
                     $m->motif,
                     $in,
                     $out,
-                    number_format($solde, 2, ',', ' ')
+                    number_format($solde, 2, ',', ' '),
                 ], ';');
             }
 
             fputcsv($handle, [
                 now()->endOfMonth()->format('d/m/Y'), '', '', '', '', '', 'Solde de cloture',
-                '', '', number_format($solde, 2, ',', ' ')
+                '', '', number_format($solde, 2, ',', ' '),
             ], ';');
 
             fputcsv($handle, [
                 '', '', '', '', '', '', 'TOTAL',
-                number_format($totIn, 2, ',', ' '), number_format($totOut, 2, ',', ' '), ''
+                number_format($totIn, 2, ',', ' '), number_format($totOut, 2, ',', ' '), '',
             ], ';');
 
             fclose($handle);
@@ -688,6 +687,7 @@ class CashierController extends Controller
 
                 $transformed = $this->transformMovement($m);
                 $transformed['solde_progressif'] = round($soldeCourant, 2);
+
                 return $transformed;
             });
 
@@ -776,7 +776,7 @@ class CashierController extends Controller
         ?string $commentaire = null
     ): void {
         $now = now();
-        $hash = hash('sha256', $requisition->id . $user->id . $roleSignataire . $action . $now->toIso8601String() . config('app.key'));
+        $hash = hash('sha256', $requisition->id.$user->id.$roleSignataire.$action.$now->toIso8601String().config('app.key'));
         $signatureCode = sprintf('BP-SIG-CS-%s-%s-%s', strtoupper(substr($user->name, 0, 2)), $now->format('ymd'), strtoupper(substr($hash, 0, 4)));
 
         RequisitionSignature::create([

@@ -70,12 +70,13 @@ interface FinanceRequisition {
     montantTotal: number;
     caisseAttribuee?: string;
     observation: string | null;
+    derniere_observation?: string | null;
     is_urgent?: boolean;
     statusCode: string;
     statusLabel: string;
     canDecide: boolean;
     canCorrect?: boolean;
-    financeRejected: boolean;
+    financeRejected?: boolean;
     motifRejet?: string | null;
     dateSoumission: string;
     signatures: Signature[];
@@ -144,9 +145,6 @@ interface Props extends PageProps {
 const money = (amount: number, currency: string) =>
     `${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${currency}`;
 
-/* =========================================================================
- *  COMPOSANT AUTOCOMPLÉTION & FILTRAGE BUDGET FRONT-END (REACT)
- * ========================================================================= */
 function BudgetLineSearchPicker({
     currentCode,
     projectId,
@@ -324,9 +322,6 @@ function BudgetLineSearchPicker({
     );
 }
 
-/* =========================================================================
- *  PAGE PRINCIPALE DASHBOARD FINANCE
- * ========================================================================= */
 export default function FinanceDashboard({
     requisitions: initialRequisitions = [],
     projects = [],
@@ -340,7 +335,6 @@ export default function FinanceDashboard({
 
     const [requisitions, setRequisitions] = useState<FinanceRequisition[]>(initialRequisitions);
 
-    // Resynchronisation automatique de l'état local quand Inertia recharge les props
     useEffect(() => {
         setRequisitions(initialRequisitions);
     }, [initialRequisitions]);
@@ -356,6 +350,7 @@ export default function FinanceDashboard({
     const [correcting, setCorrecting] = useState<RequisitionCorrectionData | null>(null);
     const [rejecting, setRejecting] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
+    const [observationFinance, setObservationFinance] = useState('');
 
     const [financeCaisse, setFinanceCaisse] = useState<string>('');
     const [financeAllocations, setFinanceAllocations] = useState<Record<string, string>>({});
@@ -449,10 +444,10 @@ export default function FinanceDashboard({
     const filteredRequisitions = useMemo(() => {
         return requisitions.filter((item) => {
             if (statusFilter === 'pending' && !item.canDecide) return false;
-            if (statusFilter === 'controle_finance' && item.statusCode !== 'controle_finance') return false;
+            if (statusFilter === 'controle_finance' && item.statusCode !== 'controle_finance' && item.statusCode !== 'visa_admin') return false;
             if (statusFilter === 'decaissement_caisse' && item.statusCode !== 'decaissement_caisse') return false;
             if (statusFilter === 'decaisse' && item.statusCode !== 'decaisse') return false;
-            if (statusFilter === 'returned' && !item.canCorrect && !item.financeRejected) return false;
+            if (statusFilter === 'returned' && item.statusCode !== 'returned_to_project_manager') return false;
 
             if (selectedProject !== 'all' && item.project_id !== selectedProject && item.projet !== selectedProject) {
                 return false;
@@ -489,6 +484,7 @@ export default function FinanceDashboard({
         setSelected(item);
         setRejecting(false);
         setRejectionReason('');
+        setObservationFinance('');
         setFinanceCaisse(item.caisseAttribuee || 'Caisse principale');
 
         const initialAllocations: Record<string, string> = {};
@@ -524,6 +520,7 @@ export default function FinanceDashboard({
             {
                 decision: 'approve',
                 pin: pinSaisi.trim(),
+                observation: observationFinance.trim() || null,
                 caisse_decaissement: financeCaisse,
                 allocations: allocationsArray,
             },
@@ -534,9 +531,9 @@ export default function FinanceDashboard({
                     setPinModalOpen(false);
                     setSelected(null);
                     setPinSaisi('');
-                    // Rechargement complet des props pour resynchroniser l'état
+                    setObservationFinance('');
                     router.reload();
-                    showToast('success', `Visa Financier certifié apposé sur ${currentNumero}. Transmis à l'Administration.`);
+                    showToast('success', `Visa Financier validé avec succès sur ${currentNumero}. Transmis à la Directrice Générale.`);
                 },
                 onError: (errors) => {
                     setPinError((errors as any).pin || 'Code PIN financier incorrect ou non configuré.');
@@ -547,7 +544,7 @@ export default function FinanceDashboard({
 
     const handleRejectFinance = () => {
         if (!selected || !rejectionReason.trim()) {
-            showToast('error', 'Veuillez spécifier le motif du rejet financier.');
+            showToast('error', 'Veuillez obligatoirement spécifier le motif du rejet financier.');
             return;
         }
 
@@ -559,7 +556,7 @@ export default function FinanceDashboard({
             {
                 decision: 'reject',
                 pin: '0000',
-                motif_rejet: rejectionReason,
+                motif_rejet: rejectionReason.trim(),
             },
             {
                 preserveScroll: true,
@@ -569,7 +566,7 @@ export default function FinanceDashboard({
                     setRejecting(false);
                     setRejectionReason('');
                     router.reload({ preserveUrl: true });
-                    showToast('error', `Réquisition ${currentNumero} renvoyée au Chef de Projet pour correction budgétaire.`);
+                    showToast('error', `Réquisition ${currentNumero} retournée au Chef de Projet pour arbitrage.`);
                 },
                 onError: (errors) => {
                     showToast('error', (errors as any).motif_rejet || 'Erreur lors du renvoi.');
@@ -595,7 +592,7 @@ export default function FinanceDashboard({
                 onSuccess: () => {
                     setSessionToAuthorize(null);
                     setSessionPin('');
-                    router.reload({ preserveScroll: true });
+                    router.reload();
                     showToast('success', `Guichet ${caisseName} ouvert avec succès.`);
                 },
                 onError: (errs) => {
@@ -616,13 +613,13 @@ export default function FinanceDashboard({
                             <Wallet className="w-3.5 h-3.5 text-[#04326D]" />
                             <span>Direction Financière</span>
                             <span className="mx-1">/</span>
-                            <span className="text-[#04326D]">Centre Financier</span>
+                            <span className="text-[#04326D]">Étape 3 : Contrôle Budgétaire & Visa Financier</span>
                         </nav>
                         <h1 className="text-xl font-bold text-[#0B192C]">
                             Contrôle Budgétaire, Caisses & Visas
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
-                            Financier : <strong className="text-[#0B192C]">{user.name}</strong> • Vérification et ajustement des lignes budgétaires, contrôle de trésorerie et autorisations en direct.
+                            Financier : <strong className="text-[#0B192C]">{user.name}</strong> • Examen des dossiers après le visa du PAM.
                         </p>
                     </div>
 
@@ -706,7 +703,7 @@ export default function FinanceDashboard({
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between border-l-4 border-l-[#F58F20]">
                         <span className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">
-                            En attente de Visa Finance
+                            En attente de Visa Finance (après PAM)
                         </span>
                         <p className="text-2xl font-black text-[#F58F20] mt-2">
                             {pendingCount} <span className="text-xs font-normal text-gray-500">dossier(s)</span>
@@ -733,7 +730,7 @@ export default function FinanceDashboard({
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                    {/* 1. Donut Graphique SVG - Statut des Dossiers */}
+                    {/* Donut Graphique */}
                     <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
                         <div className="flex items-center justify-between border-b pb-2.5">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
@@ -790,7 +787,7 @@ export default function FinanceDashboard({
                                 <div className="flex items-center justify-between pt-1 border-t border-gray-100">
                                     <span className="flex items-center gap-1.5 text-gray-600">
                                         <span className={`w-2.5 h-2.5 rounded-full ${chartData.isEmpty ? 'bg-gray-300' : 'bg-[#F58F20]'}`} />
-                                        En attente (Visas) :
+                                        En attente Finance :
                                     </span>
                                     <strong className="font-mono text-[#F58F20]">
                                         {chartData.pending}
@@ -800,7 +797,7 @@ export default function FinanceDashboard({
                         </div>
                     </div>
 
-                    {/* 2. Jauge de Ratio (Bon à Payer / Décaissé) */}
+                    {/* Jauge Progression */}
                     <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
                         <div className="flex items-center justify-between border-b pb-2.5">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
@@ -846,7 +843,7 @@ export default function FinanceDashboard({
                         </div>
                     </div>
 
-                    {/* 3. DIAGRAMME À BARRES CHRONOLOGIQUE */}
+                    {/* Diagramme à barres */}
                     <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
                         <div className="flex items-center justify-between border-b pb-2.5">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
@@ -875,7 +872,7 @@ export default function FinanceDashboard({
                                     if (req.statusCode === 'decaisse') barColor = 'bg-emerald-500';
                                     else if (req.statusCode === 'decaissement_caisse') barColor = 'bg-[#04326D]';
                                     else if (req.canDecide) barColor = 'bg-[#F58F20]'; 
-                                    else if (req.financeRejected) barColor = 'bg-red-500';
+                                    else if (req.statusCode === 'returned_to_project_manager') barColor = 'bg-red-500';
 
                                     return (
                                         <div key={req.id} className="relative group flex-1 flex flex-col items-center justify-end h-full">
@@ -944,7 +941,7 @@ export default function FinanceDashboard({
                     </div>
                 </div>
 
-                {/* Liste des réquisitions avec filtre instantané React */}
+                {/* Liste des réquisitions */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="border-b px-4 py-3 bg-gray-50 flex flex-wrap items-center justify-between gap-3 text-xs">
                         <div className="flex flex-wrap items-center gap-2">
@@ -1010,7 +1007,7 @@ export default function FinanceDashboard({
                                 <option value="controle_finance">Validées Finance</option>
                                 <option value="decaissement_caisse">Bon à Payer Accordé</option>
                                 <option value="decaisse">Décaissées au Guichet</option>
-                                <option value="returned">Renvoyées en correction</option>
+                                <option value="returned">Renvoyées au PM</option>
                             </select>
                         </div>
 
@@ -1086,8 +1083,6 @@ export default function FinanceDashboard({
                                             </td>
                                             <td className="px-4 py-3.5 text-right whitespace-nowrap">
                                                 <div className="flex items-center justify-end gap-1.5">
-                                                    
-                                                    {/* VUE DIRECTION / HISTORIQUE DES VISAS */}
                                                     <button
                                                         type="button"
                                                         onClick={() => setDirectorPreviewReq(item)}
@@ -1098,18 +1093,6 @@ export default function FinanceDashboard({
                                                         <span className="hidden xl:inline">Historique Visas</span>
                                                     </button>
 
-                                                    {/* BOUTON CORRIGER : STRICTEMENT SI LA FINANCE Y EST HABILITEE */}
-                                                    {item.canCorrect && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => openCorrection(item)}
-                                                            className="px-2.5 py-1.5 border border-red-600 bg-red-50 text-red-700 rounded font-bold text-xs hover:bg-red-100 transition"
-                                                        >
-                                                            Corriger (Rejet)
-                                                        </button>
-                                                    )}
-
-                                                    {/* BOUTON EXAMINER (Si en attente) OU IMPUTATIONS (Détails) */}
                                                     <button
                                                         type="button"
                                                         onClick={() => handleOpenExamen(item)}
@@ -1131,7 +1114,7 @@ export default function FinanceDashboard({
                 </div>
             </div>
 
-            {/* APERÇU CONSOLIDÉ (Vue Direction/Historique des signatures) */}
+            {/* APERÇU CONSOLIDÉ */}
             {directorPreviewReq && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-4xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
@@ -1157,7 +1140,6 @@ export default function FinanceDashboard({
                             </button>
                         </header>
 
-                        {/* Signatures et Visas certifiés */}
                         <div className="space-y-2">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700">
                                 Chaîne des Visas & Signatures Numériques
@@ -1200,14 +1182,14 @@ export default function FinanceDashboard({
                 </div>
             )}
 
-            {/* MODALE D'EXAMEN & D'IMPUTATION AVEC FILTRAGE REACT INSTANTANÉ */}
+            {/* MODALE D'EXAMEN & D'IMPUTATION */}
             {selected && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="w-full max-w-6xl max-h-[92vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-4 animate-slide-down flex flex-col">
                         <header className="flex items-start justify-between border-b pb-3 shrink-0">
                             <div>
                                 <span className="text-[10px] uppercase font-bold text-[#F58F20] bg-amber-50 border border-amber-200 px-2 py-0.5 rounded tracking-wider">
-                                    Contrôle Budgétaire & Visa Financier (Étape 2)
+                                    Étape 3 : Contrôle Budgétaire & Visa Financier (Après PAM)
                                 </span>
                                 <h2 className="text-base font-bold text-[#0B192C] mt-1.5">
                                     Réquisition N° {selected.numero} ({selected.nature})
@@ -1225,7 +1207,6 @@ export default function FinanceDashboard({
                             </button>
                         </header>
 
-                        {/* Choix et Modification directe de la Caisse par le MF */}
                         {selected.canDecide && (
                             <div className="p-3 bg-amber-50 border border-amber-200 rounded flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shrink-0">
                                 <div>
@@ -1250,11 +1231,17 @@ export default function FinanceDashboard({
 
                         {selected.observation && (
                             <div className="p-3 bg-amber-50 border-l-4 border-[#F58F20] text-xs text-gray-800 rounded-r shrink-0">
-                                <strong>Observation :</strong> {selected.observation}
+                                <strong>Observation initiale :</strong> {selected.observation}
                             </div>
                         )}
 
-                        {/* Tableau des lignes avec autocomplétion & filtrage dynamique */}
+                        {selected.derniere_observation && (
+                            <div className="p-3 bg-blue-50 border-l-4 border-[#04326D] text-xs text-gray-800 rounded-r shrink-0">
+                                <strong>Observation formulée par le PAM :</strong> {selected.derniere_observation}
+                            </div>
+                        )}
+
+                        {/* Tableau des lignes */}
                         <div className="flex-1 overflow-visible min-h-0 flex flex-col">
                             <div className="flex items-center justify-between mb-2 shrink-0">
                                 <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
@@ -1273,7 +1260,6 @@ export default function FinanceDashboard({
                                     <thead className="bg-[#0B192C] text-white font-bold">
                                         <tr>
                                             <th className="p-2.5">Désignation</th>
-                                            {/* Colonne de 500px pour laisser place à la liste déroulante */}
                                             <th className="p-2.5 w-[500px]">Code Imputé & Recherche Front-End</th>
                                             <th className="p-2.5 text-right">Solde Disponible</th>
                                             <th className="p-2.5 text-right">Total Ligne</th>
@@ -1378,38 +1364,54 @@ export default function FinanceDashboard({
                         {selected.canDecide && (
                             <div className="border-t pt-4 space-y-3 shrink-0">
                                 {!rejecting ? (
-                                    <div className="flex items-center justify-between">
-                                        <button
-                                            type="button"
-                                            onClick={() => setRejecting(true)}
-                                            className="px-3.5 py-2 border border-red-300 text-red-600 hover:bg-red-50 rounded text-xs font-bold transition"
-                                        >
-                                            <Ban className="w-3.5 h-3.5 inline mr-1" />
-                                            Rejeter (Renvoi au Manager Projet)
-                                        </button>
+                                    <div className="space-y-3">
+                                        {/* Champ d'observation optionnel pour la Finance */}
+                                        <div>
+                                            <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                                                Observation / Note financière (Optionnel lors de la validation) :
+                                            </label>
+                                            <textarea
+                                                rows={2}
+                                                value={observationFinance}
+                                                onChange={(e) => setObservationFinance(e.target.value)}
+                                                placeholder="Ajouter une observation ou remarque pour la Direction Générale..."
+                                                className="w-full border border-gray-300 rounded p-2 text-xs focus:outline-none focus:border-[#04326D] focus:ring-1 focus:ring-[#04326D]"
+                                            />
+                                        </div>
 
-                                        <div className="flex gap-2">
+                                        <div className="flex items-center justify-between pt-2">
                                             <button
                                                 type="button"
-                                                onClick={() => setSelected(null)}
-                                                className="px-3.5 py-2 border rounded text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                                                onClick={() => setRejecting(true)}
+                                                className="px-3.5 py-2 border border-red-300 text-red-600 hover:bg-red-50 rounded text-xs font-bold transition"
                                             >
-                                                Fermer
+                                                <Ban className="w-3.5 h-3.5 inline mr-1" />
+                                                Rejeter (Renvoi au Manager Projet)
                                             </button>
-                                            <button
-                                                type="button"
-                                                onClick={handleTriggerApprove}
-                                                className="px-4 py-2 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition"
-                                            >
-                                                Enregistrer Corrections & Viser (PIN)
-                                            </button>
+
+                                            <div className="flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelected(null)}
+                                                    className="px-3.5 py-2 border rounded text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                                                >
+                                                    Fermer
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleTriggerApprove}
+                                                    className="px-4 py-2 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition"
+                                                >
+                                                    Enregistrer & Viser aux Finances (PIN)
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 ) : (
                                     <div className="bg-red-50 p-4 rounded border border-red-200 space-y-3">
                                         <div className="flex justify-between items-center">
                                             <h4 className="text-xs font-bold text-red-800 uppercase">
-                                                Motif du Rejet (Retour au Manager de Projet)
+                                                Motif du Rejet (Retour au Manager de Projet) *
                                             </h4>
                                             <button
                                                 type="button"
@@ -1423,7 +1425,7 @@ export default function FinanceDashboard({
                                             rows={3}
                                             value={rejectionReason}
                                             onChange={(e) => setRejectionReason(e.target.value)}
-                                            placeholder="Précisez le motif comptable : dépassement de crédit, ligne erronée... Le dossier sera renvoyé au Chef de Projet."
+                                            placeholder="Précisez obligatoirement le motif financier (dépassement, code non valide, etc.). Le dossier sera renvoyé au Chef de Projet."
                                             className="w-full border border-red-300 rounded p-2 text-xs bg-white focus:outline-none"
                                             required
                                         />
@@ -1438,10 +1440,10 @@ export default function FinanceDashboard({
                                             <button
                                                 type="button"
                                                 onClick={handleRejectFinance}
-                                                disabled={processing}
-                                                className="px-4 py-1.5 bg-[#DC2626] hover:bg-[#b91c1c] text-white rounded text-xs font-bold shadow"
+                                                disabled={processing || !rejectionReason.trim()}
+                                                className="px-4 py-1.5 bg-[#DC2626] hover:bg-[#b91c1c] text-white rounded text-xs font-bold shadow disabled:opacity-50"
                                             >
-                                                Confirmer le Rejet
+                                                Confirmer le Rejet au Chef de Projet
                                             </button>
                                         </div>
                                     </div>
@@ -1495,7 +1497,7 @@ export default function FinanceDashboard({
                             </div>
 
                             <p className="text-[10px] text-gray-400 leading-tight">
-                                Cette signature infalsifiable atteste de la disponibilité des crédits budgétaires et enregistre vos imputations.
+                                Cette signature atteste du contrôle budgétaire et transmet le dossier à la Direction Générale.
                             </p>
 
                             <div className="flex justify-end gap-2 pt-2 border-t">
@@ -1509,7 +1511,7 @@ export default function FinanceDashboard({
                                 <button
                                     type="submit"
                                     disabled={processing}
-                                    className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition"
+                                    className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition disabled:opacity-50"
                                 >
                                     {processing ? 'Signature...' : 'Signer & Valider'}
                                 </button>
@@ -1582,7 +1584,6 @@ export default function FinanceDashboard({
                 </div>
             )}
 
-            {/* FORMULAIRE DE CORRECTION FINANCE : Renvoyé par Admin/Directrice */}
             {correcting && (
                 <RequisitionCorrectionForm
                     key={correcting.id}
@@ -1592,7 +1593,7 @@ export default function FinanceDashboard({
                     onSuccess={() => {
                         setCorrecting(null);
                         router.reload({ preserveUrl: true });
-                        showToast('success', `Réquisition ${correcting.numero} corrigée et resoumise au PAM avec succès.`);
+                        showToast('success', `Réquisition ${correcting.numero} corrigée.`);
                     }}
                 />
             )}

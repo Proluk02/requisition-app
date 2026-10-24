@@ -43,7 +43,7 @@ it('imports excel allocation codes and budget data into the selected project', f
     $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
     $finance = createBudgetImportFinanceUser($project);
 
-    $spreadsheet = new Spreadsheet();
+    $spreadsheet = new Spreadsheet;
     $spreadsheet->getActiveSheet()->fromArray([
         ['CATEGORY', 'SUBCATEGORY', 'DESCRIPT', 'SPLIT', 'CODE', 'LIBELLE', 'DEVISE', 'BUDGET_INITIAL', 'DONATEUR'],
         ['6', '112', 'a', '1', '6.112.a.1', 'Matériel de bureau', 'USD', 1250.5, 'Union Européenne'],

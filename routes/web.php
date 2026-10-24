@@ -131,6 +131,7 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::get('/requisitions/create', function () {
         $caisses = CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name', 'devise']);
         $projectsList = Project::orderBy('name')->get(['id', 'name', 'full_name']);
+
         return Inertia::render('Staff/Requisitions/Create', [
             'caisses' => $caisses,
             'projectsList' => $projectsList,
@@ -153,7 +154,7 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::get('/transport', [PettyCashController::class, 'index'])->name('transport.index');
     Route::get('/requisitions/{requisition}/pdf', [RequisitionController::class, 'generatePdf'])->name('requisitions.pdf');
     Route::get('/verify/signature/{hash}', [SignatureVerificationController::class, 'verify'])
-    ->name('signature.verify');
+        ->name('signature.verify');
 
     Route::post('/notifications/{id}/mark-read', function (Request $request, $id) {
         DB::table('notifications')

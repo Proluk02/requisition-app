@@ -56,6 +56,7 @@ interface RequisitionMP {
     caisseSouhaitee: string;
     caisseAttribuee?: string;
     observation?: string;
+    derniere_observation?: string | null;
     motifRejet?: string | null;
     is_urgent: boolean;
     statut: string;
@@ -63,7 +64,7 @@ interface RequisitionMP {
     statusLabel: string;
     canDecide: boolean;
     canCorrect: boolean;
-    canEdit: boolean;
+    canEdit?: boolean;
     financeReturned: boolean;
     needsCorrection: boolean;
     dateSoumission: string;
@@ -136,6 +137,7 @@ export default function ProjectManagerDashboard({
     const [allocations, setAllocations] = useState<Record<string, string>>({});
     const [modeRejet, setModeRejet] = useState<boolean>(false);
     const [motifRejet, setMotifRejet] = useState<string>('');
+    const [observationPM, setObservationPM] = useState<string>('');
     const [activeInputId, setActiveInputId] = useState<string | null>(null);
 
     const [passwordModalOpen, setPasswordModalOpen] = useState<boolean>(false);
@@ -203,6 +205,7 @@ export default function ProjectManagerDashboard({
         );
         setModeRejet(false);
         setMotifRejet('');
+        setObservationPM('');
 
         const initialAllocations: Record<string, string> = {};
         req.lignes.forEach((ligne) => {
@@ -248,6 +251,7 @@ export default function ProjectManagerDashboard({
                 decision: 'approve',
                 pin: passwordSaisi.trim(),
                 password: passwordSaisi.trim(),
+                observation: observationPM.trim() || null,
                 caisse_decaissement: caisseChoisie,
                 allocations: allocationsArray,
             },
@@ -256,10 +260,11 @@ export default function ProjectManagerDashboard({
                 onFinish: () => setSigningLoading(false),
                 onSuccess: () => {
                     setPasswordModalOpen(false);
-                    showToast('success', `Visa apposé avec succès sur ${selectedReq.numero}.`);
+                    showToast('success', `Visa MP apposé avec succès sur ${selectedReq.numero}. Transmis au PAM.`);
                     setSelectedReq(null);
                     setPasswordSaisi('');
-                    router.reload(); // Rafraichissement pour les stats
+                    setObservationPM('');
+                    router.reload();
                 },
                 onError: (errors) => {
                     const message = (errors as any).pin || (errors as any).password || Object.values(errors)[0] || 'Code PIN ou mot de passe incorrect.';
@@ -273,7 +278,7 @@ export default function ProjectManagerDashboard({
     const handleRejeter = () => {
         if (!selectedReq) return;
         if (!motifRejet.trim()) {
-            showToast('error', 'Veuillez spécifier le motif du rejet.');
+            showToast('error', 'Veuillez obligatoirement spécifier le motif du rejet.');
             return;
         }
 
@@ -283,12 +288,12 @@ export default function ProjectManagerDashboard({
                 decision: 'reject',
                 password: 'skip',
                 pin: 'skip',
-                motif_rejet: motifRejet,
+                motif_rejet: motifRejet.trim(),
             },
             {
                 preserveScroll: true,
                 onSuccess: () => {
-                    showToast('error', `Réquisition ${selectedReq.numero} rejetée.`);
+                    showToast('error', `Réquisition ${selectedReq.numero} retournée à l'initiateur pour correction.`);
                     setSelectedReq(null);
                     setModeRejet(false);
                     setMotifRejet('');
@@ -358,8 +363,6 @@ export default function ProjectManagerDashboard({
 
             {/* SECTIONS GRAPHIQUES */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-                
-                {/* Graph 1 : Suivi des Réquisitions */}
                 <div className="bg-white border border-[#B2BED6] rounded p-5 shadow-sm space-y-3 flex items-center gap-6">
                     <div className="flex-1">
                         <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5 border-b pb-2 mb-3">
@@ -376,7 +379,7 @@ export default function ProjectManagerDashboard({
                                 <strong className="font-mono text-emerald-800">{pmStats.req_validees}</strong>
                             </div>
                             <div className="flex justify-between items-center">
-                                <span className="flex items-center gap-1.5 text-gray-600"><span className="w-2.5 h-2.5 rounded-full bg-red-500" />À Corriger :</span>
+                                <span className="flex items-center gap-1.5 text-gray-600"><span className="w-2.5 h-2.5 rounded-full bg-red-500" />À Arbitrer / Corriger :</span>
                                 <strong className="font-mono text-red-800">{pmStats.req_a_corriger}</strong>
                             </div>
                         </div>
@@ -396,7 +399,6 @@ export default function ProjectManagerDashboard({
                     </div>
                 </div>
 
-                {/* Graph 2 : Exécution Budgétaire */}
                 <div className="bg-white border border-[#B2BED6] rounded p-5 shadow-sm space-y-3">
                     <div className="flex items-center justify-between border-b pb-2.5">
                         <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
@@ -434,7 +436,6 @@ export default function ProjectManagerDashboard({
                         </div>
                     </div>
                 </div>
-
             </div>
 
             <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
@@ -444,7 +445,6 @@ export default function ProjectManagerDashboard({
                     </h2>
 
                     <div className="flex flex-wrap items-center gap-3 text-xs">
-                        {/* Filtre par statut */}
                         <div className="flex items-center gap-1.5">
                             <Filter className="w-3.5 h-3.5 text-gray-400" />
                             <select
@@ -455,11 +455,10 @@ export default function ProjectManagerDashboard({
                                 <option value="all">Toutes</option>
                                 <option value="en_attente_mp">À arbitrer (Visa MP)</option>
                                 <option value="valide_mp">Validées (Transmises)</option>
-                                <option value="a_corriger">À corriger</option>
+                                <option value="a_corriger">À arbitrer / corriger</option>
                             </select>
                         </div>
 
-                        {/* Filtre par collaborateur */}
                         {projectUsers && projectUsers.length > 0 && (
                             <div className="flex items-center gap-1.5">
                                 <UserCheck className="w-3.5 h-3.5 text-gray-400" />
@@ -504,7 +503,6 @@ export default function ProjectManagerDashboard({
                                 </tr>
                             ) : (
                                 demandesFiltrees.map((req) => {
-                                    // SECURITE : Le bouton Arbitrer doit s'afficher si c'est "en_attente_mp"
                                     const isDecidable = req.canDecide || req.statut === 'en_attente_mp';
 
                                     return (
@@ -552,8 +550,6 @@ export default function ProjectManagerDashboard({
                                             </td>
                                             <td className="py-3.5 px-4 text-right whitespace-nowrap">
                                                 <div className="flex items-center justify-end gap-1.5">
-                                                    
-                                                    {/* Bouton Voir Vue Direction */}
                                                     <button
                                                         type="button"
                                                         onClick={() => setDirectorPreviewReq(req)}
@@ -564,7 +560,6 @@ export default function ProjectManagerDashboard({
                                                         <span className="hidden xl:inline">Détails</span>
                                                     </button>
 
-                                                    {/* Bouton Corriger (autorisé UNIQUEMENT après rejet Finance) */}
                                                     {req.canCorrect && (
                                                         <button
                                                             type="button"
@@ -605,7 +600,7 @@ export default function ProjectManagerDashboard({
                 </div>
             </div>
 
-            {/* APERÇU CONSOLIDÉ (Vue Direction/Historique des signatures) */}
+            {/* APERÇU CONSOLIDÉ */}
             {directorPreviewReq && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-4xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
@@ -631,7 +626,6 @@ export default function ProjectManagerDashboard({
                             </button>
                         </header>
 
-                        {/* Signatures et Visas certifiés */}
                         <div className="space-y-2">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700">
                                 Chaîne des Visas & Signatures Numériques
@@ -661,7 +655,6 @@ export default function ProjectManagerDashboard({
                             )}
                         </div>
 
-                        {/* Lignes de dépenses */}
                         <div>
                             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700 mb-2 mt-4">
                                 Lignes de Dépenses ({directorPreviewReq.lignes.length})
@@ -709,14 +702,14 @@ export default function ProjectManagerDashboard({
                 </div>
             )}
 
-            {/* MODALE D'ARBITRAGE AVEC AUTOCOMPLÉTION & SOLDE DYNAMIQUE */}
+            {/* MODALE D'ARBITRAGE DU PM */}
             {selectedReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-5xl w-full p-6 space-y-4 max-h-[95vh] flex flex-col animate-slide-down">
                         <header className="flex items-start justify-between border-b pb-3 shrink-0">
                             <div>
                                 <span className="text-[10px] text-amber-700 font-bold uppercase tracking-wider">
-                                    Contrôle Opérationnel & Attribution Budgétaire
+                                    Étape 1 : Contrôle Opérationnel & Attribution Budgétaire
                                 </span>
                                 <h2 className="text-base font-bold text-[#0B192C]">
                                     Réquisition N° {selectedReq.numero} ({selectedReq.nature})
@@ -739,7 +732,7 @@ export default function ProjectManagerDashboard({
 
                         {selectedReq.motifRejet && (
                             <div className="rounded border border-red-200 bg-red-50 p-3 text-xs text-red-900 shrink-0">
-                                <strong>Motif du dernier retour :</strong>
+                                <strong>Motif du rejet / retour hiérarchique :</strong>
                                 <p className="mt-1 whitespace-pre-wrap">{selectedReq.motifRejet}</p>
                             </div>
                         )}
@@ -748,7 +741,6 @@ export default function ProjectManagerDashboard({
                             <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 shrink-0">
                                 Imputation des Lignes de Dépenses
                             </h3>
-                            {/* OVERFLOW-VISIBLE ICI POUR NE PAS COUPER LA LISTE DEROULANTE */}
                             <div className="border border-[#B2BED6] rounded flex-1 overflow-visible">
                                 <table className="w-full text-left text-xs">
                                     <thead className="bg-[#0B192C] text-white font-bold">
@@ -768,7 +760,6 @@ export default function ProjectManagerDashboard({
                                             const soldeDispo = matchedLine ? matchedLine.solde : ligne.budget_solde_actuel;
                                             const depassement = soldeDispo !== null && soldeDispo !== undefined && ligne.total > soldeDispo;
 
-                                            // FILTRE STRICT PAR PROJECT_ID
                                             const filteredSuggestions = budgetLines.filter((b) => {
                                                 if (selectedReq.project_id && b.project_id && b.project_id !== selectedReq.project_id) {
                                                     return false;
@@ -800,7 +791,6 @@ export default function ProjectManagerDashboard({
                                                                     required
                                                                 />
 
-                                                                {/* LISTE DÉROULANTE GÉANTE OVERFLOW VISIBLE */}
                                                                 {activeInputId === ligne.id && filteredSuggestions.length > 0 && (
                                                                     <div className="absolute left-0 top-full mt-1 w-full bg-white border-2 border-[#04326D] rounded shadow-2xl z-[200] max-h-72 overflow-y-auto divide-y text-xs">
                                                                         {filteredSuggestions.map((sug) => (
@@ -934,13 +924,27 @@ export default function ProjectManagerDashboard({
                                             </select>
                                         </div>
 
+                                        {/* Observation optionnelle du PM */}
+                                        <div>
+                                            <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                                                Observation / Commentaire du PM (Optionnel lors de la validation) :
+                                            </label>
+                                            <textarea
+                                                rows={2}
+                                                value={observationPM}
+                                                onChange={(e) => setObservationPM(e.target.value)}
+                                                placeholder="Ajouter une observation pour le PAM et la Finance..."
+                                                className="w-full border border-gray-300 rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
+                                            />
+                                        </div>
+
                                         <div className="flex items-center justify-between pt-2">
                                             <button
                                                 type="button"
                                                 onClick={() => setModeRejet(true)}
                                                 className="px-3 py-2 border border-red-300 text-red-600 rounded text-xs font-bold hover:bg-red-50 transition"
                                             >
-                                                Rejeter la demande
+                                                Renvoyer à l’initiateur (Rejet)
                                             </button>
 
                                             <div className="flex gap-2">
@@ -958,7 +962,7 @@ export default function ProjectManagerDashboard({
                                                     className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition"
                                                 >
                                                     <ShieldCheck className="w-4 h-4" />
-                                                    <span>Valider & Signer (Visa MP)</span>
+                                                    <span>Valider & Transmettre au PAM</span>
                                                 </button>
                                             </div>
                                         </div>
@@ -966,13 +970,13 @@ export default function ProjectManagerDashboard({
                                 ) : (
                                     <div className="p-4 bg-red-50 border border-red-200 rounded space-y-3 text-xs">
                                         <h4 className="font-bold text-red-800 uppercase">
-                                            Motif du Rejet (Obligatoire)
+                                            Motif du Rejet (Obligatoire pour l'initiateur) *
                                         </h4>
                                         <textarea
                                             rows={3}
                                             value={motifRejet}
                                             onChange={(e) => setMotifRejet(e.target.value)}
-                                            placeholder="Précisez le motif du rejet..."
+                                            placeholder="Précisez obligatoirement les motifs ou corrections demandées à l'initiateur..."
                                             className="w-full border border-red-300 rounded p-2 text-xs bg-white focus:outline-none"
                                             required
                                         />
@@ -987,9 +991,10 @@ export default function ProjectManagerDashboard({
                                             <button
                                                 type="button"
                                                 onClick={handleRejeter}
-                                                className="px-4 py-1.5 bg-red-600 text-white rounded font-bold shadow hover:bg-red-700"
+                                                disabled={!motifRejet.trim()}
+                                                className="px-4 py-1.5 bg-red-600 text-white rounded font-bold shadow hover:bg-red-700 disabled:opacity-50"
                                             >
-                                                Confirmer le Rejet
+                                                Confirmer le Renvoi à l’Initiateur
                                             </button>
                                         </div>
                                     </div>
@@ -1000,7 +1005,7 @@ export default function ProjectManagerDashboard({
                 </div>
             )}
 
-            {/* MODALE SIGNATURE (PIN) */}
+            {/* MODALE SIGNATURE (PIN) DU PM */}
             {passwordModalOpen && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in">
                     <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
@@ -1036,6 +1041,10 @@ export default function ProjectManagerDashboard({
                                 />
                             </div>
 
+                            <p className="text-[10px] text-gray-400 leading-tight">
+                                Le visa transmettra immédiatement la réquisition au PAM pour examen administratif.
+                            </p>
+
                             <div className="flex justify-end gap-2 pt-2 border-t">
                                 <button
                                     type="button"
@@ -1047,17 +1056,16 @@ export default function ProjectManagerDashboard({
                                 <button
                                     type="submit"
                                     disabled={signingLoading}
-                                    className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow"
+                                    className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow disabled:opacity-50"
                                 >
-                                    {signingLoading ? 'Signature en cours…' : 'Signer & Valider'}
+                                    {signingLoading ? 'Signature en cours…' : 'Signer & Transmettre au PAM'}
                                 </button>
                             </div>
                         </form>
                     </div>
                 </div>
             )}
-
-            {/* FORMULAIRE DE CORRECTION INTEGRE */}
+            
             {editingReq && (
                 <RequisitionCorrectionForm
                     key={editingReq.id}
@@ -1065,7 +1073,7 @@ export default function ProjectManagerDashboard({
                     budgetLines={budgetLines}
                     onClose={() => setEditingReq(null)}
                     onSuccess={() => {
-                        showToast('success', `Réquisition corrigée et resoumise aux Finances.`);
+                        showToast('success', `Réquisition corrigée et resoumise au PAM.`);
                         setEditingReq(null);
                         router.reload();
                     }}

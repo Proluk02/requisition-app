@@ -13,22 +13,27 @@ return new class extends Migration
             $table->foreignUuid('user_id')->constrained('users')->cascadeOnDelete();
             $table->foreignUuid('project_id')->nullable()->constrained('projects')->nullOnDelete();
             $table->string('numero_requisition');
-            $table->string('nature_requisition'); // Achat, Service
+            $table->string('nature_requisition');
             $table->string('projet');
             $table->string('project_code')->nullable();
             $table->string('caisse_decaissement')->nullable();
-            $table->string('devise');
+            $table->string('devise')->default('EUR');
             $table->text('observation')->nullable();
+            $table->text('derniere_observation')->nullable();
             $table->decimal('montant_total', 15, 2)->default(0);
+
+            $table->decimal('taux_eur_usd', 15, 6)->nullable();
+            $table->decimal('taux_eur_cdf', 15, 4)->nullable();
+            $table->decimal('montant_total_eur', 15, 2)->default(0);
+
             $table->string('status')->default('draft');
             $table->boolean('is_urgent')->default(false);
             $table->date('date_paiement')->nullable();
             $table->date('date_livraison')->nullable();
 
-            // Champs Caisse / Décaissement effectif (Étape 1.2)
             $table->foreignUuid('cashier_id')->nullable()->constrained('users')->nullOnDelete();
-            $table->string('mode_paiement')->nullable(); // Espèces, Chèque, Virement bancaire
-            $table->string('reference_paiement')->nullable(); // N° Chèque, Réf Bordereau
+            $table->string('mode_paiement')->nullable();
+            $table->string('reference_paiement')->nullable();
             $table->timestamp('date_decaissement')->nullable();
 
             $table->timestamps();
@@ -40,6 +45,7 @@ return new class extends Migration
             $table->string('activite');
             $table->string('code_all_budget');
             $table->string('code_allocation')->nullable();
+            $table->string('libelle_allocation')->nullable();
             $table->string('nature')->nullable();
             $table->decimal('quantite', 15, 2)->nullable();
             $table->decimal('duree', 15, 2)->nullable();
@@ -65,9 +71,9 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->foreignUuid('requisition_id')->constrained('requisitions')->cascadeOnDelete();
             $table->foreignUuid('user_id')->constrained('users')->cascadeOnDelete();
-            $table->string('role_signataire'); // project_manager, finance, admin_manager, director, cashier
+            $table->string('role_signataire');
             $table->string('nom_signataire');
-            $table->string('action'); // approved, rejected, disbursed
+            $table->string('action');
             $table->text('commentaire')->nullable();
             $table->string('signature_code')->nullable();
             $table->string('signature_hash');

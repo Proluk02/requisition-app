@@ -41,7 +41,7 @@ class ReportingController extends Controller
         if ($project) {
             $query->where(function ($q) use ($project) {
                 $q->where('project_id', $project->id)
-                  ->orWhere('projet', $project->name);
+                    ->orWhere('projet', $project->name);
             });
         }
 
@@ -149,6 +149,7 @@ class ReportingController extends Controller
         if ($type === 'annual') {
             $start = Carbon::create($year, 1, 1, 0, 0, 0)->startOfYear();
             $end = Carbon::create($year, 12, 31, 23, 59, 59)->endOfYear();
+
             return [$start, $end, "Année {$year}"];
         }
 
@@ -163,6 +164,7 @@ class ReportingController extends Controller
 
             $start = Carbon::create($year, $quarterMonth, 1, 0, 0, 0)->startOfQuarter();
             $end = Carbon::create($year, $quarterMonth, 1, 23, 59, 59)->endOfQuarter();
+
             return [$start, $end, "Trimestre {$quarter} {$year}"];
         }
 
@@ -170,6 +172,6 @@ class ReportingController extends Controller
         $start = Carbon::create($year, $safeMonth, 1, 0, 0, 0)->startOfMonth();
         $end = Carbon::create($year, $safeMonth, 1, 23, 59, 59)->endOfMonth();
 
-        return [$start, $end, ($nomsMois[$safeMonth] ?? '') . " {$year}"];
+        return [$start, $end, ($nomsMois[$safeMonth] ?? '')." {$year}"];
     }
 }

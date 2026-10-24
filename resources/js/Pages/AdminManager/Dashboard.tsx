@@ -61,6 +61,7 @@ interface RequisitionAdmin {
     montantTotal: number;
     caisseAttribuee?: string;
     observation: string | null;
+    derniere_observation?: string | null;
     is_urgent?: boolean;
     statusCode: string;
     statusLabel: string;
@@ -172,6 +173,7 @@ export default function AdminManagerDashboard({
     const [correcting, setCorrecting] = useState<RequisitionCorrectionData | null>(null);
     const [rejecting, setRejecting] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
+    const [observationApprobation, setObservationApprobation] = useState('');
 
     // Impression / téléchargement
     const [printReq, setPrintReq] = useState<RequisitionAdmin | null>(null);
@@ -259,6 +261,7 @@ export default function AdminManagerDashboard({
         router.patch(route('requisitions.admin-decision', selected.id), {
             decision: 'approve',
             password: passwordSaisi,
+            observation: observationApprobation.trim() || null,
         }, {
             preserveScroll: true,
             onFinish: () => setProcessing(false),
@@ -267,12 +270,13 @@ export default function AdminManagerDashboard({
                 setPasswordModalOpen(false);
                 setSelected(null);
                 setPasswordSaisi('');
+                setObservationApprobation('');
 
                 setRequisitions(prev => prev.filter(item => item.id !== updatedId));
 
                 setToast({
                     type: 'success',
-                    message: `Visa Administratif accordé avec succès sur ${selected.numero}. Transmis à la Directrice Générale.`
+                    message: `Visa PAM accordé avec succès sur ${selected.numero}. Transmis au service Finance.`
                 });
                 setTimeout(() => setToast(null), 5000);
             },
@@ -287,7 +291,7 @@ export default function AdminManagerDashboard({
 
     const handleReject = () => {
         if (!selected || !rejectionReason.trim()) {
-            setToast({ type: 'error', message: 'Veuillez spécifier le motif du rejet administratif.' });
+            setToast({ type: 'error', message: 'Veuillez spécifier obligatoirement le motif du rejet administratif.' });
             return;
         }
 
@@ -296,7 +300,7 @@ export default function AdminManagerDashboard({
         router.patch(route('requisitions.admin-decision', selected.id), {
             decision: 'reject',
             password: 'skip',
-            motif_rejet: rejectionReason,
+            motif_rejet: rejectionReason.trim(),
         }, {
             preserveScroll: true,
             onFinish: () => setProcessing(false),
@@ -310,7 +314,7 @@ export default function AdminManagerDashboard({
 
                 setToast({
                     type: 'error',
-                    message: `Réquisition ${selected.numero} renvoyée aux Finances pour correction.`
+                    message: `Réquisition ${selected.numero} retournée au Chef de Projet pour arbitrage.`
                 });
                 setTimeout(() => setToast(null), 5000);
             },
@@ -437,22 +441,21 @@ export default function AdminManagerDashboard({
                     <div>
                         <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1.5 flex items-center gap-1.5">
                             <ShieldCheck className="w-3.5 h-3.5 text-[#F58F20]" />
-                            <span className="text-[#F58F20]">Étape 3 du Workflow</span>
+                            <span className="text-[#F58F20]">Étape 2 du Workflow</span>
                             <span className="mx-1">/</span>
-                            <span className="text-[#04326D]">PAM (Manager Administratif)</span>
+                            <span className="text-[#04326D]">PAM (Programme Administration Manager)</span>
                         </nav>
                         <h1 className="text-xl font-bold text-[#0B192C]">
-                            Supervision & Contrôle Administratif
+                            Supervision & Contrôle Administratif (PAM)
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
-                            Manager Admin : <strong className="text-[#0B192C]">{user.name}</strong> • Vérification de la conformité institutionnelle.
+                            Manager Admin : <strong className="text-[#0B192C]">{user.name}</strong> • Examen administratif avant le contrôle financier.
                         </p>
                     </div>
                 </header>
 
                 {/* 4 CARTES KPI STATISTIQUES */}
                 <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {/* Carte 1 */}
                     <div className="bg-white border border-[#B2BED6] rounded shadow-sm p-4 flex flex-col justify-between">
                         <div className="flex justify-between items-start">
                             <div>
@@ -471,7 +474,6 @@ export default function AdminManagerDashboard({
                         </div>
                     </div>
 
-                    {/* Carte 2 */}
                     <div className="bg-white border border-[#B2BED6] rounded shadow-sm p-4 flex flex-col justify-between">
                         <div className="flex justify-between items-start">
                             <div>
@@ -492,7 +494,6 @@ export default function AdminManagerDashboard({
                         </div>
                     </div>
 
-                    {/* Carte 3 */}
                     <div className="bg-white border border-[#B2BED6] rounded shadow-sm p-4 flex flex-col justify-between">
                         <div className="flex justify-between items-start">
                             <div>
@@ -511,7 +512,6 @@ export default function AdminManagerDashboard({
                         </div>
                     </div>
 
-                    {/* Carte 4 */}
                     <div className="bg-white border border-[#B2BED6] rounded shadow-sm p-4 flex flex-col justify-between">
                         <div className="flex justify-between items-start">
                             <div>
@@ -525,7 +525,7 @@ export default function AdminManagerDashboard({
                             </div>
                         </div>
                         <div className="mt-3 text-[11px] text-gray-500 flex items-center justify-between">
-                            <span>Renvoyés aux Finances :</span>
+                            <span>Renvoyés au Chef de Projet :</span>
                             <span className="font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">
                                 {stats.renvoyeesFinanceCount}
                             </span>
@@ -543,17 +543,16 @@ export default function AdminManagerDashboard({
                     </div>
                 )}
 
-                {/* 1. TABLE PRINCIPALE : DOSSIERS EN ATTENTE DE VISA (VISIBLE DIRECTEMENT) */}
+                {/* TABLE PRINCIPALE : DOSSIERS EN ATTENTE DE VISA PAM */}
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="p-4 border-b border-[#E2E8F0] flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-gray-50/50">
                         <div>
                             <h2 className="text-sm font-bold text-[#0B192C] uppercase tracking-wider flex items-center gap-2">
-                                Dossiers en Attente de Visa
+                                Dossiers en Attente de Visa PAM
                                 <span className="bg-[#04326D] text-white px-2 py-0.5 rounded-full text-[10px]">{filteredRequisitions.length}</span>
                             </h2>
                         </div>
 
-                        {/* Barre de filtres */}
                         <div className="flex flex-wrap items-center gap-3">
                             <div className="flex items-center gap-1.5 bg-white border border-[#B2BED6] rounded px-2 py-1">
                                 <FolderKanban className="w-3.5 h-3.5 text-gray-400" />
@@ -622,7 +621,7 @@ export default function AdminManagerDashboard({
                                 {filteredRequisitions.length === 0 ? (
                                     <tr>
                                         <td colSpan={7} className="py-10 text-center text-gray-400 italic">
-                                            Aucun dossier en attente de visa administratif.
+                                            Aucun dossier en attente de visa du PAM.
                                         </td>
                                     </tr>
                                 ) : (
@@ -688,6 +687,7 @@ export default function AdminManagerDashboard({
                                                                 setSelected(item);
                                                                 setRejecting(false);
                                                                 setRejectionReason('');
+                                                                setObservationApprobation('');
                                                             }}
                                                             className="px-2.5 py-1 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-[11px] shadow-sm transition"
                                                         >
@@ -715,10 +715,9 @@ export default function AdminManagerDashboard({
                     </div>
                 </div>
 
-                {/* 2. SYNTHÈSE COMPACTE : PROJETS ET CAISSES (VISIBLE CÔTE À CÔTE SANS CACHER LES TABLES) */}
+                {/* SYNTHÈSE COMPACTE : PROJETS ET CAISSES */}
                 {(projectsStats.length > 0 || caissesStats.length > 0) && (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        {/* Synthèse Projets */}
                         <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                             <div className="p-3 border-b border-[#E2E8F0] bg-gray-50 flex justify-between items-center">
                                 <h3 className="text-xs font-bold text-[#0B192C] uppercase flex items-center gap-1.5">
@@ -761,7 +760,6 @@ export default function AdminManagerDashboard({
                             </div>
                         </div>
 
-                        {/* Situation Caisses */}
                         <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                             <div className="p-3 border-b border-[#E2E8F0] bg-gray-50 flex justify-between items-center">
                                 <h3 className="text-xs font-bold text-[#0B192C] uppercase flex items-center gap-1.5">
@@ -808,7 +806,7 @@ export default function AdminManagerDashboard({
                     </div>
                 )}
 
-                {/* 3. HISTORIQUE GLOBAL DES RÉQUISITIONS (VISIBLE DIRECTEMENT SUR LA PAGE) */}
+                {/* HISTORIQUE GLOBAL DES RÉQUISITIONS */}
                 <section className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden mt-6">
                     <header className="p-4 border-b border-[#E2E8F0] flex flex-col md:flex-row justify-between items-center gap-4 bg-gray-50/50">
                         <div>
@@ -902,7 +900,7 @@ export default function AdminManagerDashboard({
                 </section>
             </div>
 
-            {/* MODALE D'EXAMEN ET VISA ADMINISTRATIF */}
+            {/* MODALE D'EXAMEN ET VISA ADMINISTRATIF PAM */}
             {selected && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in no-print">
                     <div className="w-full max-w-4xl max-h-[92vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-5 animate-slide-down">
@@ -910,7 +908,7 @@ export default function AdminManagerDashboard({
                             <div>
                                 <span className="text-[10px] uppercase font-bold text-[#F58F20] tracking-wider flex items-center gap-1.5">
                                     <ShieldCheck className="w-3.5 h-3.5" />
-                                    VISA 3 : CONTRÔLE ADMINISTRATIF
+                                    VISA 2 : EXAMEN & CONTRÔLE ADMINISTRATIF (PAM)
                                 </span>
                                 <h2 className="text-base font-bold text-[#0B192C] mt-1">
                                     Réquisition N° {selected.numero} ({selected.nature})
@@ -932,6 +930,12 @@ export default function AdminManagerDashboard({
                         {selected.observation && (
                             <div className="p-3 bg-amber-50 border-l-4 border-[#F58F20] text-xs text-gray-800 rounded-r shadow-sm">
                                 <strong>Observation / Contexte :</strong> {selected.observation}
+                            </div>
+                        )}
+
+                        {selected.derniere_observation && (
+                            <div className="p-3 bg-blue-50 border-l-4 border-[#04326D] text-xs text-gray-800 rounded-r shadow-sm">
+                                <strong>Dernière remarque enregistrée :</strong> {selected.derniere_observation}
                             </div>
                         )}
 
@@ -996,43 +1000,59 @@ export default function AdminManagerDashboard({
                             </div>
                         </div>
 
-                        {/* ACTIONS DE DÉCISION */}
+                        {/* ACTIONS DE DÉCISION DU PAM */}
                         {selected.canDecide && (
                             <div className="border-t pt-4 space-y-3">
                                 {!rejecting ? (
-                                    <div className="flex items-center justify-between">
-                                        <button
-                                            type="button"
-                                            onClick={() => setRejecting(true)}
-                                            className="px-3.5 py-1.5 border border-red-300 text-red-600 hover:bg-red-50 rounded text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
-                                        >
-                                            <Ban className="w-3.5 h-3.5" />
-                                            Rejeter aux Finances
-                                        </button>
+                                    <div className="space-y-3">
+                                        {/* Champ d'observation optionnel du PAM à l'approbation */}
+                                        <div>
+                                            <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                                                Observations du PAM (Optionnel lors de la validation) :
+                                            </label>
+                                            <textarea
+                                                rows={2}
+                                                value={observationApprobation}
+                                                onChange={(e) => setObservationApprobation(e.target.value)}
+                                                placeholder="Ajouter une observation ou recommandation administrative pour la Finance et la Direction..."
+                                                className="w-full border border-gray-300 rounded p-2 text-xs focus:outline-none focus:border-[#04326D] focus:ring-1 focus:ring-[#04326D]"
+                                            />
+                                        </div>
 
-                                        <div className="flex gap-2">
+                                        <div className="flex items-center justify-between pt-2">
                                             <button
                                                 type="button"
-                                                onClick={() => setSelected(null)}
-                                                className="px-4 py-1.5 border rounded text-xs font-semibold text-gray-600 hover:bg-gray-50 transition shadow-sm"
+                                                onClick={() => setRejecting(true)}
+                                                className="px-3.5 py-1.5 border border-red-300 text-red-600 hover:bg-red-50 rounded text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
                                             >
-                                                Fermer
+                                                <Ban className="w-3.5 h-3.5" />
+                                                Rejeter / Renvoyer au Chef de Projet
                                             </button>
-                                            <button
-                                                type="button"
-                                                onClick={handleTriggerApprove}
-                                                className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white rounded text-xs font-bold shadow flex items-center gap-1.5 transition"
-                                            >
-                                                <span>Accorder Visa Administratif</span>
-                                                <span>&rarr;</span>
-                                            </button>
+
+                                            <div className="flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelected(null)}
+                                                    className="px-4 py-1.5 border rounded text-xs font-semibold text-gray-600 hover:bg-gray-50 transition shadow-sm"
+                                                >
+                                                    Fermer
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleTriggerApprove}
+                                                    className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white rounded text-xs font-bold shadow flex items-center gap-1.5 transition"
+                                                >
+                                                    <span>Accorder Visa PAM</span>
+                                                    <span>&rarr;</span>
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 ) : (
                                     <div className="bg-red-50 p-4 rounded border border-red-200 space-y-3 shadow-inner">
                                         <div className="flex justify-between items-center">
                                             <h4 className="text-xs font-bold text-red-800 uppercase flex items-center gap-1.5">
-                                                <Ban className="w-3.5 h-3.5" /> Motif du Rejet Administratif (Retour Finances)
+                                                <Ban className="w-3.5 h-3.5" /> Motif du Rejet Administratif (Retour au Chef de Projet) *
                                             </h4>
                                             <button
                                                 type="button"
@@ -1046,7 +1066,7 @@ export default function AdminManagerDashboard({
                                             rows={3}
                                             value={rejectionReason}
                                             onChange={(e) => setRejectionReason(e.target.value)}
-                                            placeholder="Précisez la non-conformité administrative constatée..."
+                                            placeholder="Précisez obligatoirement le motif du rejet administratif qui sera transmis au Project Manager..."
                                             className="w-full border border-red-300 rounded p-2 text-xs focus:outline-none focus:ring-1 focus:ring-red-500 bg-white shadow-sm"
                                             required
                                         ></textarea>
@@ -1061,10 +1081,10 @@ export default function AdminManagerDashboard({
                                             <button
                                                 type="button"
                                                 onClick={handleReject}
-                                                disabled={processing}
-                                                className="px-4 py-1.5 bg-[#DC2626] hover:bg-[#b91c1c] text-white rounded text-xs font-bold shadow transition"
+                                                disabled={processing || !rejectionReason.trim()}
+                                                className="px-4 py-1.5 bg-[#DC2626] hover:bg-[#b91c1c] text-white rounded text-xs font-bold shadow transition disabled:opacity-50"
                                             >
-                                                {processing ? 'Renvoi aux finances...' : 'Confirmer le Rejet aux Finances'}
+                                                {processing ? 'Renvoi en cours...' : 'Confirmer le Rejet au Chef de Projet'}
                                             </button>
                                         </div>
                                     </div>
@@ -1075,7 +1095,7 @@ export default function AdminManagerDashboard({
                 </div>
             )}
 
-            {/* MODALE D'AUTHENTIFICATION MOT DE PASSE */}
+            {/* MODALE D'AUTHENTIFICATION MOT DE PASSE DU PAM */}
             {passwordModalOpen && selected && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in no-print">
                     <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
@@ -1084,7 +1104,7 @@ export default function AdminManagerDashboard({
                                 <Lock className="w-5 h-5 text-[#04326D]" />
                             </div>
                             <h3 className="text-[13px] font-black uppercase text-[#0B192C] tracking-wider">
-                                Visa de Contrôle Administratif
+                                Visa Administratif du PAM
                             </h3>
                             <p className="text-[10px] text-gray-500 mt-1">
                                 Signataire : <strong>{user.name}</strong> (PAM)
@@ -1094,7 +1114,7 @@ export default function AdminManagerDashboard({
                         <form onSubmit={handleConfirmSignature} className="space-y-4">
                             <div>
                                 <label className="block text-[11px] font-bold text-gray-700 mb-1.5">
-                                    Mot de passe pour signer le visa administratif :
+                                    Mot de passe pour signer le visa du PAM :
                                 </label>
                                 <input
                                     type="password"
@@ -1108,7 +1128,7 @@ export default function AdminManagerDashboard({
                             </div>
 
                             <p className="text-[10px] text-gray-500 leading-tight bg-gray-50 p-2 rounded border border-gray-100">
-                                Un certificat électronique unique sera apposé et la demande sera transmise à la Direction Générale.
+                                Un certificat électronique unique sera apposé et la demande sera transmise au service Finance pour contrôle budgétaire.
                             </p>
 
                             <div className="flex justify-end gap-2 pt-2 border-t">

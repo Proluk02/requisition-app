@@ -48,6 +48,7 @@ interface RequisitionDirectrice {
     montantTotal: number;
     caisseAttribuee: string;
     observation: string | null;
+    derniere_observation?: string | null;
     is_urgent: boolean;
     is_decaissee: boolean;
     statusCode: string;
@@ -117,6 +118,7 @@ export default function DirectorDashboard({
     const [signReq, setSignReq] = useState<RequisitionDirectrice | null>(null);
     const [rejectReq, setRejectReq] = useState<RequisitionDirectrice | null>(null);
     const [rejectionReason, setRejectionReason] = useState('');
+    const [observationDirection, setObservationDirection] = useState('');
     const [rejecting, setRejecting] = useState(false);
     const [pinError, setPinError] = useState<string | null>(null);
     const [signing, setSigning] = useState(false);
@@ -137,7 +139,6 @@ export default function DirectorDashboard({
         });
     }, [requisitions, selectedProject, selectedCaisse, decaissementFilter]);
 
-    // Volumes consolidés en USD et en Francs Congolais (CDF/FC)
     const volumeUSD = useMemo(
         () => requisitions.reduce((acc, r) => acc + (r.devise === 'USD' ? r.montantTotal : 0), 0),
         [requisitions]
@@ -148,7 +149,6 @@ export default function DirectorDashboard({
         [requisitions]
     );
 
-    // --- GRAPHIQUES ---
     const donutData = useMemo(() => {
         const total = requisitions.length || 1;
         const pctDecaisse = requisitions.length > 0 ? Math.round((decaisseesCount / total) * 100) : 0;
@@ -183,6 +183,7 @@ export default function DirectorDashboard({
 
     const handleOpenSignature = (req: RequisitionDirectrice) => {
         setPinError(null);
+        setObservationDirection('');
         setSignReq(req);
     };
 
@@ -192,12 +193,17 @@ export default function DirectorDashboard({
         setPinError(null);
         router.patch(
             route('requisitions.director-decision', signReq.id),
-            { decision: 'approve', pin },
+            { 
+                decision: 'approve', 
+                pin,
+                observation: observationDirection.trim() || null
+            },
             {
                 preserveScroll: true,
                 onFinish: () => setSigning(false),
                 onSuccess: () => {
                     setSignReq(null);
+                    setObservationDirection('');
                     setToast({
                         type: 'success',
                         message: isInterim
@@ -212,7 +218,7 @@ export default function DirectorDashboard({
         );
     };
 
-    // REJET DIRECTRICE : RENVOI STRICTEMENT AUX FINANCES
+    // REJET DIRECTRICE : RETOUR SYSTEMATIQUE AU CHEF DE PROJET
     const handleReject = (event: React.FormEvent) => {
         event.preventDefault();
         if (!rejectReq || !rejectionReason.trim()) return;
@@ -220,13 +226,13 @@ export default function DirectorDashboard({
         setRejecting(true);
         router.patch(
             route('requisitions.director-decision', rejectReq.id),
-            { decision: 'reject', motif_rejet: rejectionReason },
+            { decision: 'reject', motif_rejet: rejectionReason.trim() },
             {
                 preserveScroll: true,
                 onSuccess: () => {
                     setToast({
                         type: 'success',
-                        message: `Réquisition ${rejectReq.numero} renvoyée aux Finances pour correction budgétaire.`,
+                        message: `Réquisition ${rejectReq.numero} renvoyée au Chef de Projet pour arbitrage.`,
                     });
                     setRejectReq(null);
                     setRejectionReason('');
@@ -261,7 +267,6 @@ export default function DirectorDashboard({
             .then(() => setPrintReq(null));
     }, [printReq]);
 
-    // Conversion rigoureuse du statut vers l'étape pour la feuille d'impression
     const mapStatusToWorkflow = (status: string): RequisitionSuivi['etapeActuelle'] => {
         switch (status) {
             case 'returned_to_beneficiary':
@@ -270,12 +275,11 @@ export default function DirectorDashboard({
             case 'returned_to_project_manager':
             case 'draft':
                 return 'visa_mp';
-            case 'returned_to_finance':
             case 'visa_mp':
-                return 'controle_finance';
-            case 'returned_to_admin_manager':
-            case 'controle_finance':
                 return 'visa_admin';
+            case 'visa_pam':
+            case 'controle_finance':
+                return 'controle_finance';
             case 'visa_admin':
             case 'urgent_direction':
                 return 'approbation_direction';
@@ -336,7 +340,6 @@ export default function DirectorDashboard({
             <style>{`
                 #bon-pasteur-print-zone { display: none; }
                 @media print {
-                    /* FORCE L'IMPRESSION EN MODE PAYSAGE SUR A4 */
                     @page { size: A4 landscape; margin: 8mm 10mm; }
                     body * { visibility: hidden !important; }
                     #bon-pasteur-print-zone,
@@ -376,7 +379,7 @@ export default function DirectorDashboard({
                         <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1.5">
                             <span>Direction Générale</span>
                             <span className="mx-1.5">/</span>
-                            <span className="text-[#04326D]">Supervision</span>
+                            <span className="text-[#04326D]">Étape 4 : Approbation Finale & Bon à Payer</span>
                         </nav>
                         <h1 className="text-xl font-bold text-[#0B192C]">
                             Supervision des réquisitions
@@ -398,7 +401,6 @@ export default function DirectorDashboard({
                     </div>
                 </header>
 
-                {/* 5 CARTES KPI : INCLUANT USD ET CDF (FC) */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                     <KpiCard
                         label="Réquisitions du mois"
@@ -431,9 +433,7 @@ export default function DirectorDashboard({
                     />
                 </div>
 
-                {/* --- SECTION DES GRAPHIQUES --- */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                    {/* 1. Donut Graphique SVG - Statut des Dossiers */}
                     <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
                         <div className="flex items-center justify-between border-b pb-2.5">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
@@ -500,7 +500,6 @@ export default function DirectorDashboard({
                         </div>
                     </div>
 
-                    {/* 2. Jauge de Ratio d'Exécution Financière */}
                     <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
                         <div className="flex items-center justify-between border-b pb-2.5">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
@@ -544,7 +543,6 @@ export default function DirectorDashboard({
                         </div>
                     </div>
 
-                    {/* 3. DIAGRAMME À BARRES CHRONOLOGIQUE */}
                     <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
                         <div className="flex items-center justify-between border-b pb-2.5">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
@@ -601,7 +599,6 @@ export default function DirectorDashboard({
                     </div>
                 </div>
 
-                {/* --- SECTIONS SYNTHÈSE PROJET & CAISSE (USD & CDF) --- */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                     <section className="lg:col-span-7 bg-white border border-[#B2BED6] rounded">
                         <header className="px-4 py-3 border-b border-[#E2E8F0] flex items-center justify-between">
@@ -855,17 +852,80 @@ export default function DirectorDashboard({
                 onPrint={(req) => handlePrintPreview(req as RequisitionDirectrice)}
             />
 
-            <PinSignatureModal
-                open={!!signReq}
-                requisitionNumero={signReq?.numero ?? ''}
-                amountLabel={signReq ? money(signReq.montantTotal, signReq.devise) : ''}
-                submitting={signing}
-                error={pinError}
-                onCancel={() => !signing && setSignReq(null)}
-                onSubmit={handleSubmitSignature}
-            />
+            {/* MODALE DU PIN POUR LE BON À PAYER (AVEC OBSERVATION OPTIONNELLE) */}
+            {signReq && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in no-print">
+                    <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
+                        <div className="text-center border-b pb-3">
+                            <ShieldCheck className="w-8 h-8 text-emerald-600 mx-auto mb-1" />
+                            <h3 className="text-sm font-bold uppercase text-[#0B192C]">
+                                Approbation Finale & Bon à Payer
+                            </h3>
+                            <p className="text-[11px] text-gray-500">
+                                Réquisition N° <strong className="font-mono text-[#04326D]">{signReq.numero}</strong> • {money(signReq.montantTotal, signReq.devise)}
+                            </p>
+                        </div>
 
-            {/* MODALE DE REJET DIRECTRICE : RETOUR AUX FINANCES */}
+                        {pinError && (
+                            <div className="p-2 bg-red-50 border border-red-300 text-red-800 rounded text-xs font-bold text-center">
+                                {pinError}
+                            </div>
+                        )}
+
+                        <form onSubmit={(e) => { e.preventDefault(); handleSubmitSignature((e.target as any).pin.value); }} className="space-y-3 text-xs">
+                            <div>
+                                <label className="block font-bold text-gray-700 mb-1">
+                                    Observation de la Direction (Optionnel) :
+                                </label>
+                                <textarea
+                                    rows={2}
+                                    value={observationDirection}
+                                    onChange={(e) => setObservationDirection(e.target.value)}
+                                    placeholder="Ajouter une instruction ou remarque pour la caisse..."
+                                    className="w-full border border-gray-300 rounded p-1.5 text-xs focus:outline-none focus:border-[#04326D]"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block font-bold text-gray-700 mb-1">
+                                    Code PIN de la Direction *
+                                </label>
+                                <input
+                                    name="pin"
+                                    type="password"
+                                    placeholder="••••"
+                                    className="w-full border border-[#B2BED6] rounded p-2 text-xl font-mono text-center tracking-widest focus:outline-none focus:border-[#04326D]"
+                                    autoFocus
+                                    required
+                                />
+                            </div>
+
+                            <p className="text-[10px] text-gray-400 leading-tight">
+                                Cette validation autorise formellement le décaissement physique des fonds au guichet de caisse.
+                            </p>
+
+                            <div className="flex justify-end gap-2 pt-2 border-t">
+                                <button
+                                    type="button"
+                                    onClick={() => setSignReq(null)}
+                                    className="px-3 py-1.5 border rounded text-xs text-gray-600 hover:bg-gray-50"
+                                >
+                                    Annuler
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={signing}
+                                    className="px-4 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white rounded text-xs font-bold shadow disabled:opacity-50"
+                                >
+                                    {signing ? 'Validation...' : 'Valider le Bon à Payer'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODALE DE REJET DIRECTRICE : RETOUR AU CHEF DE PROJET */}
             {rejectReq && (
                 <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4">
                     <form onSubmit={handleReject} className="w-full max-w-lg space-y-4 rounded bg-white p-6 shadow-xl">
@@ -873,17 +933,17 @@ export default function DirectorDashboard({
                             Rejeter la réquisition {rejectReq.numero}
                         </h2>
                         <p className="text-xs text-gray-600">
-                            Le dossier sera retourné au service des <strong>Finances</strong> pour correction et ajustement budgétaire avant réexamen.
+                            Le dossier sera retourné au <strong>Chef de Projet (Project Manager)</strong> pour arbitrage et correction.
                         </p>
                         <label className="block text-xs font-semibold text-gray-700">
-                            Motif du rejet :
+                            Motif du rejet (Obligatoire) * :
                             <textarea
                                 required
                                 autoFocus
                                 rows={4}
                                 value={rejectionReason}
                                 onChange={(event) => setRejectionReason(event.target.value)}
-                                placeholder="Précisez la non-conformité constatée ou la correction financière demandée..."
+                                placeholder="Précisez le motif du rejet ou la justification refusée..."
                                 className="mt-1.5 w-full rounded border border-gray-300 p-2 text-xs focus:ring-1 focus:ring-red-500 focus:outline-none"
                             />
                         </label>
@@ -901,7 +961,7 @@ export default function DirectorDashboard({
                                 disabled={rejecting || !rejectionReason.trim()}
                                 className="rounded bg-red-700 px-4 py-1.5 text-xs font-bold text-white hover:bg-red-800 disabled:opacity-60 transition"
                             >
-                                {rejecting ? 'Envoi en cours…' : 'Rejeter et renvoyer aux Finances'}
+                                {rejecting ? 'Envoi en cours…' : 'Rejeter et renvoyer au Chef de Projet'}
                             </button>
                         </div>
                     </form>

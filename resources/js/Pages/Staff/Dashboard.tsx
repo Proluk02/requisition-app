@@ -77,7 +77,6 @@ export default function StaffDashboard({
     const [filtreEtat, setFiltreEtat] = useState<string>('all');
     const [requisitions] = useState<RequisitionItem[]>(initialReqs ?? []);
     
-    // Modal pour l'aperçu consolidé
     const [directorPreviewReq, setDirectorPreviewReq] = useState<RequisitionItem | null>(null);
 
     const stats: StaffStats = initialStats ?? {
@@ -242,8 +241,9 @@ export default function StaffDashboard({
                             <option value="all">Toutes les étapes</option>
                             <option value="brouillon">Brouillon / À corriger</option>
                             <option value="visa_mp">Visa Manager Projet</option>
+                            <option value="visa_pam">Examen PAM</option>
                             <option value="controle_finance">Contrôle Finances</option>
-                            <option value="visa_admin">Contrôle Administratif</option>
+                            <option value="approbation_direction">Direction Générale</option>
                             <option value="caisse_pret">Caisse (Prêt)</option>
                         </select>
                     </div>
@@ -276,7 +276,8 @@ export default function StaffDashboard({
                                 </tr>
                             ) : (
                                 filteredReqs.map((req) => {
-                                    const isRejected = req.statusCode?.startsWith('returned_');
+                                    const isRejected = req.statusCode === 'returned_to_beneficiary' || req.statusCode === 'returned_to_urgent_initiator';
+                                    const isInternalRevision = req.statusCode === 'returned_to_project_manager' || req.statusCode === 'returned_to_finance';
                                     
                                     return (
                                         <tr key={req.id} className="hover:bg-blue-50/40 transition-colors">
@@ -307,10 +308,20 @@ export default function StaffDashboard({
                                                     <div className="bg-red-50 border border-red-200 text-red-800 p-2 rounded max-w-xs shadow-sm">
                                                         <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-red-700 mb-0.5">
                                                             <AlertCircle className="w-3 h-3" />
-                                                            À CORRIGER
+                                                            À CORRIGER PAR VOUS
                                                         </span>
                                                         <p className="text-[10px] font-medium leading-tight">
                                                             {req.motifRejet || 'Veuillez corriger votre demande et la resoumettre.'}
+                                                        </p>
+                                                    </div>
+                                                ) : isInternalRevision ? (
+                                                    <div className="bg-amber-50 border border-amber-200 text-amber-800 p-2 rounded max-w-xs shadow-sm">
+                                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-amber-700 mb-0.5">
+                                                            <AlertCircle className="w-3 h-3" />
+                                                            EN ARBITRAGE HIÉRARCHIQUE
+                                                        </span>
+                                                        <p className="text-[10px] font-medium leading-tight">
+                                                            Le dossier est en révision auprès du Chef de Projet.
                                                         </p>
                                                     </div>
                                                 ) : (
@@ -355,7 +366,7 @@ export default function StaffDashboard({
                 </div>
             </div>
 
-            {/* APERÇU CONSOLIDÉ (Vue Direction/Historique des signatures) */}
+            {/* APERÇU CONSOLIDÉ */}
             {directorPreviewReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-4xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
@@ -381,7 +392,6 @@ export default function StaffDashboard({
                             </button>
                         </header>
 
-                        {/* Signatures et Visas certifiés */}
                         <div className="space-y-2">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700">
                                 Chaîne des Visas & Signatures Numériques

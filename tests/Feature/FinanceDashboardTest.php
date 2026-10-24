@@ -5,6 +5,8 @@ use App\Models\DemandeJustificatif;
 use App\Models\Project;
 use App\Models\Requisition;
 use App\Models\User;
+use App\Notifications\FinanceRequisitionApproved;
+use App\Notifications\FinanceRequisitionRejected;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -93,7 +95,7 @@ it('advances a same-project visa_mp requisition after finance approval', functio
     $demande = createFinanceDemand($requisition);
 
     $this->actingAs($finance)
-        ->patch('/requisitions/' . $requisition->id . '/finance-decision', [
+        ->patch('/requisitions/'.$requisition->id.'/finance-decision', [
             'decision' => 'approve',
             'allocations' => [[
                 'demande_id' => $demande->id,
@@ -113,11 +115,11 @@ it('advances a same-project visa_mp requisition after finance approval', functio
     ]);
     $this->assertDatabaseHas('notifications', [
         'notifiable_id' => $staff->id,
-        'type' => \App\Notifications\FinanceRequisitionApproved::class,
+        'type' => FinanceRequisitionApproved::class,
     ]);
     $this->assertDatabaseHas('notifications', [
         'notifiable_id' => $projectManager->id,
-        'type' => \App\Notifications\FinanceRequisitionApproved::class,
+        'type' => FinanceRequisitionApproved::class,
     ]);
 });
 
@@ -135,7 +137,7 @@ it('rejects a visa_mp requisition with a mandatory finance rejection reason', fu
     $requisition = createFinanceRequisition($staff, $project, 'FIN-REJECT-001');
 
     $this->actingAs($finance)
-        ->patch('/requisitions/' . $requisition->id . '/finance-decision', [
+        ->patch('/requisitions/'.$requisition->id.'/finance-decision', [
             'decision' => 'reject',
             'motif_rejet' => 'Imputation budgétaire incorrecte',
         ])
@@ -149,11 +151,11 @@ it('rejects a visa_mp requisition with a mandatory finance rejection reason', fu
     $this->assertDatabaseCount('notifications', 2);
     $this->assertDatabaseHas('notifications', [
         'notifiable_id' => $staff->id,
-        'type' => \App\Notifications\FinanceRequisitionRejected::class,
+        'type' => FinanceRequisitionRejected::class,
     ]);
     $this->assertDatabaseHas('notifications', [
         'notifiable_id' => $projectManager->id,
-        'type' => \App\Notifications\FinanceRequisitionRejected::class,
+        'type' => FinanceRequisitionRejected::class,
     ]);
 
     $this->actingAs($projectManager)
@@ -182,7 +184,7 @@ it('does not approve or partially allocate when Finance omits an allocation code
     $secondDemand = createFinanceDemand($requisition, 'BUD-REQUESTED-2');
 
     $this->actingAs($finance)
-        ->patch('/requisitions/' . $requisition->id . '/finance-decision', [
+        ->patch('/requisitions/'.$requisition->id.'/finance-decision', [
             'decision' => 'approve',
             'allocations' => [[
                 'demande_id' => $firstDemand->id,
@@ -206,7 +208,7 @@ it('allows finance decisions across projects but forbids statuses other than vis
     $otherProjectDemand = createFinanceDemand($otherProjectRequisition);
 
     $this->actingAs($finance)
-        ->patch('/requisitions/' . $otherProjectRequisition->id . '/finance-decision', [
+        ->patch('/requisitions/'.$otherProjectRequisition->id.'/finance-decision', [
             'decision' => 'approve',
             'allocations' => [[
                 'demande_id' => $otherProjectDemand->id,
@@ -215,7 +217,7 @@ it('allows finance decisions across projects but forbids statuses other than vis
         ])
         ->assertRedirect();
 
-    $this->patch('/requisitions/' . $alreadyReviewed->id . '/finance-decision', ['decision' => 'approve'])
+    $this->patch('/requisitions/'.$alreadyReviewed->id.'/finance-decision', ['decision' => 'approve'])
         ->assertForbidden();
 
     $this->assertDatabaseHas('requisitions', ['id' => $otherProjectRequisition->id, 'status' => 'controle_finance']);
@@ -235,7 +237,7 @@ it('forbids a non-finance role from using the finance decision endpoint', functi
     $requisition = createFinanceRequisition($staff, $project, 'FIN-WRONG-ROLE-001');
 
     $this->actingAs($manager)
-        ->patch('/requisitions/' . $requisition->id . '/finance-decision', ['decision' => 'approve'])
+        ->patch('/requisitions/'.$requisition->id.'/finance-decision', ['decision' => 'approve'])
         ->assertForbidden();
 
     $this->assertDatabaseHas('requisitions', [

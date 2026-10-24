@@ -37,7 +37,7 @@ class BudgetController extends Controller
         if (! empty($search)) {
             $linesQuery->where(function ($q) use ($search) {
                 $q->where('code', 'like', "%{$search}%")
-                  ->orWhere('libelle', 'like', "%{$search}%");
+                    ->orWhere('libelle', 'like', "%{$search}%");
             });
         }
 
@@ -232,7 +232,7 @@ class BudgetController extends Controller
                 $validated['split_code'] ?? null
             );
         }
-        
+
         // On vérifie qu'il n'y a pas déjà ce code pour CE projet
         $duplicate = BudgetLine::where('code', $code)
             ->where('project_id', $validated['project_id'])
@@ -271,14 +271,14 @@ class BudgetController extends Controller
         if ((float) $budgetLine->montant_engage > 0 || (float) $budgetLine->montant_decaisse > 0) {
             return Redirect::back()->with(
                 'error',
-                "Suppression impossible : des montants sont déjà engagés (" . number_format($budgetLine->montant_engage, 2) . " {$budgetLine->devise}) ou décaissés sur cette ligne."
+                'Suppression impossible : des montants sont déjà engagés ('.number_format($budgetLine->montant_engage, 2)." {$budgetLine->devise}) ou décaissés sur cette ligne."
             );
         }
 
         if ($budgetLine->cashMovements()->exists()) {
             return Redirect::back()->with(
                 'error',
-                "Suppression impossible : des mouvements de trésorerie sont directement liés à cette ligne budgétaire."
+                'Suppression impossible : des mouvements de trésorerie sont directement liés à cette ligne budgétaire.'
             );
         }
 
@@ -310,8 +310,8 @@ class BudgetController extends Controller
         abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403);
 
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255', 'unique:donors,name,' . $donor->id],
-            'code' => ['required', 'string', 'max:50', 'unique:donors,code,' . $donor->id],
+            'name' => ['required', 'string', 'max:255', 'unique:donors,name,'.$donor->id],
+            'code' => ['required', 'string', 'max:50', 'unique:donors,code,'.$donor->id],
             'description' => ['nullable', 'string'],
         ]);
 

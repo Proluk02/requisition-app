@@ -71,7 +71,7 @@ class SiteController extends Controller
     public function update(Request $request, Site $site): RedirectResponse
     {
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:100', 'unique:sites,name,' . $site->id],
+            'name' => ['required', 'string', 'max:100', 'unique:sites,name,'.$site->id],
             'location' => ['nullable', 'string', 'max:255'],
             'project_ids' => ['nullable', 'array'],
             'project_ids.*' => ['exists:projects,id'],
