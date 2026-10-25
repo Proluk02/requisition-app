@@ -12,6 +12,13 @@ interface SignatureOffi {
     hash: string;
 }
 
+interface SplitItem {
+    id: string;
+    code_allocation: string;
+    libelle_allocation?: string | null;
+    montant: number;
+}
+
 interface Props {
     requisition: RequisitionSuivi & {
         demandeurNom?: string;
@@ -24,7 +31,13 @@ interface Props {
         is_urgent?: boolean;
         date_paiement?: string | null;
         date_livraison?: string | null;
+        reference_paiement?: string | null;
+        mode_paiement?: string | null;
+        date_decaissement?: string | null;
         signatures?: SignatureOffi[];
+        articles: (RequisitionSuivi['articles'][number] & {
+            splits?: SplitItem[];
+        })[];
     };
 }
 
@@ -32,8 +45,11 @@ export default function OfficialPrintSheet({ requisition }: Props) {
     const { auth } = usePage<PageProps>().props;
 
     const isService = requisition.nature === 'Service';
-    const isCDF = requisition.devise === 'FC';
+    const isCDF = requisition.devise === 'FC' || (requisition.devise as string) === 'CDF';
     const isUSD = requisition.devise === 'USD';
+    const isEUR = requisition.devise === 'EUR';
+
+    const isDecaissee = requisition.statusCode === 'decaisse';
 
     const nomDemandeur =
         requisition.demandeurNom ||
@@ -46,17 +62,21 @@ export default function OfficialPrintSheet({ requisition }: Props) {
         ? (requisition.date_paiement || '......../......../202.....')
         : (requisition.date_livraison || '......../......../202.....');
 
+    // Récupération fidèle des visas certifiés selon le nouvel ordre
     const sigMP = requisition.signatures?.find(
         (s) => s.role === 'project_manager' && s.action === 'approved'
-    );
-    const sigFinance = requisition.signatures?.find(
-        (s) => s.role === 'finance' && s.action === 'approved'
     );
     const sigAdmin = requisition.signatures?.find(
         (s) => s.role === 'admin_manager' && s.action === 'approved'
     );
+    const sigFinance = requisition.signatures?.find(
+        (s) => s.role === 'finance' && s.action === 'approved'
+    );
     const sigDirectrice = requisition.signatures?.find(
         (s) => s.role === 'director' && s.action === 'approved'
+    );
+    const sigCaissier = requisition.signatures?.find(
+        (s) => s.role === 'cashier' && s.action === 'disbursed'
     );
 
     const SignatureBox = ({
@@ -117,9 +137,21 @@ export default function OfficialPrintSheet({ requisition }: Props) {
     );
 
     return (
-        // Le flux de bloc standard est utilisé pour l'impression
-        <div className="w-full bg-white text-black font-sans text-xs leading-normal print-sheet">
+        <div className="w-full bg-white text-black font-sans text-xs leading-normal print-sheet relative">
             
+            {/* SCEAU OFFICIEL PAID / DÉCAISSÉ (RECOMMANDATION 6) */}
+            {isDecaissee && (
+                <div className="absolute right-12 top-20 border-4 border-red-700 text-red-700 rounded-lg px-4 py-1.5 rotate-[-12deg] opacity-85 pointer-events-none select-none text-center shadow-sm">
+                    <span className="text-xl font-black tracking-widest block uppercase">PAID / PAYÉ</span>
+                    <span className="text-[9px] font-mono font-bold block">
+                        Réf : {requisition.reference_paiement || 'BSC-VALIDÉ'}
+                    </span>
+                    <span className="text-[8px] block">
+                        Guichet : {requisition.caisse}
+                    </span>
+                </div>
+            )}
+
             {/* 1. EN-TÊTE INSTITUTIONNEL */}
             <div className="flex justify-between items-start border-b-2 border-black pb-3 mb-4 print:break-inside-avoid">
                 <div className="flex items-center gap-3.5">
@@ -158,7 +190,7 @@ export default function OfficialPrintSheet({ requisition }: Props) {
                 </div>
             </div>
 
-            {/* 2. DEMANDEUR, PROJET, DATE DE DEMANDE ET DATE DE LIVRAISON */}
+            {/* 2. DEMANDEUR, PROJET, DATES */}
             <div className="border border-black text-[10px] mb-4 bg-gray-50/50 divide-y divide-black print:break-inside-avoid">
                 <div className="grid grid-cols-2 divide-x divide-black p-2">
                     <p>
@@ -193,14 +225,16 @@ export default function OfficialPrintSheet({ requisition }: Props) {
                 </div>
             </div>
 
-            {/* 3. TABLEAU DES ARTICLES */}
+            {/* 3. TABLEAU DES ARTICLES AVEC AFFICHAGE DES VENTILATIONS (SPLITTING) */}
             <div className="mb-4">
                 <table className="w-full border-collapse border border-black text-[10px]">
                     <thead className="print:table-header-group">
                         <tr className="bg-gray-100 text-center font-bold">
                             <th rowSpan={2} className="border border-black p-1.5 w-8">N°</th>
                             <th rowSpan={2} className="border border-black p-1.5 w-24">Code d'activité</th>
-                            <th rowSpan={2} className="border border-black p-1.5 w-28">Code d'allocation</th>
+                            <th rowSpan={2} className="border border-black p-1.5 min-w-[130px]">
+                                Code d'allocation / Ventilation
+                            </th>
                             <th rowSpan={2} className="border border-black p-1.5">
                                 {isService ? 'Nature de service' : 'Description'}
                             </th>
@@ -208,23 +242,31 @@ export default function OfficialPrintSheet({ requisition }: Props) {
                                 {isService ? 'Durée' : 'Qté'}
                             </th>
                             <th rowSpan={2} className="border border-black p-1.5 w-12">Unité</th>
-                            <th colSpan={2} className="border border-black p-1 text-center">PU</th>
-                            <th colSpan={2} className="border border-black p-1 text-center">PT</th>
+                            <th colSpan={3} className="border border-black p-1 text-center">P.U ({requisition.devise})</th>
+                            <th colSpan={3} className="border border-black p-1 text-center">P.T ({requisition.devise})</th>
                             <th rowSpan={2} className="border border-black p-1.5 w-16">OBS</th>
                         </tr>
                         <tr className="bg-gray-100 text-center font-bold">
-                            <th className="border border-black p-1 w-14">CDF</th>
+                            <th className="border border-black p-1 w-14">EUR</th>
                             <th className="border border-black p-1 w-14">USD</th>
-                            <th className="border border-black p-1 w-16">CDF</th>
+                            <th className="border border-black p-1 w-14">CDF</th>
+                            <th className="border border-black p-1 w-16">EUR</th>
                             <th className="border border-black p-1 w-16">USD</th>
+                            <th className="border border-black p-1 w-16">CDF</th>
                         </tr>
                     </thead>
                     <tbody>
                         {requisition.articles.map((art, index) => {
-                            const montantCDF = isCDF ? art.total : 0;
+                            const montantEUR = isEUR ? art.total : 0;
                             const montantUSD = isUSD ? art.total : 0;
-                            const puCDF = isCDF ? art.prixUnitaire : 0;
+                            const montantCDF = isCDF ? art.total : 0;
+
+                            const puEUR = isEUR ? art.prixUnitaire : 0;
                             const puUSD = isUSD ? art.prixUnitaire : 0;
+                            const puCDF = isCDF ? art.prixUnitaire : 0;
+
+                            const splits = (art as typeof art & { splits?: SplitItem[] }).splits;
+                            const hasSplits = splits && splits.length > 0;
 
                             return (
                                 <tr key={art.id} className="text-center print:break-inside-avoid">
@@ -232,9 +274,30 @@ export default function OfficialPrintSheet({ requisition }: Props) {
                                     <td className="border border-black p-1.5 font-mono">
                                         {(art as any).codeActivite || '—'}
                                     </td>
-                                    <td className="border border-black p-1.5 font-mono font-bold">
-                                        {(art as any).codeAllocation || art.codeBudget || '—'}
+                                    
+                                    {/* COLONNE IMPUTATION : AFFICHAGE DU CODE UNIQUE OU DES SPLITS MULTIPLES */}
+                                    <td className="border border-black p-1.5 text-left font-mono">
+                                        {hasSplits ? (
+                                            <div className="space-y-0.5">
+                                                <span className="text-[8px] uppercase font-bold text-gray-500 block border-b border-gray-300 pb-0.5">
+                                                    Ventilé ({splits!.length}) :
+                                                </span>
+                                                {splits!.map((sp) => (
+                                                    <div key={sp.id} className="flex justify-between items-center text-[9px]">
+                                                        <strong className="text-[#04326D]">{sp.code_allocation}</strong>
+                                                        <span className="text-gray-700 font-bold ml-1">
+                                                            {sp.montant.toLocaleString('fr-FR')} {requisition.devise}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <strong className="font-bold text-[#04326D]">
+                                                {(art as any).codeAllocation || art.codeBudget || '—'}
+                                            </strong>
+                                        )}
                                     </td>
+
                                     <td className="border border-black p-1.5 text-left font-medium">
                                         {art.activite}
                                     </td>
@@ -242,18 +305,29 @@ export default function OfficialPrintSheet({ requisition }: Props) {
                                         {art.quantiteOuDuree}
                                     </td>
                                     <td className="border border-black p-1.5">{art.unite || '—'}</td>
+                                    
+                                    {/* P.U */}
                                     <td className="border border-black p-1.5 text-right font-mono">
-                                        {puCDF > 0 ? puCDF.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '—'}
+                                        {puEUR > 0 ? puEUR.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '—'}
                                     </td>
                                     <td className="border border-black p-1.5 text-right font-mono">
                                         {puUSD > 0 ? puUSD.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '—'}
                                     </td>
+                                    <td className="border border-black p-1.5 text-right font-mono">
+                                        {puCDF > 0 ? puCDF.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '—'}
+                                    </td>
+
+                                    {/* P.T */}
                                     <td className="border border-black p-1.5 text-right font-mono font-bold">
-                                        {montantCDF > 0 ? montantCDF.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '—'}
+                                        {montantEUR > 0 ? montantEUR.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '—'}
                                     </td>
                                     <td className="border border-black p-1.5 text-right font-mono font-bold">
                                         {montantUSD > 0 ? montantUSD.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '—'}
                                     </td>
+                                    <td className="border border-black p-1.5 text-right font-mono font-bold">
+                                        {montantCDF > 0 ? montantCDF.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '—'}
+                                    </td>
+
                                     <td className="border border-black p-1.5 text-[8px] text-gray-500">
                                         {art.justificatifsCount > 0 ? `${art.justificatifsCount} devis` : '—'}
                                     </td>
@@ -261,14 +335,17 @@ export default function OfficialPrintSheet({ requisition }: Props) {
                             );
                         })}
                         <tr className="font-bold bg-gray-100 print:break-inside-avoid">
-                            <td colSpan={8} className="border border-black p-1.5 text-right uppercase tracking-wider">
-                                Total :
+                            <td colSpan={9} className="border border-black p-1.5 text-right uppercase tracking-wider">
+                                Total Général :
                             </td>
                             <td className="border border-black p-1.5 text-right font-mono text-xs">
-                                {isCDF ? requisition.montantTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '—'}
+                                {isEUR ? requisition.montantTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '—'}
                             </td>
                             <td className="border border-black p-1.5 text-right font-mono text-xs">
                                 {isUSD ? requisition.montantTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '—'}
+                            </td>
+                            <td className="border border-black p-1.5 text-right font-mono text-xs">
+                                {isCDF ? requisition.montantTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '—'}
                             </td>
                             <td className="border border-black p-1.5" />
                         </tr>
@@ -277,41 +354,46 @@ export default function OfficialPrintSheet({ requisition }: Props) {
             </div>
 
             {/* 4. MONTANT TOTAL EN TOUTES LETTRES */}
-            <div className="text-[11px] mb-8 p-2.5 border border-black bg-gray-50/50 print:break-inside-avoid">
+            <div className="text-[11px] mb-6 p-2.5 border border-black bg-gray-50/50 print:break-inside-avoid flex justify-between items-center">
                 <p>
                     <strong>Montant total en lettres :</strong>{' '}
                     <em className="font-serif ml-1 text-[12px] font-bold">
                         {requisition.montantLettres || 'Selon arrêté réglementaire'}
                     </em>
                 </p>
+                {isDecaissee && requisition.date_decaissement && (
+                    <span className="font-mono text-[10px] font-bold text-gray-600">
+                        Payé le : {requisition.date_decaissement} ({requisition.mode_paiement || 'Espèces'})
+                    </span>
+                )}
             </div>
 
-            {/* 5. CASES DE SIGNATURES OFFICIELLES */}
+            {/* 5. CASES DE SIGNATURES OFFICIELLES RÉALIGNÉES : PM -> PAM -> FINANCE -> DIRECTION */}
             <div className="print:break-inside-avoid">
                 <div className="grid grid-cols-4 border border-black bg-white">
                     <SignatureBox
-                        label="Manager Projet"
+                        label="1. Manager Projet"
                         roleTitle="Manager de Projet"
                         sig={sigMP}
-                        pendingLabel="En attente de visa MP"
+                        pendingLabel="En attente visa MP"
                     />
                     <SignatureBox
-                        label="Manager Finances"
-                        roleTitle="Manager des Finances"
-                        sig={sigFinance}
-                        pendingLabel="En attente de visa financier"
-                    />
-                    <SignatureBox
-                        label="Manager Administration"
+                        label="2. Administration (PAM)"
                         roleTitle="Manager d'Admin. (PAM)"
                         sig={sigAdmin}
-                        pendingLabel="En attente de visa administratif"
+                        pendingLabel="En attente visa PAM"
                     />
                     <SignatureBox
-                        label="Directrice"
+                        label="3. Manager Finances"
+                        roleTitle="Manager des Finances"
+                        sig={sigFinance}
+                        pendingLabel="En attente visa Finances"
+                    />
+                    <SignatureBox
+                        label="4. Direction Générale"
                         roleTitle="Directrice Générale"
                         sig={sigDirectrice}
-                        pendingLabel="En attente d'approbation finale"
+                        pendingLabel="En attente Bon à Payer"
                     />
                 </div>
             </div>

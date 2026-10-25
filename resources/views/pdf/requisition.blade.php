@@ -75,7 +75,7 @@
 
         /* --- ESPACE FLEXIBLE : empêche de coller les signatures direct après le total --- */
         .flex-spacer {
-            height: 40px; 
+            height: 30px; 
         }
 
         /* --- SIGNATURES --- */
@@ -114,12 +114,20 @@
             text-align: center;
             margin-top: 30px;
         }
-        .sig-footer {
-            border-top: 1px solid #000;
-            padding-top: 4px;
-            font-size: 8.5px;
-            font-weight: 600;
-            margin-top: 6px;
+
+        /* --- STAMP PAID --- */
+        .stamp-paid {
+            position: absolute;
+            right: 40px;
+            top: 70px;
+            border: 4px solid #b91c1c;
+            color: #b91c1c;
+            border-radius: 8px;
+            padding: 5px 15px;
+            transform: rotate(-12deg);
+            opacity: 0.85;
+            text-align: center;
+            z-index: 1000;
         }
 
         .text-right { text-align: right; }
@@ -134,8 +142,9 @@
 
 @php
     $isService = strtolower($requisition->nature_requisition) === 'service';
-    $isCDF = $requisition->devise === 'FC';
+    $isCDF = $requisition->devise === 'FC' || $requisition->devise === 'CDF';
     $isUSD = $requisition->devise === 'USD';
+    $isEUR = $requisition->devise === 'EUR';
 
     $nomDemandeur = $requisition->user->name ?? 'Inconnu';
 
@@ -143,9 +152,10 @@
         ? ($requisition->date_paiement ? \Carbon\Carbon::parse($requisition->date_paiement)->format('d/m/Y') : '......../......../202.....')
         : ($requisition->date_livraison ? \Carbon\Carbon::parse($requisition->date_livraison)->format('d/m/Y') : '......../......../202.....');
 
+    // NOUVEL ORDRE DES SIGNATURES
     $sigMP = $requisition->signatures->where('role_signataire', 'project_manager')->where('action', 'approved')->first();
-    $sigFinance = $requisition->signatures->where('role_signataire', 'finance')->where('action', 'approved')->first();
     $sigAdmin = $requisition->signatures->where('role_signataire', 'admin_manager')->where('action', 'approved')->first();
+    $sigFinance = $requisition->signatures->where('role_signataire', 'finance')->where('action', 'approved')->first();
     $sigDirectrice = $requisition->signatures->where('role_signataire', 'director')->where('action', 'approved')->first();
 
     // ---------------------------------------------------------------------
@@ -224,6 +234,19 @@
     }
 @endphp
 
+<!-- SCEAU PAID OFFICIEL (Affiche uniquement si décaissé) -->
+@if($requisition->status === 'decaisse')
+    <div class="stamp-paid">
+        <div style="font-size: 24px; font-weight: 900; letter-spacing: 2px;">PAID / PAYÉ</div>
+        <div style="font-size: 11px; font-family: monospace; font-weight: bold; margin-top: 2px;">
+            Réf : {{ $requisition->reference_paiement ?? 'BSC-VALIDÉ' }}
+        </div>
+        <div style="font-size: 10px; margin-top: 2px;">
+            Guichet : {{ $requisition->caisse_decaissement }}
+        </div>
+    </div>
+@endif
+
 <!-- 1. EN-TÊTE -->
 <table class="header-table">
     <tr>
@@ -291,89 +314,134 @@
     <thead>
         <tr>
             <th rowspan="2" style="width: 20px;">N°</th>
-            <th rowspan="2" style="width: 80px;">Code d'activité</th>
-            <th rowspan="2" style="width: 95px;">Code d'allocation budgétaire</th>
+            <th rowspan="2" style="width: 60px;">Code d'activité</th>
+            <th rowspan="2" style="width: 120px;">Code d'allocation / Ventilation</th>
             <th rowspan="2">{{ $isService ? 'Nature de service' : 'Description' }}</th>
-            <th rowspan="2" style="width: 40px;">{{ $isService ? 'Durée' : 'Qté' }}</th>
-            <th rowspan="2" style="width: 40px;">Unité</th>
-            <th colspan="2" class="text-center">{{ $isService ? 'Frais Prestation unitaire' : 'PU' }}</th>
-            <th colspan="2" class="text-center">{{ $isService ? 'Frais Prestation totale' : 'PT' }}</th>
-            <th rowspan="2" style="width: 50px;">OBS</th>
+            <th rowspan="2" style="width: 35px;">{{ $isService ? 'Durée' : 'Qté' }}</th>
+            <th rowspan="2" style="width: 35px;">Unité</th>
+            <th colspan="3" class="text-center">P.U ({{ $requisition->devise }})</th>
+            <th colspan="3" class="text-center">P.T ({{ $requisition->devise }})</th>
+            <th rowspan="2" style="width: 35px;">OBS</th>
         </tr>
         <tr>
-            <th style="width: 55px;">CDF</th>
-            <th style="width: 55px;">USD</th>
-            <th style="width: 65px;">CDF</th>
-            <th style="width: 65px;">USD</th>
+            <th style="width: 45px;">EUR</th>
+            <th style="width: 45px;">USD</th>
+            <th style="width: 45px;">CDF</th>
+            <th style="width: 45px;">EUR</th>
+            <th style="width: 45px;">USD</th>
+            <th style="width: 45px;">CDF</th>
         </tr>
     </thead>
     <tbody>
         @foreach($requisition->demandes as $index => $art)
             @php
-                $montantCDF = $isCDF ? $art->total_ligne : 0;
+                $montantEUR = $isEUR ? $art->total_ligne : 0;
                 $montantUSD = $isUSD ? $art->total_ligne : 0;
-                $puCDF = $isCDF ? $art->frais_unitaire : 0;
+                $montantCDF = $isCDF ? $art->total_ligne : 0;
+
+                $puEUR = $isEUR ? $art->frais_unitaire : 0;
                 $puUSD = $isUSD ? $art->frais_unitaire : 0;
+                $puCDF = $isCDF ? $art->frais_unitaire : 0;
+                
                 $qte = $art->quantite > 0 ? $art->quantite : $art->duree;
             @endphp
             <tr class="text-center">
-                <td class="font-mono">{{ $index + 1 }}</td>
-                <td class="font-mono">{{ $art->code_activite ?? '' }}</td>
-                <td class="font-mono font-bold">{{ $art->code_allocation ?? $art->code_all_budget ?? '—' }}</td>
-                <td class="text-left font-medium">{{ $art->activite }}</td>
-                <td class="font-bold font-mono">{{ $qte }}</td>
-                <td>{{ $art->unite ?? '—' }}</td>
-                <td class="text-right font-mono">{{ $puCDF > 0 ? number_format($puCDF, 2, ',', ' ') : '—' }}</td>
-                <td class="text-right font-mono">{{ $puUSD > 0 ? number_format($puUSD, 2, ',', ' ') : '—' }}</td>
-                <td class="text-right font-mono font-bold">{{ $montantCDF > 0 ? number_format($montantCDF, 2, ',', ' ') : '—' }}</td>
-                <td class="text-right font-mono font-bold">{{ $montantUSD > 0 ? number_format($montantUSD, 2, ',', ' ') : '—' }}</td>
-                <td style="font-size: 9px; color: #4b5563;">{{ $art->justificatifs->count() > 0 ? $art->justificatifs->count() . ' devis' : '—' }}</td>
+                <td class="font-mono" style="vertical-align: top;">{{ $index + 1 }}</td>
+                <td class="font-mono" style="vertical-align: top;">{{ $art->code_activite ?? '—' }}</td>
+                
+                <!-- GESTION DE LA VENTILATION (SPLITTING) -->
+                <td class="font-mono text-left" style="vertical-align: top; padding: 2px 4px;">
+                    @if($art->splits->count() > 0)
+                        <div style="font-size: 8.5px; color: #6b7280; font-weight: bold; border-bottom: 1px solid #d1d5db; padding-bottom: 2px; margin-bottom: 2px;">
+                            VENTILÉ ({{ $art->splits->count() }}) :
+                        </div>
+                        @foreach($art->splits as $split)
+                            <div style="font-size: 9px; margin-bottom: 1px; clear: both;">
+                                <span style="color: #04326D; font-weight: bold;">{{ $split->code_allocation }}</span>
+                                <span style="float: right;">{{ number_format($split->montant, 2, ',', ' ') }}</span>
+                            </div>
+                        @endforeach
+                    @else
+                        <div style="font-weight: bold; color: #04326D; margin-top: 3px;">
+                            {{ $art->code_allocation ?? $art->code_all_budget ?? '—' }}
+                        </div>
+                    @endif
+                </td>
+
+                <td class="text-left font-medium" style="vertical-align: top;">{{ $art->activite }}</td>
+                <td class="font-bold font-mono" style="vertical-align: top;">{{ $qte }}</td>
+                <td style="vertical-align: top;">{{ $art->unite ?? '—' }}</td>
+                
+                <!-- P.U -->
+                <td class="text-right font-mono" style="vertical-align: top;">{{ $puEUR > 0 ? number_format($puEUR, 2, ',', ' ') : '—' }}</td>
+                <td class="text-right font-mono" style="vertical-align: top;">{{ $puUSD > 0 ? number_format($puUSD, 2, ',', ' ') : '—' }}</td>
+                <td class="text-right font-mono" style="vertical-align: top;">{{ $puCDF > 0 ? number_format($puCDF, 2, ',', ' ') : '—' }}</td>
+                
+                <!-- P.T -->
+                <td class="text-right font-mono font-bold" style="vertical-align: top;">{{ $montantEUR > 0 ? number_format($montantEUR, 2, ',', ' ') : '—' }}</td>
+                <td class="text-right font-mono font-bold" style="vertical-align: top;">{{ $montantUSD > 0 ? number_format($montantUSD, 2, ',', ' ') : '—' }}</td>
+                <td class="text-right font-mono font-bold" style="vertical-align: top;">{{ $montantCDF > 0 ? number_format($montantCDF, 2, ',', ' ') : '—' }}</td>
+                
+                <td style="font-size: 8px; color: #4b5563; vertical-align: top;">{{ $art->justificatifs->count() > 0 ? $art->justificatifs->count() . ' devis' : '—' }}</td>
             </tr>
         @endforeach
         <tr style="background-color: #f9fafb;">
-            <td colspan="8" class="text-right font-bold uppercase">Total :</td>
-            <td class="text-right font-bold font-mono">{{ $isCDF ? number_format($requisition->montant_total, 2, ',', ' ') : '—' }}</td>
+            <td colspan="9" class="text-right font-bold uppercase" style="letter-spacing: 1px;">Total :</td>
+            <td class="text-right font-bold font-mono">{{ $isEUR ? number_format($requisition->montant_total, 2, ',', ' ') : '—' }}</td>
             <td class="text-right font-bold font-mono">{{ $isUSD ? number_format($requisition->montant_total, 2, ',', ' ') : '—' }}</td>
+            <td class="text-right font-bold font-mono">{{ $isCDF ? number_format($requisition->montant_total, 2, ',', ' ') : '—' }}</td>
             <td></td>
         </tr>
     </tbody>
 </table>
 
 <!-- 4. TOTAL LETTRES -->
-<div class="total-letters">
-    <strong>Montant total en lettres :</strong>
-    <em class="font-bold italic" style="margin-left: 5px; font-family: serif; font-size: 12px;">{{ $montantEnLettres }}</em>
-</div>
+<table style="width: 100%; margin-top: 15px;">
+    <tr>
+        <td class="total-letters" style="width: 60%; margin-top: 0;">
+            <strong>Montant total en lettres :</strong>
+            <em class="font-bold italic" style="margin-left: 5px; font-family: serif; font-size: 12px;">{{ $montantEnLettres }}</em>
+        </td>
+        <td style="width: 40%; text-align: right; padding-left: 10px; vertical-align: bottom;">
+            @if($requisition->status === 'decaisse')
+                <div style="font-size: 10px; color: #4b5563; font-weight: bold; font-family: monospace;">
+                    Payé le : {{ \Carbon\Carbon::parse($requisition->date_decaissement)->format('d/m/Y H:i') }}<br>
+                    Mode : {{ $requisition->mode_paiement }}
+                </div>
+            @endif
+        </td>
+    </tr>
+</table>
 
 <!-- 5. ESPACE FLEXIBLE (pousse les signatures vers le bas de page en évitant les coupures) -->
 <div class="flex-spacer"></div>
 
-<!-- 6. SIGNATURES -->
+<!-- 6. SIGNATURES (Ordre ajusté) -->
 <div class="signatures-wrapper">
     <table class="signatures-box">
         <tr>
             <!-- VISA MP -->
             <td class="sig-cell">
-                <div class="sig-header">Manager projet</div>
-                {!! renderSignature($sigMP, "Manager de Projet", "En attente de visa MP") !!}
+                <div class="sig-header">1. Manager projet</div>
+                {!! renderSignature($sigMP, "Manager de Projet", "En attente visa MP") !!}
+            </td>
+
+            <!-- VISA PAM -->
+            <td class="sig-cell">
+                <div class="sig-header">2. Administration (PAM)</div>
+                {!! renderSignature($sigAdmin, "Manager d'Administration (PAM)", "En attente visa PAM") !!}
             </td>
 
             <!-- VISA FINANCE -->
             <td class="sig-cell">
-                <div class="sig-header">Manager chargé de finance</div>
-                {!! renderSignature($sigFinance, "Manager des Finances", "En attente de visa financier") !!}
-            </td>
-
-            <!-- VISA ADMIN -->
-            <td class="sig-cell">
-                <div class="sig-header">Manager d'Administration</div>
-                {!! renderSignature($sigAdmin, "Manager d'Administration (PAM)", "En attente de visa administratif") !!}
+                <div class="sig-header">3. Manager Finances</div>
+                {!! renderSignature($sigFinance, "Manager des Finances", "En attente visa financier") !!}
             </td>
 
             <!-- VISA DIRECTRICE -->
             <td class="sig-cell">
-                <div class="sig-header">Directrice</div>
-                {!! renderSignature($sigDirectrice, "Directrice Générale", "En attente d'approbation finale") !!}
+                <div class="sig-header">4. Directrice</div>
+                {!! renderSignature($sigDirectrice, "Directrice Générale", "En attente d'approbation") !!}
             </td>
         </tr>
     </table>

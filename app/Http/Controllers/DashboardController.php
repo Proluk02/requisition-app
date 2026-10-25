@@ -57,7 +57,7 @@ class DashboardController extends Controller
         }
 
         if ($user->hasRole('coordinator') || $user->hasRole('beneficiary')) {
-            $requisitions = Requisition::with(['demandes.justificatifs', 'signatures.user'])
+            $requisitions = Requisition::with(['demandes.justificatifs', 'demandes.splits', 'signatures.user'])
                 ->where('user_id', $user->id)
                 ->orderByDesc('created_at')
                 ->get();
@@ -84,7 +84,8 @@ class DashboardController extends Controller
 
     private function renderProjectManagerDashboard(User $user)
     {
-        $requisitionsQuery = clone Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
+        // AJOUT de 'demandes.splits'
+        $requisitionsQuery = clone Requisition::with(['user', 'demandes.justificatifs', 'demandes.splits', 'signatures.user', 'project'])
             ->where('project_id', $user->project_id)
             ->orderByDesc('created_at');
 
@@ -152,7 +153,8 @@ class DashboardController extends Controller
         $selectedPeriod = $request->input('period', now()->format('Y-m'));
         [$year, $month] = explode('-', $selectedPeriod);
 
-        $query = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
+        // AJOUT de 'demandes.splits'
+        $query = Requisition::with(['user', 'demandes.justificatifs', 'demandes.splits', 'signatures.user', 'project'])
             ->whereYear('created_at', (int) $year)
             ->whereMonth('created_at', (int) $month)
             ->orderByDesc('created_at');
@@ -217,6 +219,13 @@ class DashboardController extends Controller
                     'prixUnitaire' => (float) $d->frais_unitaire,
                     'frais' => (float) $d->frais_unitaire,
                     'total' => (float) $d->total_ligne,
+                    // AJOUT des SPLITS
+                    'splits' => $d->splits->map(fn ($s) => [
+                        'id' => (string) $s->id,
+                        'code_allocation' => $s->code_allocation,
+                        'libelle_allocation' => $s->libelle_allocation,
+                        'montant' => (float) $s->montant,
+                    ])->values()->all(),
                     'justificatifs' => $d->justificatifs->map(fn ($j) => [
                         'id' => (string) $j->id,
                         'nom' => $j->original_name ?? $j->description,
@@ -290,7 +299,7 @@ class DashboardController extends Controller
     {
         abort_unless($request->user()?->canApproveAsDirector(), 403);
 
-        $urgences = Requisition::with(['user', 'demandes.justificatifs', 'project'])
+        $urgences = Requisition::with(['user', 'demandes.justificatifs', 'demandes.splits', 'project'])
             ->where('is_urgent', true)
             ->whereNotIn('status', ['decaisse', 'cloture', 'rejetee'])
             ->orderByDesc('created_at')
@@ -327,7 +336,8 @@ class DashboardController extends Controller
 
     private function renderFinanceDashboard(User $user)
     {
-        $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
+        // AJOUT de 'demandes.splits'
+        $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'demandes.splits', 'signatures.user', 'project'])
             ->orderByDesc('created_at')
             ->get();
 
@@ -443,6 +453,13 @@ class DashboardController extends Controller
                             'prixUnitaire' => (float) $d->frais_unitaire,
                             'frais' => (float) $d->frais_unitaire,
                             'total' => (float) $d->total_ligne,
+                            // AJOUT des SPLITS
+                            'splits' => $d->splits->map(fn ($s) => [
+                                'id' => (string) $s->id,
+                                'code_allocation' => $s->code_allocation,
+                                'libelle_allocation' => $s->libelle_allocation,
+                                'montant' => (float) $s->montant,
+                            ])->values()->all(),
                             'budget_solde_actuel' => $lineModel ? (float) $lineModel->solde : null,
                             'budget_initial' => $lineModel ? (float) $lineModel->budget_initial : null,
                             'justificatifs' => $d->justificatifs->map(fn ($j) => [
@@ -466,12 +483,12 @@ class DashboardController extends Controller
 
     private function renderAdminManagerDashboard(User $user)
     {
-        $allRequisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
+        $allRequisitions = Requisition::with(['user', 'demandes.justificatifs', 'demandes.splits', 'signatures.user', 'project'])
             ->orderByDesc('created_at')
             ->get();
 
         // Le PAM examine STRICTEMENT les réquisitions au statut 'visa_mp'
-        $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'signatures.user', 'project'])
+        $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'demandes.splits', 'signatures.user', 'project'])
             ->where(function ($query) use ($user) {
                 $query->where('status', 'visa_mp')
                     ->orWhere(function ($urgentQuery) use ($user) {
@@ -598,6 +615,13 @@ class DashboardController extends Controller
                     'prixUnitaire' => (float) $d->frais_unitaire,
                     'frais' => (float) $d->frais_unitaire,
                     'total' => (float) $d->total_ligne,
+                    // AJOUT des SPLITS
+                    'splits' => $d->splits->map(fn ($s) => [
+                        'id' => (string) $s->id,
+                        'code_allocation' => $s->code_allocation,
+                        'libelle_allocation' => $s->libelle_allocation,
+                        'montant' => (float) $s->montant,
+                    ])->values()->all(),
                     'justificatifs' => $d->justificatifs->map(fn ($j) => [
                         'id' => (string) $j->id,
                         'nom' => $j->original_name ?? $j->description,
@@ -771,6 +795,13 @@ class DashboardController extends Controller
                         'prixUnitaire' => (float) $d->frais_unitaire,
                         'devise' => $r->devise,
                         'total' => (float) $d->total_ligne,
+                        // AJOUT des SPLITS
+                        'splits' => $d->splits->map(fn ($s) => [
+                            'id' => (string) $s->id,
+                            'code_allocation' => $s->code_allocation,
+                            'libelle_allocation' => $s->libelle_allocation,
+                            'montant' => (float) $s->montant,
+                        ])->values()->all(),
                         'justif' => $d->justificatifs->map(function ($j) {
                             $dateFormatted = '';
                             if (! empty($j->date)) {

@@ -51,4 +51,15 @@ class Demande extends Model
     {
         return $this->hasMany(DemandeJustificatif::class);
     }
+
+    public function splits()
+    {
+        return $this->hasMany(DemandeSplit::class, 'demande_id');
+    }
+
+    public function isSplit(): bool
+    {
+        return $this->splits()->exists();
+    }
+
 }

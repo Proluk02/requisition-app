@@ -20,7 +20,11 @@ import {
     Coins,
     BarChart3,
     Activity,
-    LayoutTemplate
+    LayoutTemplate,
+    Layers,
+    Plus,
+    Trash2,
+    FileText
 } from 'lucide-react';
 
 interface Signature {
@@ -41,6 +45,12 @@ interface FinanceJustificatif {
     fileUrl: string | null;
 }
 
+interface SplitItem {
+    id?: string;
+    code_allocation: string;
+    montant: number;
+}
+
 interface FinanceLine {
     id: string;
     activite: string;
@@ -52,6 +62,7 @@ interface FinanceLine {
     unite: string;
     prixUnitaire: number;
     total: number;
+    splits?: SplitItem[];
     budget_solde_actuel?: number | null;
     budget_initial?: number | null;
     justificatifs: FinanceJustificatif[];
@@ -145,6 +156,7 @@ interface Props extends PageProps {
 const money = (amount: number, currency: string) =>
     `${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${currency}`;
 
+// Composant réutilisable pour rechercher un code budgétaire (utilisé pour lignes simples ET ventilations)
 function BudgetLineSearchPicker({
     currentCode,
     projectId,
@@ -234,10 +246,10 @@ function BudgetLineSearchPicker({
             </div>
 
             {isOpen && (
-                <div className="absolute left-0 top-full mt-1 w-[600px] bg-white border-2 border-[#04326D] rounded-lg shadow-2xl z-[9999] max-h-96 overflow-y-auto divide-y divide-gray-100 text-xs">
-                    <div className="p-2 bg-gray-50 text-[10px] text-gray-500 font-bold uppercase tracking-wider flex justify-between sticky top-0 z-10">
+                <div className="absolute left-0 top-full mt-1 w-[400px] bg-white border-2 border-[#04326D] rounded-lg shadow-2xl z-[9999] max-h-72 overflow-y-auto divide-y divide-gray-100 text-xs">
+                    <div className="p-2 bg-gray-50 text-[10px] text-gray-500 font-bold uppercase tracking-wider flex justify-between sticky top-0 z-10 shadow-sm">
                         <span>Lignes trouvées ({matchingLines.length})</span>
-                        <span>Solde disponible</span>
+                        <span>Solde dispo.</span>
                     </div>
                     {matchingLines.length === 0 ? (
                         <div className="p-3 text-center text-gray-400 italic">
@@ -275,23 +287,9 @@ function BudgetLineSearchPicker({
                                             {money(line.solde, line.devise || devise)}
                                         </span>
                                     </div>
-                                    <p className="text-[11px] text-gray-700 whitespace-normal">
+                                    <p className="text-[11px] text-gray-700 whitespace-normal leading-tight">
                                         {line.libelle}
                                     </p>
-                                    <div className="flex justify-between items-center text-[10px] pt-1">
-                                        <span className="text-gray-500">
-                                            Initial : {money(line.budget_initial, line.devise || devise)}
-                                        </span>
-                                        {isEnough ? (
-                                            <span className="text-emerald-700 font-bold">
-                                                ✓ Couvre la ligne
-                                            </span>
-                                        ) : (
-                                            <span className="text-red-600 font-bold">
-                                                ⚠️ Manque {money(lineTotal - line.solde, devise)}
-                                            </span>
-                                        )}
-                                    </div>
                                 </button>
                             );
                         })
@@ -305,7 +303,7 @@ function BudgetLineSearchPicker({
                         {activeLine.libelle}
                     </p>
                     <div className="flex items-center justify-between text-gray-600 pt-0.5 border-t border-gray-200">
-                        <span>Solde actuel : <strong className="font-mono text-[#0B192C]">{money(activeLine.solde, devise)}</strong></span>
+                        <span>Solde : <strong className="font-mono text-[#0B192C]">{money(activeLine.solde, devise)}</strong></span>
                         <span className={isOverdraft ? 'text-red-700 font-bold' : 'text-emerald-700 font-bold'}>
                             {isOverdraft
                                 ? `⚠️ Déficit : ${money(Math.abs(soldeRestant!), devise)}`
@@ -315,7 +313,7 @@ function BudgetLineSearchPicker({
                 </div>
             ) : (
                 <span className="text-[10px] text-gray-400 italic block mt-1">
-                    Aucune ligne valide sélectionnée
+                    Aucun code sélectionné
                 </span>
             )}
         </div>
@@ -351,9 +349,10 @@ export default function FinanceDashboard({
     const [rejecting, setRejecting] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
     const [observationFinance, setObservationFinance] = useState('');
+    const [activeInputId, setActiveInputId] = useState<string | null>(null);
 
     const [financeCaisse, setFinanceCaisse] = useState<string>('');
-    const [financeAllocations, setFinanceAllocations] = useState<Record<string, string>>({});
+    const [editedArticles, setEditedArticles] = useState<FinanceLine[]>([]);
 
     const [pinModalOpen, setPinModalOpen] = useState(false);
     const [pinSaisi, setPinSaisi] = useState('');
@@ -375,34 +374,16 @@ export default function FinanceDashboard({
         setTimeout(() => setToast(null), 5000);
     };
 
+    const round = (num: number, decimals: number) => {
+        return Math.round(num * Math.pow(10, decimals)) / Math.pow(10, decimals);
+    };
+
     const getBudgetLineObject = (code: string, projectId?: string) => {
         if (!code.trim()) return null;
         const normalized = code.trim().toLowerCase();
         return allBudgetLines.find(
             (l) => l.normalizedCode === normalized && (!projectId || l.project_id === projectId)
         ) || null;
-    };
-
-    const openCorrection = (item: FinanceRequisition) => {
-        setCorrecting({
-            id: item.id,
-            numero: item.numero,
-            project_id: item.project_id,
-            nature: item.nature,
-            devise: item.devise,
-            caisse: item.caisseAttribuee || 'Caisse principale',
-            observation: item.observation,
-            motifRejet: item.motifRejet,
-            lignes: item.lignes.map((line) => ({
-                id: line.id,
-                activite: line.activite,
-                codeBudget: line.codeAllocation || line.codeBudget,
-                nature: line.nature,
-                quantiteOuDuree: line.quantiteOuDuree,
-                unite: line.unite,
-                prixUnitaire: line.prixUnitaire,
-            })),
-        });
     };
 
     const pendingCount = requisitions.filter((item) => item.canDecide).length;
@@ -485,17 +466,120 @@ export default function FinanceDashboard({
         setRejecting(false);
         setRejectionReason('');
         setObservationFinance('');
-        setFinanceCaisse(item.caisseAttribuee || 'Caisse principale');
+        
+        // Restriction stricte de la devise pour l'affectation de la caisse
+        const matchedCaisses = cashRegisters.filter(c => c.devise === item.devise);
+        const initialCaisse = matchedCaisses.some(c => c.name === item.caisseAttribuee)
+            ? item.caisseAttribuee
+            : matchedCaisses[0]?.name || '';
+        setFinanceCaisse(initialCaisse || '');
 
-        const initialAllocations: Record<string, string> = {};
-        item.lignes.forEach((ligne) => {
-            initialAllocations[ligne.id] = ligne.codeAllocation || ligne.codeBudget || '';
-        });
-        setFinanceAllocations(initialAllocations);
+        // Copie de travail (édition de l'activité, codes, et des ventilations)
+        setEditedArticles(item.lignes.map(l => ({
+            ...l,
+            splits: l.splits ? l.splits.map(s => ({ ...s })) : []
+        })));
     };
+
+    // --- LOGIQUE D'ÉDITION POUR LE FINANCIER ---
+    const updateArticleField = (index: number, field: keyof FinanceLine, value: any) => {
+        // Restriction formelle : Le Financier ne modifie ni Qté, ni P.U., ni Total.
+        if (field === 'quantiteOuDuree' || field === 'prixUnitaire' || field === 'total') return;
+
+        setEditedArticles((prev) => {
+            const next = [...prev];
+            (next[index] as any)[field] = value;
+            return next;
+        });
+    };
+
+    const addSplitToArticle = (artIndex: number) => {
+        setEditedArticles((prev) => {
+            const next = [...prev];
+            const currentSplits = next[artIndex].splits ? [...next[artIndex].splits!] : [];
+            const dejaVentile = currentSplits.reduce((acc, s) => acc + s.montant, 0);
+            const reste = Math.max(0, next[artIndex].total - dejaVentile);
+
+            currentSplits.push({
+                code_allocation: '',
+                montant: reste,
+            });
+            next[artIndex].splits = currentSplits;
+            return next;
+        });
+    };
+
+    const removeSplitFromArticle = (artIndex: number, splitIndex: number) => {
+        setEditedArticles((prev) => {
+            const next = [...prev];
+            const currentSplits = [...next[artIndex].splits!];
+            currentSplits.splice(splitIndex, 1);
+            next[artIndex].splits = currentSplits;
+            return next;
+        });
+    };
+
+    const updateSplitField = (artIndex: number, splitIndex: number, field: 'code_allocation' | 'montant', val: any) => {
+        setEditedArticles((prev) => {
+            const next = [...prev];
+            const currentSplits = [...next[artIndex].splits!];
+            (currentSplits[splitIndex] as any)[field] = field === 'montant' ? Number(val) : val;
+            next[artIndex].splits = currentSplits;
+            return next;
+        });
+    };
+
+    // DÉTECTION STRICTE DES DÉPASSEMENTS BUDGÉTAIRES (Lignes et Splits)
+    const hasDepassement = useMemo(() => {
+        if (!selected) return false;
+        return editedArticles.some((ligne) => {
+            if (ligne.splits && ligne.splits.length > 0) {
+                // Vérifier si un des splits dépasse son propre solde disponible
+                return ligne.splits.some(split => {
+                    const bLine = getBudgetLineObject(split.code_allocation, selected.project_id);
+                    if (!bLine) return false;
+                    return split.montant > bLine.solde;
+                });
+            }
+            const code = ligne.codeAllocation || ligne.codeBudget || '';
+            const bLine = getBudgetLineObject(code, selected.project_id);
+            const solde = bLine ? bLine.solde : ligne.budget_solde_actuel;
+            return solde !== null && solde !== undefined && ligne.total > solde;
+        });
+    }, [selected, editedArticles, allBudgetLines]);
 
     const handleTriggerApprove = () => {
         if (!selected) return;
+
+        if (!financeCaisse) {
+            showToast('error', `Veuillez sélectionner une caisse physique valide en ${selected.devise}.`);
+            return;
+        }
+
+        // Vérification rigoureuse des splits et des codes budgétaires
+        for (let i = 0; i < editedArticles.length; i++) {
+            const art = editedArticles[i];
+            if (art.splits && art.splits.length > 0) {
+                const sum = round(art.splits.reduce((acc, s) => acc + s.montant, 0), 2);
+                if (Math.abs(sum - art.total) > 0.05) {
+                    showToast('error', `Erreur de ventilation sur « ${art.activite} » : La somme répartie (${sum}) doit correspondre au total de la ligne (${art.total}).`);
+                    return;
+                }
+                if (art.splits.some(s => !s.code_allocation.trim())) {
+                    showToast('error', `Veuillez spécifier un code budgétaire pour chaque part sur « ${art.activite} ».`);
+                    return;
+                }
+            } else if (!(art.codeAllocation?.trim() || art.codeBudget?.trim())) {
+                showToast('error', `Veuillez attribuer un code budgétaire valide à la ligne « ${art.activite} ».`);
+                return;
+            }
+        }
+
+        if (hasDepassement) {
+            showToast('error', 'Blocage strict : Une ou plusieurs lignes dépassent le solde budgétaire disponible. Veuillez ajuster les imputations ou rejeter le dossier.');
+            return;
+        }
+
         setPinSaisi('');
         setPinError(null);
         setPinModalOpen(true);
@@ -504,13 +588,24 @@ export default function FinanceDashboard({
     const handleConfirmSignature = (e: React.FormEvent) => {
         e.preventDefault();
         if (!selected || !pinSaisi) return;
+        if (hasDepassement) return;
 
         setProcessing(true);
         setPinError(null);
 
-        const allocationsArray = Object.entries(financeAllocations).map(([demande_id, code_allocation]) => ({
-            demande_id,
-            code_allocation: code_allocation.trim(),
+        const articlesPayload = editedArticles.map((art) => ({
+            id: art.id,
+            activite: art.activite, // Le financier a le droit de reformuler l'activité
+            quantiteOuDuree: art.quantiteOuDuree,
+            prixUnitaire: art.prixUnitaire,
+            code_allocation: art.codeAllocation || art.codeBudget || '',
+            splits: art.splits && art.splits.length > 0
+                ? art.splits.map((split) => ({
+                    id: split.id,
+                    code_allocation: split.code_allocation,
+                    montant: split.montant,
+                }))
+                : null,
         }));
 
         const currentNumero = selected.numero;
@@ -522,7 +617,7 @@ export default function FinanceDashboard({
                 pin: pinSaisi.trim(),
                 observation: observationFinance.trim() || null,
                 caisse_decaissement: financeCaisse,
-                allocations: allocationsArray,
+                articles: articlesPayload,
             },
             {
                 preserveScroll: true,
@@ -533,7 +628,7 @@ export default function FinanceDashboard({
                     setPinSaisi('');
                     setObservationFinance('');
                     router.reload();
-                    showToast('success', `Visa Financier validé avec succès sur ${currentNumero}. Transmis à la Directrice Générale.`);
+                    showToast('success', `Visa Financier validé avec succès sur ${currentNumero}. Transmis à la Direction.`);
                 },
                 onError: (errors) => {
                     setPinError((errors as any).pin || 'Code PIN financier incorrect ou non configuré.');
@@ -949,7 +1044,7 @@ export default function FinanceDashboard({
                                 <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                                 <input
                                     type="text"
-                                    placeholder="Recherche instantanée (N°, agent, projet...)"
+                                    placeholder="Recherche instantanée (N°, agent...)"
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     className="pl-8 pr-3 py-1 border border-[#B2BED6] rounded text-xs bg-white text-[#0B192C] w-64 focus:outline-none focus:border-[#04326D]"
@@ -1114,10 +1209,10 @@ export default function FinanceDashboard({
                 </div>
             </div>
 
-            {/* APERÇU CONSOLIDÉ */}
+            {/* APERÇU CONSOLIDÉ (Historique des signatures et lignes de dépenses) */}
             {directorPreviewReq && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
-                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-4xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
+                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-5xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
                         <header className="flex items-start justify-between border-b pb-3">
                             <div>
                                 <span className="text-[10px] bg-blue-100 text-[#04326D] font-bold uppercase px-2 py-0.5 rounded">
@@ -1169,6 +1264,54 @@ export default function FinanceDashboard({
                             )}
                         </div>
 
+                        {/* Lignes de dépenses */}
+                        <div>
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700 mb-2 mt-4">
+                                Détail des Lignes de Dépenses ({directorPreviewReq.lignes.length})
+                            </h3>
+                            <table className="w-full text-left text-xs border border-gray-200">
+                                <thead className="bg-[#0B192C] text-white">
+                                    <tr>
+                                        <th className="p-2 w-1/3">Désignation</th>
+                                        <th className="p-2 w-1/3">Code Imputation / Ventilation</th>
+                                        <th className="p-2 text-right">Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y text-gray-700">
+                                    {directorPreviewReq.lignes.map((l) => (
+                                        <tr key={l.id}>
+                                            <td className="p-2 font-medium">{l.activite}</td>
+                                            <td className="p-2 font-mono text-[#04326D]">
+                                                {l.splits && l.splits.length > 0 ? (
+                                                    <div className="space-y-1">
+                                                        {l.splits.map((s, i) => (
+                                                            <div key={i} className="flex justify-between items-center bg-blue-50/50 p-1 rounded text-[10px]">
+                                                                <span className="font-bold">{s.code_allocation}</span>
+                                                                <span className="text-gray-600">{money(s.montant, directorPreviewReq.devise)}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    l.codeAllocation || l.codeBudget || '—'
+                                                )}
+                                            </td>
+                                            <td className="p-2 text-right font-mono font-bold text-[#0B192C]">
+                                                {money(l.total, directorPreviewReq.devise)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                                <tfoot className="bg-gray-50 font-bold border-t">
+                                    <tr>
+                                        <td colSpan={2} className="p-2 text-right">Total Général :</td>
+                                        <td className="p-2 text-right text-sm font-mono text-[#04326D]">
+                                            {money(directorPreviewReq.montantTotal, directorPreviewReq.devise)}
+                                        </td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+
                         <div className="flex justify-end pt-3 border-t">
                             <button
                                 type="button"
@@ -1182,10 +1325,16 @@ export default function FinanceDashboard({
                 </div>
             )}
 
-            {/* MODALE D'EXAMEN & D'IMPUTATION */}
+            {/* MODALE D'EXAMEN & D'IMPUTATION FINANCIÈRE */}
             {selected && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
-                    <div className="w-full max-w-6xl max-h-[92vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-4 animate-slide-down flex flex-col">
+                <div 
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in"
+                    onClick={() => setActiveInputId(null)}
+                >
+                    <div 
+                        className="w-full max-w-[95vw] lg:max-w-7xl max-h-[95vh] overflow-y-auto bg-white border border-[#B2BED6] shadow-2xl rounded p-6 space-y-4 animate-slide-down flex flex-col"
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         <header className="flex items-start justify-between border-b pb-3 shrink-0">
                             <div>
                                 <span className="text-[10px] uppercase font-bold text-[#F58F20] bg-amber-50 border border-amber-200 px-2 py-0.5 rounded tracking-wider">
@@ -1200,19 +1349,32 @@ export default function FinanceDashboard({
                             </div>
                             <button
                                 type="button"
-                                onClick={() => setSelected(null)}
+                                onClick={() => {
+                                    setSelected(null);
+                                    setActiveInputId(null);
+                                }}
                                 className="text-gray-400 hover:text-gray-600 text-lg font-bold"
                             >
                                 <X className="w-5 h-5" />
                             </button>
                         </header>
 
+                        {/* BANNIÈRE DE BLOCAGE SI DÉPASSEMENT DÉTECTÉ */}
+                        {hasDepassement && (
+                            <div className="p-3 bg-red-100 border-2 border-red-500 rounded text-xs text-red-900 font-bold flex items-center gap-2 shadow-sm animate-pulse shrink-0">
+                                <AlertTriangle className="w-5 h-5 text-red-700 shrink-0" />
+                                <span>
+                                    BLOCAGE AUTOMATIQUE : Le crédit budgétaire disponible sur au moins une des lignes est dépassé. La signature du visa est strictement interdite. Veuillez rejeter le dossier ou ajuster les imputations.
+                                </span>
+                            </div>
+                        )}
+
                         {selected.canDecide && (
                             <div className="p-3 bg-amber-50 border border-amber-200 rounded flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shrink-0">
                                 <div>
                                     <strong className="text-[#F58F20] block">Caisse d'imputation et de décaissement</strong>
                                     <span className="text-amber-900 text-[11px]">
-                                        En tant que Manager Finance, vous pouvez réaffecter la caisse si nécessaire avant validation.
+                                        Vous devez sélectionner une caisse physique dont la devise correspond ({selected.devise}).
                                     </span>
                                 </div>
                                 <select
@@ -1220,7 +1382,10 @@ export default function FinanceDashboard({
                                     onChange={(e) => setFinanceCaisse(e.target.value)}
                                     className="border border-amber-300 rounded px-3 py-1.5 text-xs font-bold text-[#0B192C] bg-white min-w-[200px] focus:outline-none focus:border-[#F58F20]"
                                 >
-                                    {cashRegisters.map((c) => (
+                                    {cashRegisters.filter(c => c.devise === selected.devise).length === 0 && (
+                                        <option value="">-- Aucune caisse en {selected.devise} --</option>
+                                    )}
+                                    {cashRegisters.filter(c => c.devise === selected.devise).map((c) => (
                                         <option key={c.id} value={c.name}>
                                             {c.name} ({c.devise})
                                         </option>
@@ -1248,9 +1413,9 @@ export default function FinanceDashboard({
                                     Contrôle et Ajustement des Imputations Budgétaires
                                 </h3>
                                 {selected.canDecide && (
-                                    <span className="text-[10px] text-[#04326D] font-bold flex items-center gap-1">
-                                        <Coins className="w-3.5 h-3.5 text-emerald-600" />
-                                        Tapez un code pour filtrer instantanément le solde en direct
+                                    <span className="text-[10px] text-[#04326D] font-bold flex items-center gap-1 bg-blue-50 px-2 py-1 rounded">
+                                        <Coins className="w-3.5 h-3.5 text-[#04326D]" />
+                                        Vous pouvez modifier la désignation, les imputations et la ventilation (les montants globaux sont bloqués).
                                     </span>
                                 )}
                             </div>
@@ -1260,61 +1425,183 @@ export default function FinanceDashboard({
                                     <thead className="bg-[#0B192C] text-white font-bold">
                                         <tr>
                                             <th className="p-2.5">Désignation</th>
-                                            <th className="p-2.5 w-[500px]">Code Imputé & Recherche Front-End</th>
-                                            <th className="p-2.5 text-right">Solde Disponible</th>
+                                            <th className="p-2.5 w-20 text-center">Qté/Durée</th>
+                                            <th className="p-2.5 w-24 text-right">P.U.</th>
+                                            <th className="p-2.5 min-w-[340px]">Code Imputé & Ventilation (Splits)</th>
+                                            <th className="p-2.5 text-right">Solde Dispo</th>
                                             <th className="p-2.5 text-right">Total Ligne</th>
                                             <th className="p-2.5 text-center">Faisabilité</th>
                                             <th className="p-2.5">Justificatifs</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
-                                        {selected.lignes.map((line) => {
-                                            const currentCode = financeAllocations[line.id] ?? line.codeAllocation ?? line.codeBudget ?? '';
+                                        {editedArticles.map((line, artIdx) => {
+                                            const hasSplits = line.splits && line.splits.length > 0;
+                                            const currentCode = line.codeAllocation ?? line.codeBudget ?? '';
                                             const matchedLine = getBudgetLineObject(currentCode, selected.project_id);
                                             const soldeDispo = matchedLine ? matchedLine.solde : line.budget_solde_actuel;
-                                            const depassement = soldeDispo !== null && soldeDispo !== undefined && line.total > soldeDispo;
+                                            const depassement = soldeDispo !== null && soldeDispo !== undefined && line.total > soldeDispo && !hasSplits;
+
+                                            const sumSplits = hasSplits ? round(line.splits!.reduce((acc, s) => acc + s.montant, 0), 2) : 0;
+                                            const splitDifference = hasSplits ? round(line.total - sumSplits, 2) : 0;
+                                            const isSplitExact = hasSplits && Math.abs(splitDifference) <= 0.05;
 
                                             return (
-                                                <tr key={line.id} className={depassement ? 'bg-red-50/60' : ''}>
-                                                    <td className="p-2.5 font-medium max-w-[200px] truncate" title={line.activite}>{line.activite}</td>
-                                                    <td className="p-2.5 relative">
+                                                <tr key={line.id} className={depassement && !hasSplits ? 'bg-red-50/60 font-semibold' : ''}>
+                                                    <td className="p-2.5 align-top min-w-[150px]">
                                                         {selected.canDecide ? (
-                                                            <BudgetLineSearchPicker
-                                                                currentCode={currentCode}
-                                                                projectId={selected.project_id}
-                                                                allBudgetLines={allBudgetLines}
-                                                                lineTotal={line.total}
-                                                                devise={selected.devise}
-                                                                onSelectCode={(code) => {
-                                                                    setFinanceAllocations({
-                                                                        ...financeAllocations,
-                                                                        [line.id]: code,
-                                                                    });
-                                                                }}
+                                                            <textarea
+                                                                rows={2}
+                                                                value={line.activite}
+                                                                onChange={(e) => updateArticleField(artIdx, 'activite', e.target.value)}
+                                                                className="w-full border border-gray-300 rounded p-1.5 text-xs font-semibold focus:border-[#04326D] resize-none focus:ring-1 focus:ring-[#04326D]"
                                                             />
                                                         ) : (
-                                                            <div>
-                                                                <span className="font-mono font-bold text-[#04326D] block">
-                                                                    {line.codeAllocation || line.codeBudget || 'Non attribué'}
-                                                                </span>
-                                                                <span className="text-[10px] text-gray-500 block truncate" title={line.libelleAllocation || ''}>
-                                                                    {line.libelleAllocation || 'Non assigné'}
-                                                                </span>
+                                                            <span className="font-medium max-w-[200px] truncate block" title={line.activite}>{line.activite}</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="p-2.5 align-top text-center font-mono text-gray-600 bg-gray-50 cursor-not-allowed">
+                                                        {line.quantiteOuDuree}
+                                                    </td>
+                                                    <td className="p-2.5 align-top text-right font-mono text-gray-600 bg-gray-50 cursor-not-allowed">
+                                                        {money(line.prixUnitaire, selected.devise)}
+                                                    </td>
+                                                    <td className="p-2.5 align-top relative">
+                                                        {!hasSplits ? (
+                                                            <div className="space-y-1.5">
+                                                                {selected.canDecide ? (
+                                                                    <div className="flex gap-2 items-start">
+                                                                        <div className="flex-1 relative">
+                                                                            <BudgetLineSearchPicker
+                                                                                currentCode={currentCode}
+                                                                                projectId={selected.project_id}
+                                                                                allBudgetLines={allBudgetLines}
+                                                                                lineTotal={line.total}
+                                                                                devise={selected.devise}
+                                                                                onSelectCode={(code) => {
+                                                                                    const newArticles = [...editedArticles];
+                                                                                    newArticles[artIdx].codeAllocation = code;
+                                                                                    setEditedArticles(newArticles);
+                                                                                }}
+                                                                            />
+                                                                        </div>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => addSplitToArticle(artIdx)}
+                                                                            className="px-2 py-1.5 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded text-[11px] font-bold flex items-center gap-1 shrink-0 transition"
+                                                                        >
+                                                                            <Layers className="w-3.5 h-3.5" />
+                                                                            <span>Ventiler</span>
+                                                                        </button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div>
+                                                                        <span className="font-mono font-bold text-[#04326D] block">
+                                                                            {line.codeAllocation || line.codeBudget || 'Non attribué'}
+                                                                        </span>
+                                                                        <span className="text-[10px] text-gray-500 block truncate" title={line.libelleAllocation || ''}>
+                                                                            {line.libelleAllocation || 'Non assigné'}
+                                                                        </span>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="p-2.5 bg-purple-50/60 border border-purple-200 rounded-lg space-y-2 relative">
+                                                                <div className="flex items-center justify-between text-[11px] font-bold">
+                                                                    <span className="text-purple-900 uppercase flex items-center gap-1">
+                                                                        <Layers className="w-3.5 h-3.5" /> Ventilation ({line.splits!.length} codes)
+                                                                    </span>
+                                                                    <span className={isSplitExact ? 'text-emerald-700 font-bold' : 'text-red-700 font-bold'}>
+                                                                        {isSplitExact ? '✓ Répartition exacte' : `⚠️ Reste : ${money(splitDifference, selected.devise)}`}
+                                                                    </span>
+                                                                </div>
+
+                                                                {line.splits!.map((split, spIdx) => {
+                                                                    return (
+                                                                        <div key={spIdx} className="flex gap-2 items-start">
+                                                                            {selected.canDecide ? (
+                                                                                <div className="flex-1 relative min-w-[200px]">
+                                                                                    <BudgetLineSearchPicker
+                                                                                        currentCode={split.code_allocation}
+                                                                                        projectId={selected.project_id}
+                                                                                        allBudgetLines={allBudgetLines}
+                                                                                        lineTotal={split.montant}
+                                                                                        devise={selected.devise}
+                                                                                        onSelectCode={(code) => updateSplitField(artIdx, spIdx, 'code_allocation', code)}
+                                                                                    />
+                                                                                </div>
+                                                                            ) : (
+                                                                                <span className="font-mono font-bold text-[#04326D] flex-1 block truncate pt-1">
+                                                                                    {split.code_allocation}
+                                                                                </span>
+                                                                            )}
+                                                                            
+                                                                            <div className="flex items-center gap-1">
+                                                                                <input
+                                                                                    type="number"
+                                                                                    step="any"
+                                                                                    placeholder="Montant"
+                                                                                    value={split.montant}
+                                                                                    onChange={(e) => updateSplitField(artIdx, spIdx, 'montant', e.target.value)}
+                                                                                    className="w-24 border border-purple-300 rounded p-1.5 text-xs font-mono font-bold text-right bg-white focus:outline-none focus:border-purple-500"
+                                                                                    disabled={!selected.canDecide}
+                                                                                />
+                                                                                <span className="text-[11px] font-bold text-gray-500 w-6 pt-1">{selected.devise}</span>
+
+                                                                                {selected.canDecide && (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => removeSplitFromArticle(artIdx, spIdx)}
+                                                                                        className="p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700 rounded transition"
+                                                                                        title="Supprimer cette part"
+                                                                                    >
+                                                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                                                    </button>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })}
+
+                                                                {selected.canDecide && (
+                                                                    <div className="flex justify-between items-center pt-1.5 mt-1 border-t border-purple-200">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => addSplitToArticle(artIdx)}
+                                                                            className="text-[10.5px] font-bold text-purple-700 hover:bg-purple-100 px-1.5 py-1 rounded flex items-center gap-1 transition"
+                                                                        >
+                                                                            <Plus className="w-3 h-3" /> Ajouter un autre code
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => updateArticleField(artIdx, 'splits', [])}
+                                                                            className="text-[10.5px] font-semibold text-red-600 hover:bg-red-50 px-1.5 py-1 rounded transition"
+                                                                        >
+                                                                            Annuler la ventilation
+                                                                        </button>
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         )}
                                                     </td>
-                                                    <td className="p-2.5 text-right font-mono font-bold whitespace-nowrap">
-                                                        {soldeDispo !== null && soldeDispo !== undefined ? (
+                                                    <td className="p-2.5 align-top text-right font-mono font-bold whitespace-nowrap">
+                                                        {hasSplits ? (
+                                                            <span className="text-[10px] text-gray-500">Multi-soldes</span>
+                                                        ) : soldeDispo !== null && soldeDispo !== undefined ? (
                                                             money(soldeDispo, selected.devise)
                                                         ) : (
                                                             <span className="text-gray-400 font-normal">Non défini</span>
                                                         )}
                                                     </td>
-                                                    <td className="p-2.5 text-right font-mono font-bold whitespace-nowrap text-[#0B192C]">
+                                                    <td className="p-2.5 align-top text-right font-mono font-black whitespace-nowrap text-[#0B192C] bg-gray-50">
                                                         {money(line.total, selected.devise)}
                                                     </td>
-                                                    <td className="p-2.5 text-center whitespace-nowrap">
-                                                        {soldeDispo === null || soldeDispo === undefined ? (
+                                                    <td className="p-2.5 align-top text-center whitespace-nowrap">
+                                                        {hasSplits ? (
+                                                            <span className="px-2 py-0.5 rounded bg-purple-100 border border-purple-200 text-purple-800 text-[10px] font-bold">
+                                                                Géré en backend
+                                                            </span>
+                                                        ) : soldeDispo === null || soldeDispo === undefined ? (
                                                             <span className="text-[10px] text-gray-400">À vérifier</span>
                                                         ) : depassement ? (
                                                             <span className="px-2 py-0.5 rounded bg-red-50 border border-red-200 text-red-800 text-[10px] font-bold">
@@ -1326,7 +1613,7 @@ export default function FinanceDashboard({
                                                             </span>
                                                         )}
                                                     </td>
-                                                    <td className="p-2.5">
+                                                    <td className="p-2.5 align-top">
                                                         {line.justificatifs.length > 0 ? (
                                                             <div className="space-y-1">
                                                                 {line.justificatifs.map((f) => (
@@ -1350,7 +1637,7 @@ export default function FinanceDashboard({
                                     </tbody>
                                     <tfoot className="bg-gray-50 font-bold border-t border-[#E2E8F0]">
                                         <tr>
-                                            <td colSpan={3} className="p-2.5 text-right">Total Dossier :</td>
+                                            <td colSpan={5} className="p-2.5 text-right">Total Dossier :</td>
                                             <td className="p-2.5 text-right font-mono text-sm text-[#0B192C]">
                                                 {money(selected.montantTotal, selected.devise)}
                                             </td>
@@ -1392,7 +1679,10 @@ export default function FinanceDashboard({
                                             <div className="flex gap-2">
                                                 <button
                                                     type="button"
-                                                    onClick={() => setSelected(null)}
+                                                    onClick={() => {
+                                                        setSelected(null);
+                                                        setActiveInputId(null);
+                                                    }}
                                                     className="px-3.5 py-2 border rounded text-xs font-semibold text-gray-600 hover:bg-gray-50"
                                                 >
                                                     Fermer
@@ -1400,9 +1690,13 @@ export default function FinanceDashboard({
                                                 <button
                                                     type="button"
                                                     onClick={handleTriggerApprove}
-                                                    className="px-4 py-2 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition"
+                                                    disabled={!financeCaisse || hasDepassement}
+                                                    className={`px-4 py-2 text-white rounded text-xs font-bold shadow transition ${
+                                                        !financeCaisse || hasDepassement ? 'bg-gray-400 cursor-not-allowed opacity-60' : 'bg-[#04326D] hover:bg-[#06428f]'
+                                                    }`}
+                                                    title={hasDepassement ? "Validation bloquée : dépassement budgétaire" : !financeCaisse ? "Veuillez sélectionner une caisse" : "Valider"}
                                                 >
-                                                    Enregistrer & Viser aux Finances (PIN)
+                                                    {!financeCaisse ? 'Caisse manquante' : hasDepassement ? 'Validation Bloquée' : 'Enregistrer & Viser aux Finances (PIN)'}
                                                 </button>
                                             </div>
                                         </div>
@@ -1454,29 +1748,72 @@ export default function FinanceDashboard({
                 </div>
             )}
 
-            {/* MODALE DU PIN FINANCIER */}
+            {/* MODALE DU PIN FINANCIER AVEC RÉCAPITULATIF DES IMPUTATIONS */}
             {pinModalOpen && selected && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in">
-                    <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
+                    <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-md w-full p-6 space-y-4 animate-slide-down">
                         <div className="text-center border-b pb-3">
                             <div className="w-12 h-12 mx-auto rounded bg-blue-50 border border-blue-100 flex items-center justify-center mb-2">
                                 <Lock className="w-5 h-5 text-[#04326D]" />
                             </div>
                             <h3 className="text-sm font-bold uppercase text-[#0B192C] tracking-wide">
-                                Signature Électronique du Visa Financier
+                                Signature Finale & Visa Financier
                             </h3>
                             <p className="text-[11px] text-gray-500 mt-1">
                                 Réquisition N° <strong className="font-mono text-[#04326D]">{selected.numero}</strong>
                             </p>
                         </div>
 
+                        {/* --- NOUVEAU : RÉCAPITULATIF COMPLET AVANT DE VALIDER --- */}
+                        <div className="bg-gray-50 border border-gray-200 rounded p-3 text-xs max-h-52 overflow-y-auto">
+                            <h4 className="font-bold text-gray-700 flex items-center gap-1.5 uppercase tracking-wider text-[10px] mb-2 border-b border-gray-200 pb-1">
+                                <FileText className="w-3.5 h-3.5" />
+                                Récapitulatif des Imputations (Validation Finale)
+                            </h4>
+                            <ul className="space-y-3">
+                                {editedArticles.map((art, idx) => (
+                                    <li key={idx} className="flex flex-col">
+                                        <span className="font-semibold text-gray-800 text-[11px] mb-0.5 leading-tight">{art.activite}</span>
+                                        {art.splits && art.splits.length > 0 ? (
+                                            <div className="pl-3 border-l-2 border-purple-300 space-y-1 mt-0.5">
+                                                {art.splits.map((s, i) => (
+                                                    <div key={i} className="flex justify-between items-center text-[10px]">
+                                                        <span className="font-mono font-bold text-purple-700 bg-purple-50 px-1 rounded">{s.code_allocation || 'Code manquant'}</span>
+                                                        <span className="text-gray-600">{money(s.montant, selected.devise)}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="flex justify-between items-center text-[10px] pl-3 border-l-2 border-[#04326D] mt-0.5">
+                                                <span className="font-mono font-bold text-[#04326D] bg-blue-50 px-1 rounded">
+                                                    {art.codeAllocation || art.codeBudget || 'Non attribué'}
+                                                </span>
+                                                <span className="text-gray-600">{money(art.total, selected.devise)}</span>
+                                            </div>
+                                        )}
+                                    </li>
+                                ))}
+                            </ul>
+                            <div className="mt-3 pt-2 border-t border-gray-200 flex flex-col gap-1.5">
+                                <div className="flex justify-between items-center text-[11px] text-gray-600">
+                                    <span>Caisse Sélectionnée :</span>
+                                    <span className="font-bold text-[#0B192C]">{financeCaisse}</span>
+                                </div>
+                                <div className="flex justify-between items-center font-bold text-[#0B192C]">
+                                    <span>Total à décaisser :</span>
+                                    <span className="text-[#04326D] font-mono text-sm">{money(selected.montantTotal, selected.devise)}</span>
+                                </div>
+                            </div>
+                        </div>
+                        {/* -------------------------------------------------------- */}
+
                         {pinError && (
-                            <div className="p-2.5 bg-red-50 border border-red-300 text-red-800 rounded text-xs">
+                            <div className="p-2.5 bg-red-50 border border-red-300 text-red-800 rounded text-xs text-center font-semibold">
                                 {pinError}
                             </div>
                         )}
 
-                        <form onSubmit={handleConfirmSignature} className="space-y-3 text-xs">
+                        <form onSubmit={handleConfirmSignature} className="space-y-3 text-xs pt-1">
                             <div>
                                 <label className="block font-bold text-gray-700 mb-1">
                                     Saisissez votre Code PIN personnel financier *
@@ -1486,18 +1823,18 @@ export default function FinanceDashboard({
                                     <input
                                         type="password"
                                         maxLength={6}
-                                        placeholder="Code PIN (4 à 6 chiffres)"
+                                        placeholder="••••"
                                         value={pinSaisi}
                                         onChange={(e) => setPinSaisi(e.target.value)}
-                                        className="w-full pl-8 pr-3 py-2 border border-[#B2BED6] rounded text-xs font-mono tracking-widest text-[#0B192C] focus:outline-none focus:border-[#04326D]"
+                                        className="w-full pl-8 pr-3 py-2 border border-[#B2BED6] rounded text-lg font-mono tracking-widest text-center text-[#0B192C] focus:outline-none focus:border-[#04326D]"
                                         autoFocus
                                         required
                                     />
                                 </div>
                             </div>
 
-                            <p className="text-[10px] text-gray-400 leading-tight">
-                                Cette signature atteste du contrôle budgétaire et transmet le dossier à la Direction Générale.
+                            <p className="text-[10px] text-gray-400 leading-tight text-center">
+                                En signant, vous validez définitivement ces imputations (et leurs ventilations) pour le décaissement et l'examen final par la DG.
                             </p>
 
                             <div className="flex justify-end gap-2 pt-2 border-t">

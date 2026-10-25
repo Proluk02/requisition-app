@@ -7,6 +7,7 @@ use App\Models\CashRegister;
 use App\Models\DailyExchangeRate;
 use App\Models\Demande;
 use App\Models\DemandeJustificatif;
+use App\Models\DemandeSplit;
 use App\Models\Project;
 use App\Models\Requisition;
 use App\Models\RequisitionSignature;
@@ -32,7 +33,7 @@ class RequisitionController extends Controller
 {
     public function index()
     {
-        $requisitions = Requisition::with(['demandes.justificatifs', 'signatures.user', 'project', 'user'])
+        $requisitions = Requisition::with(['demandes.justificatifs', 'demandes.splits', 'signatures.user', 'project', 'user'])
             ->where('user_id', Auth::id())
             ->orderByDesc('created_at')
             ->get()
@@ -101,6 +102,12 @@ class RequisitionController extends Controller
                             'unite' => $demande->unite ?? '',
                             'prixUnitaire' => (float) $demande->frais_unitaire,
                             'total' => (float) $demande->total_ligne,
+                            'splits' => $demande->splits->map(fn ($s) => [
+                                'id' => $s->id,
+                                'code_allocation' => $s->code_allocation,
+                                'libelle_allocation' => $s->libelle_allocation,
+                                'montant' => (float) $s->montant,
+                            ])->values()->all(),
                             'justificatifsCount' => $justificatifs->count(),
                             'justificatifs' => $justificatifs->map(function ($justificatif) {
                                 return [
@@ -128,9 +135,7 @@ class RequisitionController extends Controller
     public function showJustificatif(DemandeJustificatif $justificatif)
     {
         $user = Auth::user();
-        if (! $user) {
-            abort(403);
-        }
+        abort_unless($user, 403);
 
         $requisition = $justificatif->demande?->requisition;
         $isAuthorized = $requisition?->user_id === $user->id
@@ -140,12 +145,8 @@ class RequisitionController extends Controller
             || $user->hasRole('admin_manager')
             || $user->canApproveAsDirector();
 
-        if (! $isAuthorized) {
-            abort(403, 'Vous n’êtes pas autorisé à consulter ce fichier.');
-        }
-        if (empty($justificatif->file_path) || ! Storage::disk('public')->exists($justificatif->file_path)) {
-            abort(404, 'Fichier introuvable.');
-        }
+        abort_unless($isAuthorized, 403, 'Vous n’êtes pas autorisé à consulter ce fichier.');
+        abort_if(empty($justificatif->file_path) || ! Storage::disk('public')->exists($justificatif->file_path), 404, 'Fichier introuvable.');
 
         $absolutePath = Storage::disk('public')->path($justificatif->file_path);
 
@@ -174,6 +175,9 @@ class RequisitionController extends Controller
             'articles.*.quantiteOuDuree' => ['required', 'numeric', 'min:0'],
             'articles.*.unite' => ['nullable', 'string', 'max:255'],
             'articles.*.prixUnitaire' => ['required', 'numeric', 'min:0'],
+            'articles.*.splits' => ['nullable', 'array'],
+            'articles.*.splits.*.code_allocation' => ['required_with:articles.*.splits', 'string', 'max:255'],
+            'articles.*.splits.*.montant' => ['required_with:articles.*.splits', 'numeric', 'min:0.01'],
             'articles.*.justificatifs' => ['nullable', 'array'],
             'articles.*.justificatifs.*.description' => ['nullable', 'string', 'max:255'],
             'articles.*.justificatifs.*.date' => ['nullable', 'date'],
@@ -197,36 +201,57 @@ class RequisitionController extends Controller
             $montantTotal = 0;
             $observation = $validated['observation'] ?? null;
 
-            foreach ($validated['articles'] as $articleIndex => $article) {
-                $demande = $demandes->get($article['id']);
-                if (! $demande) {
-                    continue;
+            foreach ($validated['articles'] as $articleIndex => $artData) {
+                $demande = $demandes->get($artData['id']);
+                if (! $demande) continue;
+
+                $qte = (float) $artData['quantiteOuDuree'];
+                $pu = (float) $artData['prixUnitaire'];
+                $totalLigne = round($qte * $pu, 2);
+                $isService = strtolower($natureRequisition) === 'service';
+                $montantTotal += $totalLigne;
+
+                $codePrincipal = trim((string) ($artData['code_all_budget'] ?? ''));
+                $splitsData = $artData['splits'] ?? [];
+
+                if (! empty($splitsData)) {
+                    $demande->splits()->delete();
+                    foreach ($splitsData as $split) {
+                        $codeNorm = BudgetLine::normalizeCode($split['code_allocation']);
+                        $libelle = BudgetLine::where('project_id', $lockedRequisition->project_id)
+                            ->whereRaw('LOWER(TRIM(code)) = ?', [$codeNorm])
+                            ->value('libelle') ?? 'Ventilation';
+
+                        DemandeSplit::create([
+                            'demande_id' => $demande->id,
+                            'code_allocation' => trim($split['code_allocation']),
+                            'libelle_allocation' => $libelle,
+                            'montant' => (float) $split['montant'],
+                        ]);
+                    }
+                    $codePrincipal = $splitsData[0]['code_allocation'];
+                } else {
+                    $demande->splits()->delete();
                 }
 
-                $quantiteOuDuree = (float) $article['quantiteOuDuree'];
-                $fraisUnitaire = (float) $article['prixUnitaire'];
-                $totalLigne = round($quantiteOuDuree * $fraisUnitaire, 2);
-                $isService = strtolower($natureRequisition) === 'service';
-
                 $demande->update([
-                    'activite' => $article['activite'],
-                    'code_all_budget' => $article['code_all_budget'] ?? $demande->code_all_budget,
-                    'code_allocation' => $article['code_all_budget'] ?? $demande->code_allocation,
-                    'nature' => $article['nature'] ?? $demande->nature,
-                    'quantite' => $isService ? 0 : $quantiteOuDuree,
-                    'duree' => $isService ? $quantiteOuDuree : 0,
-                    'unite' => $article['unite'] ?? $demande->unite,
-                    'frais_unitaire' => $fraisUnitaire,
+                    'activite' => $artData['activite'],
+                    'code_all_budget' => $codePrincipal,
+                    'code_allocation' => $codePrincipal,
+                    'libelle_allocation' => BudgetLine::where('project_id', $lockedRequisition->project_id)
+                        ->whereRaw('LOWER(TRIM(code)) = ?', [BudgetLine::normalizeCode($codePrincipal)])
+                        ->value('libelle') ?? $demande->libelle_allocation,
+                    'nature' => $artData['nature'] ?? $demande->nature,
+                    'quantite' => $isService ? 0 : $qte,
+                    'duree' => $isService ? $qte : 0,
+                    'unite' => $artData['unite'] ?? $demande->unite,
+                    'frais_unitaire' => $pu,
                     'total_ligne' => $totalLigne,
                 ]);
 
-                $montantTotal += $totalLigne;
-
                 foreach ($request->file("articles.{$articleIndex}.justificatifs", []) as $justificatifIndex => $fileData) {
                     $uploadedFile = is_array($fileData) ? ($fileData['file'] ?? null) : $fileData;
-                    if (! $uploadedFile instanceof UploadedFile || ! $uploadedFile->isValid()) {
-                        continue;
-                    }
+                    if (! $uploadedFile instanceof UploadedFile || ! $uploadedFile->isValid()) continue;
 
                     $metadata = $request->input("articles.{$articleIndex}.justificatifs.{$justificatifIndex}", []);
                     $path = $uploadedFile->store('requisition-attachments', 'public');
@@ -243,12 +268,18 @@ class RequisitionController extends Controller
                 }
             }
 
+            $activeRate = DailyExchangeRate::getActiveRate();
+            $conversion = DailyExchangeRate::convertToEur($montantTotal, $validated['devise'], $activeRate);
+
             $lockedRequisition->update([
                 'caisse_decaissement' => $validated['caisse_decaissement'],
                 'nature_requisition' => $natureRequisition,
                 'devise' => $validated['devise'],
                 'observation' => $observation,
-                'montant_total' => round($montantTotal, 2),
+                'montant_total' => $montantTotal,
+                'montant_total_eur' => $conversion['montant_eur'],
+                'taux_eur_usd' => $conversion['taux_eur_usd'],
+                'taux_eur_cdf' => $conversion['taux_eur_cdf'],
                 'status' => $resubmissionStatus,
             ]);
 
@@ -258,10 +289,7 @@ class RequisitionController extends Controller
                 default => 'initiator',
             };
 
-            $rejection = $lockedRequisition->signatures()
-                ->where('action', 'rejected')
-                ->latest('signed_at')
-                ->first();
+            $rejection = $lockedRequisition->signatures()->where('action', 'rejected')->latest('signed_at')->first();
 
             $this->enregistrerSignature(
                 requisition: $lockedRequisition,
@@ -299,26 +327,10 @@ class RequisitionController extends Controller
     {
         $isOwner = $requisition->user_id === $user->id;
 
-        if ($requisition->status === 'returned_to_urgent_initiator' && $isOwner) {
-            return 'urgent_direction';
-        }
-
-        if ($isOwner && $requisition->status === 'returned_to_beneficiary') {
-            return 'draft';
-        }
-
-        // Le Chef de Projet corrige après n'importe quel rejet et transmet au PAM
-        if ($user->hasRole('project_manager')
-            && $user->project_id !== null
-            && $user->project_id === $requisition->project_id
-            && in_array($requisition->status, ['returned_to_project_manager', 'returned_to_finance', 'returned_to_admin_manager'])) {
-            return 'visa_mp';
-        }
-
-        if ($isOwner && $requisition->status === 'draft') {
-            return 'draft';
-        }
-
+        if ($requisition->status === 'returned_to_urgent_initiator' && $isOwner) return 'urgent_direction';
+        if ($isOwner && $requisition->status === 'returned_to_beneficiary') return 'draft';
+        if ($user->hasRole('project_manager') && $user->project_id !== null && $user->project_id === $requisition->project_id && in_array($requisition->status, ['returned_to_project_manager', 'returned_to_finance', 'returned_to_admin_manager'])) return 'visa_mp';
+        if ($isOwner && $requisition->status === 'draft') return 'draft';
         return null;
     }
 
@@ -344,12 +356,8 @@ class RequisitionController extends Controller
             'lignes.*.frais_unitaire' => ['required', 'numeric', 'min:0'],
             'lignes.*.total_ligne' => ['required', 'numeric', 'min:0'],
             'lignes.*.justificatifs' => ['nullable', 'array'],
-        ], [
-            'caisse_decaissement.required' => 'Veuillez sélectionner une caisse créée.',
-            'caisse_decaissement.exists' => 'La caisse sélectionnée est introuvable.',
         ]);
 
-        // 1. VÉRIFICATION STRICTE DE COHÉRENCE CAISSE <-> DEVISE
         $caisse = CashRegister::where('name', $validated['caisse_decaissement'])->firstOrFail();
         abort_unless(
             $caisse->devise === $validated['devise'],
@@ -381,7 +389,6 @@ class RequisitionController extends Controller
         $numeroChronologique = sprintf('%s/%s/%03d', $initialesProjet, $moisCourant, $ordre);
         $isUrgent = $request->boolean('is_urgent');
 
-        // 2. CONVERSION DE RÉFÉRENCE EN EURO (€) SUR BASE DU TAUX DU JOUR
         $conversion = DailyExchangeRate::convertToEur((float) $validated['montant_total'], $validated['devise']);
 
         $requisition = Requisition::create([
@@ -413,20 +420,8 @@ class RequisitionController extends Controller
             $isUrgent ? 'Soumission URGENTE (Circuit normal prioritaire)' : 'Soumission initiale'
         );
 
-        $this->notifierUtilisateur(
-            userId: $user->id,
-            titre: 'Réquisition transmise',
-            message: "Votre réquisition {$numeroChronologique} a été transmise avec succès au Manager de Projet.",
-            urgent: $isUrgent
-        );
-
-        $this->notifierRole(
-            roleCible: 'project_manager',
-            projectId: $project->id,
-            titre: $isUrgent ? 'URGENT : Réquisition à viser' : 'Nouvelle réquisition à viser',
-            message: "La réquisition {$numeroChronologique} ({$requisition->montant_total} {$requisition->devise}) de {$user->name} attend votre visa.",
-            urgent: $isUrgent
-        );
+        $this->notifierUtilisateur($user->id, 'Réquisition transmise', "Votre réquisition {$numeroChronologique} a été transmise avec succès au Manager de Projet.", $isUrgent);
+        $this->notifierRole('project_manager', $project->id, $isUrgent ? 'URGENT : Réquisition à viser' : 'Nouvelle réquisition à viser', "La réquisition {$numeroChronologique} ({$requisition->montant_total} {$requisition->devise}) de {$user->name} attend votre visa.", $isUrgent);
 
         foreach ($request->input('lignes', []) as $ligneIndex => $ligne) {
             $demande = Demande::create([
@@ -445,19 +440,12 @@ class RequisitionController extends Controller
             $rawJustificatifs = $request->input("lignes.{$ligneIndex}.justificatifs", []);
             $uploadedJustificatifs = $request->file("lignes.{$ligneIndex}.justificatifs", []);
 
-            if (! is_array($rawJustificatifs)) {
-                $rawJustificatifs = [$rawJustificatifs];
-            }
-            if (! is_array($uploadedJustificatifs)) {
-                $uploadedJustificatifs = [$uploadedJustificatifs];
-            }
+            if (! is_array($rawJustificatifs)) $rawJustificatifs = [$rawJustificatifs];
+            if (! is_array($uploadedJustificatifs)) $uploadedJustificatifs = [$uploadedJustificatifs];
 
             foreach ($rawJustificatifs as $justifIndex => $justifData) {
                 $uploadedFile = $uploadedJustificatifs[$justifIndex]['file'] ?? ($uploadedJustificatifs[$justifIndex] ?? null);
-
-                if (! $uploadedFile || ! $uploadedFile instanceof UploadedFile || ! $uploadedFile->isValid()) {
-                    continue;
-                }
+                if (! $uploadedFile || ! $uploadedFile instanceof UploadedFile || ! $uploadedFile->isValid()) continue;
 
                 $fileMeta = is_array($justifData) ? $justifData : [];
                 $path = $uploadedFile->store('requisition-attachments', 'public');
@@ -493,16 +481,23 @@ class RequisitionController extends Controller
             'password' => ['nullable', 'string'],
             'observation' => ['nullable', 'string', 'max:5000'],
             'caisse_decaissement' => [
-                'required_if:decision,approve',
                 'nullable',
                 'string',
                 'max:255',
                 Rule::exists('cash_registers', 'name')->where('is_active', true),
             ],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
-            'allocations' => ['required_if:decision,approve', 'array', 'min:1'],
-            'allocations.*.demande_id' => ['required', 'string', 'distinct'],
-            'allocations.*.code_allocation' => ['required', 'string', 'max:255'],
+            
+            'articles' => ['nullable', 'array'],
+            'articles.*.id' => ['required_with:articles', 'string'],
+            'articles.*.activite' => ['required_with:articles', 'string', 'max:255'],
+            'articles.*.quantiteOuDuree' => ['required_with:articles', 'numeric', 'min:0'],
+            'articles.*.prixUnitaire' => ['required_with:articles', 'numeric', 'min:0'],
+            'articles.*.code_allocation' => ['nullable', 'string', 'max:255'],
+            
+            'articles.*.splits' => ['nullable', 'array'],
+            'articles.*.splits.*.code_allocation' => ['required_with:articles.*.splits', 'string', 'max:255'],
+            'articles.*.splits.*.montant' => ['required_with:articles.*.splits', 'numeric', 'min:0.01'],
         ]);
 
         if ($validated['decision'] === 'approve') {
@@ -512,14 +507,6 @@ class RequisitionController extends Controller
                 return Redirect::back()->withErrors([
                     'pin' => 'Signature refusée : Code PIN (ou mot de passe) incorrect.',
                     'password' => 'Signature refusée : Code PIN (ou mot de passe) incorrect.',
-                ]);
-            }
-
-            // Vérification stricte caisse <-> devise de la réquisition
-            $caisse = CashRegister::where('name', $validated['caisse_decaissement'])->first();
-            if ($caisse && $caisse->devise !== $requisition->devise) {
-                return Redirect::back()->withErrors([
-                    'caisse_decaissement' => "La caisse sélectionnée ({$caisse->name}) fonctionne en {$caisse->devise}, alors que la réquisition est en {$requisition->devise}.",
                 ]);
             }
         }
@@ -535,69 +522,122 @@ class RequisitionController extends Controller
             );
 
             if ($validated['decision'] === 'approve') {
+                $caisseChoisie = $validated['caisse_decaissement'] ?? $lockedRequisition->caisse_decaissement;
+                $caisseModel = CashRegister::where('name', $caisseChoisie)->first();
+                if ($caisseModel && $caisseModel->devise !== $lockedRequisition->devise) {
+                    return [
+                        'success' => false,
+                        'error' => "Incohérence : la caisse « {$caisseModel->name} » fonctionne en {$caisseModel->devise}, alors que la réquisition est en {$lockedRequisition->devise}."
+                    ];
+                }
+
                 $demandes = $lockedRequisition->demandes()->lockForUpdate()->get()->keyBy('id');
+                $nouveauMontantTotal = 0;
                 $activeRate = DailyExchangeRate::getActiveRate();
 
-                // 1. CONTRÔLE ET BLOCAGE STRICT DES DÉPASSEMENTS BUDGÉTAIRES
-                foreach ($validated['allocations'] as $allocation) {
-                    $demande = $demandes->get($allocation['demande_id']);
-                    if (! $demande) {
-                        continue;
-                    }
+                if (! empty($validated['articles'])) {
+                    foreach ($validated['articles'] as $artData) {
+                        $demande = $demandes->get($artData['id']);
+                        if (! $demande) continue;
 
-                    $codeNorm = BudgetLine::normalizeCode($allocation['code_allocation']);
-                    $budgetLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
-                        ->whereRaw('LOWER(TRIM(code)) = ?', [$codeNorm])
-                        ->lockForUpdate()
-                        ->first();
+                        $qte = (float) $artData['quantiteOuDuree'];
+                        $pu = (float) $artData['prixUnitaire'];
+                        $totalLigne = round($qte * $pu, 2);
+                        $nouveauMontantTotal += $totalLigne;
 
-                    if (! $budgetLine) {
-                        return [
-                            'success' => false,
-                            'error' => "Le code budgétaire « {$allocation['code_allocation']} » est introuvable pour ce projet.",
-                        ];
-                    }
+                        $codePrincipal = trim((string) ($artData['code_allocation'] ?? ''));
+                        $splitsData = $artData['splits'] ?? [];
 
-                    // Calcul de l'équivalent en Euro selon la devise de la ligne budgétaire
-                    $conversionLigne = DailyExchangeRate::convertToEur((float) $demande->total_ligne, $lockedRequisition->devise, $activeRate);
-                    $montantRequisEur = $conversionLigne['montant_eur'];
+                        if (! empty($splitsData)) {
+                            $sommeSplits = round(array_sum(array_column($splitsData, 'montant')), 2);
+                            if (abs($sommeSplits - $totalLigne) > 0.05) {
+                                return [
+                                    'success' => false,
+                                    'error' => "Erreur de ventilation sur « {$demande->activite} » : La somme des montants ventilés ({$sommeSplits} {$lockedRequisition->devise}) doit être exactement égale au total de la ligne ({$totalLigne} {$lockedRequisition->devise})."
+                                ];
+                            }
 
-                    // Si la ligne budgétaire est en EUR et que le montant la dépasse
-                    $soldeDisponible = (float) $budgetLine->solde;
-                    if ($montantRequisEur > $soldeDisponible) {
-                        return [
-                            'success' => false,
-                            'error' => "Blocage automatique : La ligne « {$demande->activite} » nécessite {$montantRequisEur} EUR ({$demande->total_ligne} {$lockedRequisition->devise}), ce qui dépasse le solde disponible sur la ligne {$budgetLine->code} ({$soldeDisponible} EUR). Validation impossible.",
-                        ];
-                    }
-                }
+                            foreach ($splitsData as $split) {
+                                $codeNorm = BudgetLine::normalizeCode($split['code_allocation']);
+                                $bLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
+                                    ->whereRaw('LOWER(TRIM(code)) = ?', [$codeNorm])
+                                    ->first();
 
-                // 2. ENREGISTREMENT DES ALLOCATIONS SI AUCUN DÉPASSEMENT
-                foreach ($validated['allocations'] as $allocation) {
-                    $demande = $demandes->get($allocation['demande_id']);
-                    if ($demande) {
-                        $codeNorm = BudgetLine::normalizeCode($allocation['code_allocation']);
-                        $libelle = BudgetLine::query()
-                            ->where('project_id', $lockedRequisition->project_id)
-                            ->whereRaw('LOWER(TRIM(code)) = ?', [$codeNorm])
-                            ->value('libelle') ?? 'code non specifie';
+                                $convSplit = DailyExchangeRate::convertToEur((float) $split['montant'], $lockedRequisition->devise, $activeRate);
+                                if ($bLine && $convSplit['montant_eur'] > (float) $bLine->solde) {
+                                    return [
+                                        'success' => false,
+                                        'error' => "Dépassement sur code ventilé {$bLine->code} : Nécessite {$convSplit['montant_eur']} EUR ({$split['montant']} {$lockedRequisition->devise}), solde dispo : {$bLine->solde} EUR."
+                                    ];
+                                }
+                            }
 
+                            $demande->splits()->delete();
+                            foreach ($splitsData as $split) {
+                                $codeNorm = BudgetLine::normalizeCode($split['code_allocation']);
+                                $libelle = BudgetLine::where('project_id', $lockedRequisition->project_id)
+                                    ->whereRaw('LOWER(TRIM(code)) = ?', [$codeNorm])
+                                    ->value('libelle') ?? 'Ventilation';
+
+                                DemandeSplit::create([
+                                    'demande_id' => $demande->id,
+                                    'code_allocation' => trim($split['code_allocation']),
+                                    'libelle_allocation' => $libelle,
+                                    'montant' => (float) $split['montant'],
+                                ]);
+                            }
+
+                            $codePrincipal = $splitsData[0]['code_allocation'];
+                        } else {
+                            $demande->splits()->delete();
+
+                            if (! empty($codePrincipal)) {
+                                $codeNorm = BudgetLine::normalizeCode($codePrincipal);
+                                $bLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
+                                    ->whereRaw('LOWER(TRIM(code)) = ?', [$codeNorm])
+                                    ->first();
+
+                                $convLigne = DailyExchangeRate::convertToEur($totalLigne, $lockedRequisition->devise, $activeRate);
+                                if ($bLine && $convLigne['montant_eur'] > (float) $bLine->solde) {
+                                    return [
+                                        'success' => false,
+                                        'error' => "Dépassement sur {$bLine->code} : Nécessite {$convLigne['montant_eur']} EUR ({$totalLigne} {$lockedRequisition->devise}), solde dispo : {$bLine->solde} EUR."
+                                    ];
+                                }
+                            }
+                        }
+
+                        $isService = strtolower($lockedRequisition->nature_requisition) === 'service';
                         $demande->update([
-                            'code_allocation' => trim($allocation['code_allocation']),
-                            'code_all_budget' => trim($allocation['code_allocation']),
-                            'libelle_allocation' => $libelle,
+                            'activite' => $artData['activite'],
+                            'quantite' => $isService ? 0 : $qte,
+                            'duree' => $isService ? $qte : 0,
+                            'frais_unitaire' => $pu,
+                            'total_ligne' => $totalLigne,
+                            'code_allocation' => $codePrincipal,
+                            'code_all_budget' => $codePrincipal,
+                            'libelle_allocation' => BudgetLine::where('project_id', $lockedRequisition->project_id)
+                                ->whereRaw('LOWER(TRIM(code)) = ?', [BudgetLine::normalizeCode($codePrincipal)])
+                                ->value('libelle') ?? $demande->libelle_allocation,
                         ]);
                     }
+                } else {
+                    $nouveauMontantTotal = (float) $lockedRequisition->montant_total;
                 }
+
+                $conversion = DailyExchangeRate::convertToEur($nouveauMontantTotal, $lockedRequisition->devise, $activeRate);
 
                 $commentaireSignature = ! empty($validated['observation'])
                     ? $validated['observation']
-                    : "Visa MP accordé. Caisse : {$validated['caisse_decaissement']}";
+                    : "Visa MP accordé. Caisse : {$caisseChoisie}";
 
-                // STATUT : visa_mp (Transmis STRICTEMENT au PAM)
                 $lockedRequisition->update([
                     'status' => 'visa_mp',
-                    'caisse_decaissement' => $validated['caisse_decaissement'],
+                    'caisse_decaissement' => $caisseChoisie,
+                    'montant_total' => $nouveauMontantTotal,
+                    'montant_total_eur' => $conversion['montant_eur'],
+                    'taux_eur_usd' => $conversion['taux_eur_usd'],
+                    'taux_eur_cdf' => $conversion['taux_eur_cdf'],
                     'derniere_observation' => $validated['observation'] ?? null,
                 ]);
 
@@ -634,7 +674,6 @@ class RequisitionController extends Controller
                 return ['success' => true];
             }
 
-            // REJET DU PM => RETOUR AU BÉNÉFICIAIRE
             $lockedRequisition->update([
                 'status' => 'returned_to_beneficiary',
                 'derniere_observation' => $validated['motif_rejet'],
@@ -667,22 +706,17 @@ class RequisitionController extends Controller
         return Redirect::back()->with(
             $validated['decision'] === 'approve' ? 'success' : 'error',
             $validated['decision'] === 'approve'
-                ? 'Visa Manager de Projet accordé. Dossier transmis au PAM.'
+                ? 'Visa Manager de Projet accordé avec imputations. Dossier transmis au PAM.'
                 : 'Réquisition retournée à l’initiateur pour correction.'
         );
     }
 
-    /**
-     * Examen et décision du PAM (Programme Administration Manager)
-     * Le PAM intervient STRICTEMENT lorsque le statut est 'visa_mp'
-     */
     public function adminDecision(Request $request, Requisition $requisition)
     {
         $user = $request->user();
 
         abort_unless($user?->hasRole('admin_manager'), 403, 'Action réservée au Manager de l\'Administration (PAM).');
 
-        // VÉRIFICATION STRICTE : Le PAM n'intervient que sur 'visa_mp'
         abort_unless(
             $requisition->status === 'visa_mp',
             403,
@@ -722,7 +756,6 @@ class RequisitionController extends Controller
                     ? $validated['observation']
                     : 'Visa de contrôle administratif (PAM) accordé.';
 
-                // STATUT : visa_pam (C'est ICI que le dossier est débloqué pour la Finance)
                 $lockedRequisition->update([
                     'status' => 'visa_pam',
                     'derniere_observation' => $validated['observation'] ?? null,
@@ -748,7 +781,6 @@ class RequisitionController extends Controller
                     message: "Votre réquisition {$lockedRequisition->numero_requisition} a été visée par le PAM et transmise aux Finances."
                 );
 
-                // Notifie UNIQUEMENT la Finance maintenant que le PAM a validé
                 $this->notifierRole(
                     roleCible: 'finance',
                     projectId: null,
@@ -760,7 +792,6 @@ class RequisitionController extends Controller
                 return;
             }
 
-            // REJET DU PAM => RETOUR SYSTEMATIQUE AU PROJECT MANAGER
             $lockedRequisition->update([
                 'status' => 'returned_to_project_manager',
                 'derniere_observation' => $validated['motif_rejet'],
@@ -796,18 +827,12 @@ class RequisitionController extends Controller
         );
     }
 
-    /**
-     * Contrôle budgétaire et visa de la Finance
-     * La Finance intervient STRICTEMENT lorsque le statut est 'visa_pam' (après visa du PAM)
-     */
     public function financeDecision(Request $request, Requisition $requisition)
     {
         $user = $request->user();
 
         abort_unless($user?->hasRole('finance'), 403, 'Action réservée au Manager des Finances.');
 
-        // VÉRIFICATION STRICTE : La Finance NE PEUT PAS intervenir sur 'visa_mp' !
-        // Elle intervient UNIQUEMENT après validation du PAM ('visa_pam').
         abort_unless(
             $requisition->status === 'visa_pam',
             403,
@@ -825,10 +850,18 @@ class RequisitionController extends Controller
                 'max:255',
                 Rule::exists('cash_registers', 'name')->where('is_active', true),
             ],
-            'allocations' => ['nullable', 'array'],
-            'allocations.*.demande_id' => ['required_with:allocations', 'string'],
-            'allocations.*.code_allocation' => ['required_with:allocations', 'string', 'max:255'],
             'motif_rejet' => ['required_if:decision,reject', 'nullable', 'string', 'max:5000'],
+            
+            'articles' => ['nullable', 'array'],
+            'articles.*.id' => ['required_with:articles', 'string'],
+            'articles.*.activite' => ['required_with:articles', 'string', 'max:255'],
+            'articles.*.quantiteOuDuree' => ['required_with:articles', 'numeric', 'min:0'],
+            'articles.*.prixUnitaire' => ['required_with:articles', 'numeric', 'min:0'],
+            'articles.*.code_allocation' => ['nullable', 'string', 'max:255'],
+            
+            'articles.*.splits' => ['nullable', 'array'],
+            'articles.*.splits.*.code_allocation' => ['required_with:articles.*.splits', 'string', 'max:255'],
+            'articles.*.splits.*.montant' => ['required_with:articles.*.splits', 'numeric', 'min:0.01'],
         ]);
 
         if ($validated['decision'] === 'approve') {
@@ -842,7 +875,7 @@ class RequisitionController extends Controller
             }
         }
 
-        DB::transaction(function () use ($validated, $requisition, $user) {
+        $resultat = DB::transaction(function () use ($validated, $requisition, $user) {
             $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
 
             abort_unless(
@@ -852,38 +885,124 @@ class RequisitionController extends Controller
             );
 
             if ($validated['decision'] === 'approve') {
-                if (! empty($validated['caisse_decaissement'])) {
-                    $lockedRequisition->caisse_decaissement = $validated['caisse_decaissement'];
+                $caisseChoisie = $validated['caisse_decaissement'] ?? $lockedRequisition->caisse_decaissement;
+                $caisseModel = CashRegister::where('name', $caisseChoisie)->first();
+                if ($caisseModel && $caisseModel->devise !== $lockedRequisition->devise) {
+                    return [
+                        'success' => false,
+                        'error' => "Incohérence : la caisse « {$caisseModel->name} » fonctionne en {$caisseModel->devise}, la réquisition est en {$lockedRequisition->devise}."
+                    ];
                 }
 
-                if (! empty($validated['allocations'])) {
-                    $demandes = $lockedRequisition->demandes()->lockForUpdate()->get()->keyBy('id');
-                    foreach ($validated['allocations'] as $allocation) {
-                        $demande = $demandes->get($allocation['demande_id']);
-                        if ($demande) {
-                            $code = trim($allocation['code_allocation']);
-                            $libelle = BudgetLine::query()
-                                ->where('project_id', $lockedRequisition->project_id)
-                                ->whereRaw('LOWER(TRIM(code)) = ?', [BudgetLine::normalizeCode($code)])
-                                ->value('libelle') ?? 'code non specifie';
+                $demandes = $lockedRequisition->demandes()->lockForUpdate()->get()->keyBy('id');
+                $nouveauMontantTotal = 0;
+                $activeRate = DailyExchangeRate::getActiveRate();
 
-                            $demande->update([
-                                'code_allocation' => $code,
-                                'code_all_budget' => $code,
-                                'libelle_allocation' => $libelle,
-                            ]);
+                if (! empty($validated['articles'])) {
+                    foreach ($validated['articles'] as $artData) {
+                        $demande = $demandes->get($artData['id']);
+                        if (! $demande) continue;
+
+                        $qte = (float) $artData['quantiteOuDuree'];
+                        $pu = (float) $artData['prixUnitaire'];
+                        $totalLigne = round($qte * $pu, 2);
+                        $nouveauMontantTotal += $totalLigne;
+
+                        $codePrincipal = trim((string) ($artData['code_allocation'] ?? ''));
+                        $splitsData = $artData['splits'] ?? [];
+
+                        if (! empty($splitsData)) {
+                            $sommeSplits = round(array_sum(array_column($splitsData, 'montant')), 2);
+                            if (abs($sommeSplits - $totalLigne) > 0.05) {
+                                return [
+                                    'success' => false,
+                                    'error' => "Erreur de ventilation sur « {$demande->activite} » : La somme des montants ventilés ({$sommeSplits} {$lockedRequisition->devise}) doit être exactement égale au total de la ligne ({$totalLigne} {$lockedRequisition->devise})."
+                                ];
+                            }
+
+                            foreach ($splitsData as $split) {
+                                $codeNorm = BudgetLine::normalizeCode($split['code_allocation']);
+                                $bLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
+                                    ->whereRaw('LOWER(TRIM(code)) = ?', [$codeNorm])
+                                    ->first();
+
+                                $convSplit = DailyExchangeRate::convertToEur((float) $split['montant'], $lockedRequisition->devise, $activeRate);
+                                if ($bLine && $convSplit['montant_eur'] > (float) $bLine->solde) {
+                                    return [
+                                        'success' => false,
+                                        'error' => "Dépassement sur code ventilé {$bLine->code} : Nécessite {$convSplit['montant_eur']} EUR ({$split['montant']} {$lockedRequisition->devise}), solde dispo : {$bLine->solde} EUR."
+                                    ];
+                                }
+                            }
+
+                            $demande->splits()->delete();
+                            foreach ($splitsData as $split) {
+                                $codeNorm = BudgetLine::normalizeCode($split['code_allocation']);
+                                $libelle = BudgetLine::where('project_id', $lockedRequisition->project_id)
+                                    ->whereRaw('LOWER(TRIM(code)) = ?', [$codeNorm])
+                                    ->value('libelle') ?? 'Ventilation';
+
+                                DemandeSplit::create([
+                                    'demande_id' => $demande->id,
+                                    'code_allocation' => trim($split['code_allocation']),
+                                    'libelle_allocation' => $libelle,
+                                    'montant' => (float) $split['montant'],
+                                ]);
+                            }
+
+                            $codePrincipal = $splitsData[0]['code_allocation'];
+                        } else {
+                            $demande->splits()->delete();
+
+                            if (! empty($codePrincipal)) {
+                                $codeNorm = BudgetLine::normalizeCode($codePrincipal);
+                                $bLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
+                                    ->whereRaw('LOWER(TRIM(code)) = ?', [$codeNorm])
+                                    ->first();
+
+                                $convLigne = DailyExchangeRate::convertToEur($totalLigne, $lockedRequisition->devise, $activeRate);
+                                if ($bLine && $convLigne['montant_eur'] > (float) $bLine->solde) {
+                                    return [
+                                        'success' => false,
+                                        'error' => "Dépassement sur {$bLine->code} : Nécessite {$convLigne['montant_eur']} EUR ({$totalLigne} {$lockedRequisition->devise}), solde dispo : {$bLine->solde} EUR."
+                                    ];
+                                }
+                            }
                         }
+
+                        $isService = strtolower($lockedRequisition->nature_requisition) === 'service';
+                        $demande->update([
+                            'activite' => $artData['activite'],
+                            'quantite' => $isService ? 0 : $qte,
+                            'duree' => $isService ? $qte : 0,
+                            'frais_unitaire' => $pu,
+                            'total_ligne' => $totalLigne,
+                            'code_allocation' => $codePrincipal,
+                            'code_all_budget' => $codePrincipal,
+                            'libelle_allocation' => BudgetLine::where('project_id', $lockedRequisition->project_id)
+                                ->whereRaw('LOWER(TRIM(code)) = ?', [BudgetLine::normalizeCode($codePrincipal)])
+                                ->value('libelle') ?? $demande->libelle_allocation,
+                        ]);
                     }
+                } else {
+                    $nouveauMontantTotal = (float) $lockedRequisition->montant_total;
                 }
 
-                // STATUT : visa_admin (transmis à la Directrice Générale)
-                $lockedRequisition->status = 'visa_admin';
-                $lockedRequisition->derniere_observation = $validated['observation'] ?? null;
-                $lockedRequisition->save();
+                $conversion = DailyExchangeRate::convertToEur($nouveauMontantTotal, $lockedRequisition->devise, $activeRate);
+
+                $lockedRequisition->update([
+                    'status' => 'visa_admin',
+                    'caisse_decaissement' => $caisseChoisie,
+                    'montant_total' => $nouveauMontantTotal,
+                    'montant_total_eur' => $conversion['montant_eur'],
+                    'taux_eur_usd' => $conversion['taux_eur_usd'],
+                    'taux_eur_cdf' => $conversion['taux_eur_cdf'],
+                    'derniere_observation' => $validated['observation'] ?? null,
+                ]);
 
                 $commentaireSignature = ! empty($validated['observation'])
                     ? $validated['observation']
-                    : "Visa financier accordé. Caisse : {$lockedRequisition->caisse_decaissement}";
+                    : "Visa financier accordé avec ajustements comptables. Caisse : {$caisseChoisie}";
 
                 $this->enregistrerSignature(
                     $lockedRequisition,
@@ -896,7 +1015,7 @@ class RequisitionController extends Controller
                 $this->notifierUtilisateur(
                     userId: $user->id,
                     titre: 'Visa Financier accordé',
-                    message: "Vous avez apposé votre visa financier sur {$lockedRequisition->numero_requisition}."
+                    message: "Vous avez validé {$lockedRequisition->numero_requisition} avec succès."
                 );
 
                 $this->notifierUtilisateur(
@@ -905,7 +1024,6 @@ class RequisitionController extends Controller
                     message: "Le visa financier a été accordé pour votre réquisition {$lockedRequisition->numero_requisition}. Transmise à la Direction."
                 );
 
-                // Notifie UNIQUEMENT la Direction Générale
                 $this->notifierRole(
                     roleCible: 'director',
                     projectId: null,
@@ -914,10 +1032,9 @@ class RequisitionController extends Controller
                     urgent: (bool) $lockedRequisition->is_urgent
                 );
 
-                return;
+                return ['success' => true];
             }
 
-            // REJET DES FINANCES => RETOUR SYSTEMATIQUE AU PROJECT MANAGER
             $lockedRequisition->update([
                 'status' => 'returned_to_project_manager',
                 'derniere_observation' => $validated['motif_rejet'],
@@ -943,12 +1060,21 @@ class RequisitionController extends Controller
                 titre: 'Réquisition retournée par les Finances',
                 message: "La réquisition {$lockedRequisition->numero_requisition} a été renvoyée par les Finances : {$validated['motif_rejet']}"
             );
+
+            return ['success' => true];
         });
+
+        if (isset($resultat['success']) && ! $resultat['success']) {
+            return Redirect::back()->withErrors([
+                'general' => $resultat['error'],
+                'pin' => $resultat['error'],
+            ]);
+        }
 
         return Redirect::back()->with(
             $validated['decision'] === 'approve' ? 'success' : 'error',
             $validated['decision'] === 'approve'
-                ? 'Visa financier validé avec succès. Transmis à la Directrice Générale.'
+                ? 'Visa financier accordé avec ajustements comptables enregistrés.'
                 : 'Dossier renvoyé au Manager de Projet pour arbitrage.'
         );
     }
@@ -1035,7 +1161,6 @@ class RequisitionController extends Controller
                 return;
             }
 
-            // REJET DE LA DIRECTRICE => RETOUR SYSTEMATIQUE AU PROJECT MANAGER
             $lockedRequisition->update([
                 'status' => 'returned_to_project_manager',
                 'derniere_observation' => $validated['motif_rejet'],
@@ -1300,6 +1425,7 @@ class RequisitionController extends Controller
     {
         $requisition->load([
             'demandes.justificatifs',
+            'demandes.splits',
             'signatures.user',
             'project',
             'user',

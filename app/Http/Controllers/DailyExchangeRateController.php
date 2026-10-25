@@ -78,4 +78,45 @@ class DailyExchangeRateController extends Controller
 
         return Redirect::back()->with('success', "Taux de change journalier du {$validated['date_taux']} enregistré avec succès.");
     }
+
+    public function update(Request $request, DailyExchangeRate $exchangeRate)
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403, 'Action réservée au service Finance.');
+
+        $validated = $request->validate([
+            'date_taux' => ['required', 'date', 'unique:daily_exchange_rates,date_taux,' . $exchangeRate->id],
+            'taux_eur_usd' => ['required', 'numeric', 'min:0.000001'],
+            'taux_eur_cdf' => ['required', 'numeric', 'min:0.0001'],
+        ], [
+            'date_taux.unique' => 'Une autre saisie existe déjà pour cette date.',
+            'taux_eur_usd.required' => 'Le taux EUR/USD est obligatoire.',
+            'taux_eur_cdf.required' => 'Le taux EUR/CDF est obligatoire.',
+        ]);
+
+        $exchangeRate->update([
+            'date_taux' => $validated['date_taux'],
+            'taux_eur_usd' => $validated['taux_eur_usd'],
+            'taux_eur_cdf' => $validated['taux_eur_cdf'],
+            'updated_by' => $user->id,
+        ]);
+
+        return Redirect::back()->with('success', 'Taux de change modifié avec succès.');
+    }
+
+    public function destroy(Request $request, DailyExchangeRate $exchangeRate)
+    {
+        $user = $request->user();
+        abort_unless($user->hasRole('finance') || $user->hasRole('admin'), 403, 'Action réservée au service Finance.');
+
+        $active = DailyExchangeRate::getActiveRate();
+        if ($active && $active->id === $exchangeRate->id && $exchangeRate->date_taux->isToday()) {
+            return Redirect::back()->with('error', "Impossible de supprimer le taux actif du jour. Enregistrez d'abord un nouveau taux pour aujourd'hui si nécessaire.");
+        }
+
+        $dateLabel = $exchangeRate->date_taux->format('d/m/Y');
+        $exchangeRate->delete();
+
+        return Redirect::back()->with('success', "Taux de change du {$dateLabel} supprimé.");
+    }
 }

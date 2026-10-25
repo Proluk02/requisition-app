@@ -88,6 +88,12 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::post('/exchange-rates', [DailyExchangeRateController::class, 'store'])
         ->name('exchange-rates.store');
 
+    Route::put('/exchange-rates/{exchangeRate}', [DailyExchangeRateController::class, 'update'])
+        ->name('exchange-rates.update');
+
+    Route::delete('/exchange-rates/{exchangeRate}', [DailyExchangeRateController::class, 'destroy'])
+        ->name('exchange-rates.destroy');
+
 
         Route::get('/budgets', [BudgetController::class, 'index'])->name('budgets.index');
         Route::get('/budgets/import', [BudgetController::class, 'importForm'])->name('budgets.import-form');

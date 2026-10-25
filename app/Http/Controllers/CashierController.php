@@ -29,7 +29,6 @@ class CashierController extends Controller
         $user = $request->user();
         abort_unless($user->hasRole('cashier') || $user->hasRole('admin'), 403, 'Accès réservé au guichet caisse.');
 
-        // Strictement les caisses affectées à ce caissier
         $userCaisses = $this->getUserCaisses($user);
 
         $caissesData = $userCaisses->map(function ($caisse) {
@@ -99,7 +98,6 @@ class CashierController extends Controller
             ];
         });
 
-        // Totaux calculés STRICTEMENT sur les caisses affectées au caissier
         $caisseNames = $userCaisses->pluck('name')->map(fn ($n) => strtolower(trim($n)))->all();
 
         $totalAttenteUSD = (float) Requisition::where('status', 'decaissement_caisse')
@@ -128,15 +126,13 @@ class CashierController extends Controller
     }
 
     /**
-     * Module 2 : Bons à Décaisser.
-     * Affiche EXCLUSIVEMENT les réquisitions affectées à la caisse sélectionnée du caissier.
+     * Module 2 : Bons à Décaisser (avec chargement des splits de ventilation).
      */
     public function disbursements(Request $request): Response
     {
         $user = $request->user();
         abort_unless($user->hasRole('cashier') || $user->hasRole('admin'), 403);
 
-        // Strictement les caisses affectées à ce caissier
         $userCaisses = $this->getUserCaisses($user);
         $selectedCaisseId = $request->input('caisse_id', $userCaisses->first()?->id ?? '');
         $selectedCaisse = $userCaisses->firstWhere('id', $selectedCaisseId) ?? $userCaisses->first();
@@ -144,8 +140,7 @@ class CashierController extends Controller
         $aDecaisser = collect();
 
         if ($selectedCaisse) {
-            // Réquisitions autorisées STRICTEMENT sur cette caisse affectée
-            $aDecaisser = Requisition::with(['user', 'demandes.justificatifs', 'project'])
+            $aDecaisser = Requisition::with(['user', 'demandes.splits', 'demandes.justificatifs', 'project'])
                 ->where('status', 'decaissement_caisse')
                 ->whereRaw('LOWER(TRIM(caisse_decaissement)) = ?', [strtolower(trim($selectedCaisse->name))])
                 ->orderByDesc('updated_at')
@@ -172,6 +167,12 @@ class CashierController extends Controller
                         'unite' => $d->unite ?? '',
                         'prixUnitaire' => (float) $d->frais_unitaire,
                         'total' => (float) $d->total_ligne,
+                        'splits' => $d->splits->map(fn ($s) => [
+                            'id' => $s->id,
+                            'code_allocation' => $s->code_allocation,
+                            'libelle_allocation' => $s->libelle_allocation,
+                            'montant' => (float) $s->montant,
+                        ])->all(),
                     ])->values()->all(),
                 ]);
         }
@@ -187,7 +188,6 @@ class CashierController extends Controller
 
         $recentDisbursements = $recentDisbursementsQuery->get()->map(fn (CashMovement $m) => $this->transformMovement($m));
 
-        // Liste des caisses DU CAISSIER avec compteur pour savoir sur laquelle basculer
         $caissesOptions = $userCaisses->map(function ($c) {
             $count = Requisition::where('status', 'decaissement_caisse')
                 ->whereRaw('LOWER(TRIM(caisse_decaissement)) = ?', [strtolower(trim($c->name))])
@@ -218,8 +218,7 @@ class CashierController extends Controller
     }
 
     /**
-     * DÉCAISSEMENT EFFECTIF :
-     * Vérification stricte : le caissier doit être affecté à la caisse de la réquisition.
+     * DÉCAISSEMENT EFFECTIF AVEC DÉDUCTION VENTILÉE GLOBALE (SPLITS) :
      */
     public function disburse(Request $request, Requisition $requisition)
     {
@@ -239,7 +238,6 @@ class CashierController extends Controller
             );
         }
 
-        // VÉRIFICATION STRICTE DE L'AFFECTATION DU CAISSIER À CETTE CAISSE
         if (! $user->hasRole('admin')) {
             $isAssigned = $cashRegister->cashiers()->where('users.id', $user->id)->exists();
             abort_unless($isAssigned, 403, "Action refusée : Vous n'êtes pas affecté à la caisse « {$requisition->caisse_decaissement} ».");
@@ -284,16 +282,56 @@ class CashierController extends Controller
         }
 
         DB::transaction(function () use ($validated, $requisition, $user, $cashRegister, $session, $montantDecaisse) {
-            $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
+            // Eager load des demandes ET de leurs splits pour avoir toutes les informations.
+            $lockedRequisition = Requisition::with('demandes.splits')->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
 
             $now = now();
             $annee = $now->year;
             $countBSC = CashMovement::whereYear('created_at', $annee)->where('type', 'sortie')->count() + 1;
             $numeroBSC = sprintf('BSC-%s-%03d', $annee, $countBSC);
 
-            $primaryImputation = $lockedRequisition->demandes()->first()?->code_allocation
-                ?? $lockedRequisition->demandes()->first()?->code_all_budget
-                ?? '6.112.a';
+            $activeRate = DailyExchangeRate::getActiveRate();
+            $conversionTotal = DailyExchangeRate::convertToEur($montantDecaisse, $lockedRequisition->devise, $activeRate);
+            $totalRequisitionEur = $conversionTotal['montant_eur'];
+
+            // 1. AGRÉGATION DES DÉDUCTIONS BUDGÉTAIRES PAR CODE (Prévient les écrasements si le même code est ventilé plusieurs fois)
+            $deductionsParCode = [];
+            $originalCodes = [];
+
+            foreach ($lockedRequisition->demandes as $demande) {
+                $splits = $demande->splits;
+
+                if ($splits->isNotEmpty()) {
+                    foreach ($splits as $split) {
+                        $conversionSplit = DailyExchangeRate::convertToEur((float) $split->montant, $lockedRequisition->devise, $activeRate);
+                        $codeNorm = BudgetLine::normalizeCode($split->code_allocation);
+                        
+                        if (!isset($deductionsParCode[$codeNorm])) {
+                            $deductionsParCode[$codeNorm] = 0.0;
+                        }
+                        $deductionsParCode[$codeNorm] += $conversionSplit['montant_eur'];
+                        $originalCodes[] = trim($split->code_allocation);
+                    }
+                } else {
+                    $codeAllocation = trim((string) ($demande->code_allocation ?: $demande->code_all_budget));
+                    if (! empty($codeAllocation)) {
+                        $conversionLigne = DailyExchangeRate::convertToEur((float) $demande->total_ligne, $lockedRequisition->devise, $activeRate);
+                        $codeNorm = BudgetLine::normalizeCode($codeAllocation);
+                        
+                        if (!isset($deductionsParCode[$codeNorm])) {
+                            $deductionsParCode[$codeNorm] = 0.0;
+                        }
+                        $deductionsParCode[$codeNorm] += $conversionLigne['montant_eur'];
+                        $originalCodes[] = $codeAllocation;
+                    }
+                }
+            }
+
+            // Générer l'étiquette d'imputation globale (pour le BSC PDF)
+            $originalCodes = array_values(array_unique(array_filter($originalCodes)));
+            $primaryImputation = count($originalCodes) > 1 
+                ? 'MULTI-CODES (' . implode(', ', array_slice($originalCodes, 0, 3)) . (count($originalCodes) > 3 ? '...' : '') . ')' 
+                : ($originalCodes[0] ?? 'NON DEFINI');
 
             $observation = preg_replace(
                 '/(?:^|\R)Motif rejet (?:MP|Finance|Administratif|Direction(?: \(P\.O\. Intérim\)| \(Urgence\))?):[^\r\n]*/u',
@@ -301,7 +339,7 @@ class CashierController extends Controller
                 $lockedRequisition->observation ?? ''
             );
 
-            // 1. Débit physique de la caisse (en devise de la caisse)
+            // 2. Création du Mouvement de Caisse (BSC)
             CashMovement::create([
                 'cash_register_id' => $cashRegister->id,
                 'session_id' => $session->id,
@@ -324,35 +362,25 @@ class CashierController extends Controller
                 'signature_caissier' => $user->name,
             ]);
 
-            // 2. Conversion au taux journalier actif
-            $activeRate = DailyExchangeRate::getActiveRate();
-            $conversionTotal = DailyExchangeRate::convertToEur($montantDecaisse, $lockedRequisition->devise, $activeRate);
-            $totalRequisitionEur = $conversionTotal['montant_eur'];
+            // 3. Application propre et sécurisée des déductions sur le solde de chaque Ligne Budgétaire
+            foreach ($deductionsParCode as $codeNorm => $montantADeduire) {
+                $budgetLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
+                    ->whereRaw('LOWER(TRIM(code)) = ?', [$codeNorm])
+                    ->lockForUpdate()
+                    ->first();
 
-            // 3. Déduction réelle sur les lignes budgétaires en Euro (€)
-            foreach ($lockedRequisition->demandes as $demande) {
-                $codeAllocation = trim((string) ($demande->code_allocation ?: $demande->code_all_budget));
-                $ligneTotalOrigine = (float) $demande->total_ligne;
-
-                if (! empty($codeAllocation)) {
-                    $conversionLigne = DailyExchangeRate::convertToEur($ligneTotalOrigine, $lockedRequisition->devise, $activeRate);
-                    $ligneTotalEur = $conversionLigne['montant_eur'];
-
-                    $budgetLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
-                        ->whereRaw('LOWER(TRIM(code)) = ?', [BudgetLine::normalizeCode($codeAllocation)])
-                        ->lockForUpdate()
-                        ->first();
-
-                    if ($budgetLine) {
-                        $budgetLine->increment('montant_decaisse', $ligneTotalEur);
-                        $budgetLine->update([
-                            'solde' => round($budgetLine->budget_initial - $budgetLine->montant_decaisse, 2),
-                        ]);
-                    }
+                if ($budgetLine) {
+                    $nouveauDecaisse = $budgetLine->montant_decaisse + $montantADeduire;
+                    $nouveauSolde = round($budgetLine->budget_initial - $nouveauDecaisse, 2);
+                    
+                    $budgetLine->update([
+                        'montant_decaisse' => $nouveauDecaisse,
+                        'solde' => $nouveauSolde,
+                    ]);
                 }
             }
 
-            // 4. Clôture de la réquisition avec conservation des taux
+            // 4. Clôture de la réquisition
             $lockedRequisition->update([
                 'status' => 'decaisse',
                 'cashier_id' => $user->id,
@@ -364,17 +392,15 @@ class CashierController extends Controller
                 'montant_total_eur' => $totalRequisitionEur,
             ]);
 
-            // 5. Débit physique de la caisse
             $cashRegister->decrement('solde_actuel', $montantDecaisse);
             $session->increment('total_sorties', $montantDecaisse);
 
-            // 6. Signature électronique du caissier
             $this->enregistrerSignature(
                 requisition: $lockedRequisition,
                 user: $user,
                 roleSignataire: 'cashier',
                 action: 'disbursed',
-                commentaire: "Bon de Sortie Caisse {$numeroBSC} émis. Paiement en {$validated['mode_paiement']}. Déduit du budget au taux journalier (Équivalent : {$totalRequisitionEur} EUR)."
+                commentaire: "Bon de Sortie Caisse {$numeroBSC} émis. Paiement en {$validated['mode_paiement']}. Déduit du budget au taux journalier (Équivalent total : {$totalRequisitionEur} EUR)."
             );
 
             $this->notifierUtilisateur(
@@ -384,7 +410,7 @@ class CashierController extends Controller
             );
         });
 
-        return Redirect::back()->with('success', 'Bon de Sortie Caisse émis. Caisse débitée et consommation budgétaire déduite en Euro avec succès.');
+        return Redirect::back()->with('success', 'Bon de Sortie Caisse émis. Caisse débitée et consommation budgétaire imputée avec succès sur l\'ensemble des lignes et ventilations.');
     }
 
     /**
@@ -787,9 +813,6 @@ class CashierController extends Controller
         ]);
     }
 
-    /**
-     * Récupération STRICTE des caisses affectées au caissier.
-     */
     protected function getUserCaisses(User $user)
     {
         return $user->hasRole('admin')

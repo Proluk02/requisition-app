@@ -5,7 +5,7 @@ import RequisitionCorrectionForm, { type RequisitionCorrectionData } from '@/Com
 import { PageProps } from '@/types';
 import {
     ShieldCheck, Plus, Eye, X, AlertCircle, CheckCircle2,
-    Paperclip, Filter, PieChart, BarChart3, Search, Check, UserCheck, LayoutTemplate, AlertTriangle
+    Paperclip, Filter, PieChart, BarChart3, Search, Check, UserCheck, LayoutTemplate, AlertTriangle, Layers, Trash2
 } from 'lucide-react';
 
 interface Signature {
@@ -27,6 +27,11 @@ interface Justificatif {
     fileUrl: string | null;
 }
 
+interface SplitItem {
+    code_allocation: string;
+    montant: number;
+}
+
 interface LigneDemande {
     id: string;
     activite: string;
@@ -39,6 +44,7 @@ interface LigneDemande {
     frais: number;
     total: number;
     budget_solde_actuel?: number | null;
+    splits?: SplitItem[];
     justif: Justificatif[];
 }
 
@@ -134,11 +140,13 @@ export default function ProjectManagerDashboard({
     const [selectedReq, setSelectedReq] = useState<RequisitionMP | null>(null);
     const [directorPreviewReq, setDirectorPreviewReq] = useState<RequisitionMP | null>(null);
     const [caisseChoisie, setCaisseChoisie] = useState<string>('');
-    const [allocations, setAllocations] = useState<Record<string, string>>({});
     const [modeRejet, setModeRejet] = useState<boolean>(false);
     const [motifRejet, setMotifRejet] = useState<string>('');
     const [observationPM, setObservationPM] = useState<string>('');
     const [activeInputId, setActiveInputId] = useState<string | null>(null);
+
+    // ÉTAT D'ÉDITION POUR LE PM
+    const [editedArticles, setEditedArticles] = useState<LigneDemande[]>([]);
 
     const [passwordModalOpen, setPasswordModalOpen] = useState<boolean>(false);
     const [passwordSaisi, setPasswordSaisi] = useState<string>('');
@@ -151,6 +159,8 @@ export default function ProjectManagerDashboard({
         type: 'success' | 'error';
         message: string;
     } | null>(null);
+
+    const money = (amount: number, currency: string) => `${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${currency}`;
 
     useEffect(() => {
         setDemandes(requisitions);
@@ -195,6 +205,10 @@ export default function ProjectManagerDashboard({
         return { pctConsomme, pctRestant, isEmpty: pmStats.budget_total_usd === 0 };
     }, [pmStats]);
 
+    const round = (num: number, decimals: number) => {
+        return Math.round(num * Math.pow(10, decimals)) / Math.pow(10, decimals);
+    };
+
     const handleOuvrirArbitrage = (req: RequisitionMP) => {
         setSelectedReq(req);
         const requestedRegister = req.caisseAttribuee || req.caisseSouhaitee;
@@ -207,36 +221,103 @@ export default function ProjectManagerDashboard({
         setMotifRejet('');
         setObservationPM('');
 
-        const initialAllocations: Record<string, string> = {};
-        req.lignes.forEach((ligne) => {
-            initialAllocations[ligne.id] = ligne.code_allocation || ligne.codeAllBudget || '';
-        });
-        setAllocations(initialAllocations);
+        // Initialisation de la copie de travail modifiable pour le PM
+        setEditedArticles(
+            req.lignes.map((l) => ({
+                ...l,
+                splits: l.splits ? [...l.splits] : [],
+            }))
+        );
     };
+
+    const updateArticleField = (index: number, field: keyof LigneDemande, value: any) => {
+        setEditedArticles((prev) => {
+            const next = [...prev];
+            (next[index] as any)[field] = value;
+            if (field === 'quantiteOuDuree' || field === 'frais') {
+                next[index].total = round(Number(next[index].quantiteOuDuree) * Number(next[index].frais), 2);
+            }
+            return next;
+        });
+    };
+
+    const addSplitToArticle = (artIndex: number) => {
+        setEditedArticles((prev) => {
+            const next = [...prev];
+            const currentSplits = next[artIndex].splits ? [...next[artIndex].splits!] : [];
+            const dejaVentile = currentSplits.reduce((acc, s) => acc + s.montant, 0);
+            const reste = Math.max(0, next[artIndex].total - dejaVentile);
+
+            currentSplits.push({
+                code_allocation: '',
+                montant: reste,
+            });
+            next[artIndex].splits = currentSplits;
+            return next;
+        });
+    };
+
+    const removeSplitFromArticle = (artIndex: number, splitIndex: number) => {
+        setEditedArticles((prev) => {
+            const next = [...prev];
+            const currentSplits = [...next[artIndex].splits!];
+            currentSplits.splice(splitIndex, 1);
+            next[artIndex].splits = currentSplits;
+            return next;
+        });
+    };
+
+    const updateSplitField = (artIndex: number, splitIndex: number, field: 'code_allocation' | 'montant', val: any) => {
+        setEditedArticles((prev) => {
+            const next = [...prev];
+            const currentSplits = [...next[artIndex].splits!];
+            (currentSplits[splitIndex] as any)[field] = field === 'montant' ? Number(val) : val;
+            next[artIndex].splits = currentSplits;
+            return next;
+        });
+    };
+
+    const totalGeneralCalcule = useMemo(() => {
+        return editedArticles.reduce((acc, a) => acc + a.total, 0);
+    }, [editedArticles]);
 
     // DÉTECTION STRICTE DES DÉPASSEMENTS BUDGÉTAIRES
     const hasDepassement = useMemo(() => {
         if (!selectedReq) return false;
-        return selectedReq.lignes.some((ligne) => {
-            const code = allocations[ligne.id] || '';
+        return editedArticles.some((ligne) => {
+            if (ligne.splits && ligne.splits.length > 0) {
+                // Ignore au front-end pour les splits (géré en backend pour la conversion) 
+                // mais on peut faire une vérif basique
+                return false; 
+            }
+            const code = ligne.codeAllBudget || '';
             const bLine = getBudgetLineObject(code, selectedReq.project_id);
             const solde = bLine ? bLine.solde : ligne.budget_solde_actuel;
             return solde !== null && solde !== undefined && ligne.total > solde;
         });
-    }, [selectedReq, allocations, budgetLines]);
+    }, [selectedReq, editedArticles, budgetLines]);
 
     const handleDeclencherApprobation = () => {
         if (!selectedReq) return;
 
-        const allocationsArray = Object.entries(allocations).map(([demande_id, code_allocation]) => ({
-            demande_id,
-            code_allocation: code_allocation.trim(),
-        }));
-
-        const ligneSansCode = allocationsArray.find((a) => !a.code_allocation);
-        if (ligneSansCode) {
-            showToast('error', 'Vous devez attribuer un code budgétaire valide à chaque ligne.');
-            return;
+        // Vérification de la ventilation
+        for (let i = 0; i < editedArticles.length; i++) {
+            const art = editedArticles[i];
+            if (art.splits && art.splits.length > 0) {
+                const sum = round(art.splits.reduce((acc, s) => acc + s.montant, 0), 2);
+                if (Math.abs(sum - art.total) > 0.05) {
+                    showToast('error', `Erreur de ventilation sur « ${art.activite} » : La somme des sous-montants (${sum} ${selectedReq.devise}) doit égaler le total de la ligne (${art.total} ${selectedReq.devise}).`);
+                    return;
+                }
+                const splitSansCode = art.splits.find((s) => !s.code_allocation.trim());
+                if (splitSansCode) {
+                    showToast('error', `Veuillez spécifier le code budgétaire pour chaque part ventilée sur « ${art.activite} ».`);
+                    return;
+                }
+            } else if (!art.codeAllBudget?.trim()) {
+                showToast('error', `Veuillez attribuer un code budgétaire valide à la ligne « ${art.activite} ».`);
+                return;
+            }
         }
 
         // BLOCAGE AUTOMATIQUE EN CAS DE DÉPASSEMENT BUDGÉTAIRE
@@ -254,7 +335,6 @@ export default function ProjectManagerDashboard({
         e.preventDefault();
         if (!selectedReq || !passwordSaisi.trim()) return;
 
-        // VÉRIFICATION DE SÉCURITÉ SUPPLÉMENTAIRE
         if (hasDepassement) {
             setPinError('Approbation bloquée : dépassement du budget disponible constaté.');
             return;
@@ -262,11 +342,6 @@ export default function ProjectManagerDashboard({
 
         setSigningLoading(true);
         setPinError(null);
-
-        const allocationsArray = Object.entries(allocations).map(([demande_id, code_allocation]) => ({
-            demande_id,
-            code_allocation: code_allocation.trim(),
-        }));
 
         router.patch(
             route('requisitions.manager-decision', selectedReq.id),
@@ -276,7 +351,19 @@ export default function ProjectManagerDashboard({
                 password: passwordSaisi.trim(),
                 observation: observationPM.trim() || null,
                 caisse_decaissement: caisseChoisie,
-                allocations: allocationsArray,
+                articles: editedArticles.map((art) => ({
+                    id: art.id,
+                    activite: art.activite,
+                    quantiteOuDuree: art.quantiteOuDuree,
+                    prixUnitaire: art.frais,
+                    code_allocation: art.codeAllBudget || '',
+                    splits: art.splits && art.splits.length > 0
+                        ? art.splits.map((split) => ({
+                            code_allocation: split.code_allocation,
+                            montant: split.montant,
+                        }))
+                        : null,
+                })),
             },
             {
                 preserveScroll: true,
@@ -371,7 +458,7 @@ export default function ProjectManagerDashboard({
                     </h1>
                     <p className="text-xs text-gray-500 mt-1">
                         Manager de Projet : <strong className="text-[#0B192C]">{user.name}</strong>{' '}
-                        • Contrôle analytique et imputation budgétaire.
+                        • Contrôle analytique, correction et imputation budgétaire.
                     </p>
                 </div>
 
@@ -623,7 +710,7 @@ export default function ProjectManagerDashboard({
                 </div>
             </div>
 
-            {/* APERÇU CONSOLIDÉ */}
+            {/* APERÇU CONSOLIDÉ (Vue Direction/Historique des signatures) */}
             {directorPreviewReq && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-4xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
@@ -649,6 +736,7 @@ export default function ProjectManagerDashboard({
                             </button>
                         </header>
 
+                        {/* Signatures et Visas certifiés */}
                         <div className="space-y-2">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700">
                                 Chaîne des Visas & Signatures Numériques
@@ -678,6 +766,7 @@ export default function ProjectManagerDashboard({
                             )}
                         </div>
 
+                        {/* Lignes de dépenses */}
                         <div>
                             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700 mb-2 mt-4">
                                 Lignes de Dépenses ({directorPreviewReq.lignes.length})
@@ -725,10 +814,15 @@ export default function ProjectManagerDashboard({
                 </div>
             )}
 
-            {/* MODALE D'ARBITRAGE DU PM AVEC DÉTECTION DE BLOCAGE DÉPASSEMENT */}
+            {/* MODALE D'ARBITRAGE DU PM AVEC DÉTECTION DE BLOCAGE DÉPASSEMENT ET VENTILATION */}
             {selectedReq && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
-                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-5xl w-full p-6 space-y-4 max-h-[95vh] flex flex-col animate-slide-down">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in"
+                    onClick={() => setActiveInputId(null)} // Pour fermer les dropdowns en cliquant en dehors
+                >
+                    <div
+                        className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-6xl w-full p-6 space-y-4 max-h-[95vh] flex flex-col animate-slide-down"
+                        onClick={(e) => e.stopPropagation()} // Empêche la fermeture de la modale elle-même
+                    >
                         <header className="flex items-start justify-between border-b pb-3 shrink-0">
                             <div>
                                 <span className="text-[10px] text-amber-700 font-bold uppercase tracking-wider">
@@ -755,7 +849,7 @@ export default function ProjectManagerDashboard({
 
                         {/* BANNIÈRE DE BLOCAGE SI DÉPASSEMENT DÉTECTÉ */}
                         {hasDepassement && (
-                            <div className="p-3 bg-red-100 border-2 border-red-500 rounded text-xs text-red-900 font-bold flex items-center gap-2 shadow-sm animate-pulse">
+                            <div className="p-3 bg-red-100 border-2 border-red-500 rounded text-xs text-red-900 font-bold flex items-center gap-2 shadow-sm animate-pulse shrink-0">
                                 <AlertTriangle className="w-5 h-5 text-red-700 shrink-0" />
                                 <span>
                                     BLOCAGE AUTOMATIQUE : Le crédit budgétaire disponible sur au moins une des lignes est dépassé. La signature du visa est strictement interdite. Veuillez rejeter le dossier ou ajuster les imputations.
@@ -771,27 +865,36 @@ export default function ProjectManagerDashboard({
                         )}
 
                         <div className="flex-1 overflow-visible min-h-0 flex flex-col">
-                            <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 shrink-0">
-                                Imputation des Lignes de Dépenses
-                            </h3>
+                            <div className="flex items-center justify-between mb-2 shrink-0">
+                                <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                    Correction Complète & Découpage Budgétaire (Splitting)
+                                </h3>
+                            </div>
                             <div className="border border-[#B2BED6] rounded flex-1 overflow-visible">
                                 <table className="w-full text-left text-xs">
                                     <thead className="bg-[#0B192C] text-white font-bold">
                                         <tr>
                                             <th className="p-2.5">Désignation</th>
-                                            <th className="p-2.5 w-[500px]">Code Allocation & Recherche</th>
-                                            <th className="p-2.5 text-right">Solde Actuel</th>
-                                            <th className="p-2.5 text-right">Total Ligne</th>
-                                            <th className="p-2.5 text-center">Faisabilité</th>
-                                            <th className="p-2.5">Pièces</th>
+                                            <th className="p-2.5 w-24 text-center">Qté/Durée</th>
+                                            <th className="p-2.5 w-28 text-right">P.U ({selectedReq.devise})</th>
+                                            <th className="p-2.5 w-32 text-right">Total ({selectedReq.devise})</th>
+                                            <th className="p-2.5 min-w-[340px]">Imputation & Ventilation (Splits)</th>
+                                            <th className="p-2.5 w-20 text-center">Faisabilité</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y text-gray-700">
-                                        {selectedReq.lignes.map((ligne) => {
-                                            const currentCode = allocations[ligne.id] || '';
+                                        {editedArticles.map((art, artIdx) => {
+                                            const currentCode = art.codeAllBudget || '';
                                             const matchedLine = getBudgetLineObject(currentCode, selectedReq.project_id);
-                                            const soldeDispo = matchedLine ? matchedLine.solde : ligne.budget_solde_actuel;
-                                            const depassement = soldeDispo !== null && soldeDispo !== undefined && ligne.total > soldeDispo;
+                                            const soldeDispo = matchedLine ? matchedLine.solde : art.budget_solde_actuel;
+                                            const depassement = soldeDispo !== null && soldeDispo !== undefined && art.total > soldeDispo;
+                                            
+                                            const isDecidable = selectedReq.canDecide || selectedReq.statut === 'en_attente_mp';
+                                            
+                                            const hasSplits = art.splits && art.splits.length > 0;
+                                            const sumSplits = hasSplits ? round(art.splits!.reduce((acc, s) => acc + s.montant, 0), 2) : 0;
+                                            const splitDifference = hasSplits ? round(art.total - sumSplits, 2) : 0;
+                                            const isSplitExact = hasSplits && Math.abs(splitDifference) <= 0.05;
 
                                             const filteredSuggestions = budgetLines.filter((b) => {
                                                 if (selectedReq.project_id && b.project_id && b.project_id !== selectedReq.project_id) {
@@ -802,88 +905,241 @@ export default function ProjectManagerDashboard({
                                                 return b.code.toLowerCase().includes(q) || b.libelle.toLowerCase().includes(q);
                                             });
 
-                                            const isDecidable = selectedReq.canDecide || selectedReq.statut === 'en_attente_mp';
-
                                             return (
-                                                <tr key={ligne.id} className={depassement ? 'bg-red-50/80 font-semibold' : ''}>
-                                                    <td className="p-2.5 font-medium max-w-[200px] truncate" title={ligne.activite}>{ligne.activite}</td>
-                                                    <td className="p-2.5 relative">
+                                                <tr key={art.id} className={depassement && !hasSplits ? 'bg-red-50/80 font-semibold' : ''}>
+                                                    <td className="p-2.5 align-top">
                                                         {isDecidable ? (
-                                                            <div className="relative">
-                                                                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2 top-2 pointer-events-none" />
-                                                                <input
-                                                                    type="text"
-                                                                    placeholder="Tapez (ex: 2.2)..."
-                                                                    value={currentCode}
-                                                                    onFocus={() => setActiveInputId(ligne.id)}
-                                                                    onChange={(e) => {
-                                                                        setAllocations({ ...allocations, [ligne.id]: e.target.value });
-                                                                        setActiveInputId(ligne.id);
-                                                                    }}
-                                                                    className="w-full pl-7 pr-2 border border-[#04326D] rounded p-1.5 text-xs font-mono font-bold text-[#04326D] bg-white focus:outline-none"
-                                                                    required
-                                                                />
+                                                            <textarea
+                                                                rows={2}
+                                                                value={art.activite}
+                                                                onChange={(e) => updateArticleField(artIdx, 'activite', e.target.value)}
+                                                                className="w-full border border-gray-300 rounded p-1.5 text-xs font-semibold focus:border-[#04326D] resize-none focus:ring-1 focus:ring-[#04326D]"
+                                                            />
+                                                        ) : (
+                                                            <span className="font-medium max-w-[200px] truncate block" title={art.activite}>{art.activite}</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="p-2.5 align-top">
+                                                        {isDecidable ? (
+                                                            <input
+                                                                type="number"
+                                                                min="0.1"
+                                                                step="any"
+                                                                value={art.quantiteOuDuree}
+                                                                onChange={(e) => updateArticleField(artIdx, 'quantiteOuDuree', parseFloat(e.target.value) || 0)}
+                                                                className="w-full border border-gray-300 rounded p-1.5 text-xs text-center font-mono focus:outline-none focus:border-[#04326D] focus:ring-1 focus:ring-[#04326D]"
+                                                                required
+                                                            />
+                                                        ) : (
+                                                            <span className="font-mono">{art.quantiteOuDuree}</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="p-2.5 align-top">
+                                                        {isDecidable ? (
+                                                            <input
+                                                                type="number"
+                                                                min="0"
+                                                                step="any"
+                                                                value={art.frais}
+                                                                onChange={(e) => updateArticleField(artIdx, 'frais', parseFloat(e.target.value) || 0)}
+                                                                className="w-full border border-gray-300 rounded p-1.5 text-xs text-right font-mono focus:outline-none focus:border-[#04326D] focus:ring-1 focus:ring-[#04326D]"
+                                                                required
+                                                            />
+                                                        ) : (
+                                                            <span className="font-mono text-right block">{money(art.frais, selectedReq.devise)}</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="p-2.5 align-top text-right font-mono font-black text-[#0B192C]">
+                                                        {art.total.toLocaleString()} {selectedReq.devise}
+                                                    </td>
 
-                                                                {activeInputId === ligne.id && filteredSuggestions.length > 0 && (
-                                                                    <div className="absolute left-0 top-full mt-1 w-full bg-white border-2 border-[#04326D] rounded shadow-2xl z-[200] max-h-72 overflow-y-auto divide-y text-xs">
-                                                                        {filteredSuggestions.map((sug) => (
-                                                                            <button
-                                                                                key={sug.id}
-                                                                                type="button"
-                                                                                onClick={() => {
-                                                                                    setAllocations({ ...allocations, [ligne.id]: sug.code });
-                                                                                    setActiveInputId(null);
+                                                    <td className="p-2.5 align-top relative space-y-2">
+                                                        {!hasSplits ? (
+                                                            <div className="space-y-1.5">
+                                                                {isDecidable ? (
+                                                                    <div className="flex gap-2 items-center">
+                                                                        <div className="flex-1 relative">
+                                                                            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2 top-2 pointer-events-none" />
+                                                                            <input
+                                                                                type="text"
+                                                                                placeholder="Tapez (ex: 2.2)..."
+                                                                                value={currentCode}
+                                                                                onFocus={() => setActiveInputId(art.id)}
+                                                                                onChange={(e) => {
+                                                                                    updateArticleField(artIdx, 'codeAllBudget', e.target.value);
+                                                                                    setActiveInputId(art.id);
                                                                                 }}
-                                                                                className="w-full p-2.5 text-left hover:bg-blue-50 flex flex-col justify-between transition"
-                                                                            >
-                                                                                <div className="flex items-center justify-between mb-1">
-                                                                                    <div className="flex items-center gap-1.5">
-                                                                                        <span className="font-mono font-black text-[#04326D] text-[13px]">{sug.code}</span>
-                                                                                        {sug.code === currentCode && <Check className="w-3 h-3 text-[#04326D]" />}
-                                                                                    </div>
-                                                                                    <span className="font-mono text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
-                                                                                        Solde: {sug.solde.toLocaleString()} {sug.devise}
-                                                                                    </span>
+                                                                                className="w-full pl-7 pr-2 border border-[#04326D] rounded p-1.5 text-xs font-mono font-bold text-[#04326D] bg-white focus:outline-none focus:ring-1 focus:ring-[#04326D]"
+                                                                                required
+                                                                            />
+                                                                            {activeInputId === art.id && filteredSuggestions.length > 0 && (
+                                                                                <div className="absolute left-0 top-full mt-1 w-full min-w-[250px] bg-white border-2 border-[#04326D] rounded shadow-2xl z-[200] max-h-72 overflow-y-auto divide-y text-xs">
+                                                                                    {filteredSuggestions.map((sug) => (
+                                                                                        <button
+                                                                                            key={sug.id}
+                                                                                            type="button"
+                                                                                            onClick={() => {
+                                                                                                updateArticleField(artIdx, 'codeAllBudget', sug.code);
+                                                                                                setActiveInputId(null);
+                                                                                            }}
+                                                                                            className="w-full p-2.5 text-left hover:bg-blue-50 flex flex-col justify-between transition"
+                                                                                        >
+                                                                                            <div className="flex items-center justify-between mb-1">
+                                                                                                <div className="flex items-center gap-1.5">
+                                                                                                    <span className="font-mono font-black text-[#04326D] text-[13px]">{sug.code}</span>
+                                                                                                    {sug.code === currentCode && <Check className="w-3 h-3 text-[#04326D]" />}
+                                                                                                </div>
+                                                                                                <span className="font-mono text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                                                                                                    Solde: {sug.solde.toLocaleString()} {sug.devise}
+                                                                                                </span>
+                                                                                            </div>
+                                                                                            <span className="text-[11px] text-gray-700 font-medium break-words leading-tight">
+                                                                                                {sug.libelle}
+                                                                                            </span>
+                                                                                        </button>
+                                                                                    ))}
                                                                                 </div>
-                                                                                <span className="text-[11px] text-gray-700 font-medium break-words">
-                                                                                    {sug.libelle}
-                                                                                </span>
-                                                                            </button>
-                                                                        ))}
+                                                                            )}
+                                                                        </div>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => addSplitToArticle(artIdx)}
+                                                                            className="px-2 py-1 bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded text-[11px] font-bold flex items-center gap-1 shrink-0 transition"
+                                                                        >
+                                                                            <Layers className="w-3.5 h-3.5" />
+                                                                            <span>Ventiler (Splits)</span>
+                                                                        </button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div>
+                                                                        <span className="font-mono font-bold text-[#04326D] block">
+                                                                            {art.code_allocation || art.codeAllBudget}
+                                                                        </span>
+                                                                        <span className="text-[10px] text-gray-500 block truncate" title={art.libelleAllocation}>
+                                                                            {art.libelleAllocation}
+                                                                        </span>
                                                                     </div>
                                                                 )}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="p-2.5 bg-purple-50/60 border border-purple-200 rounded-lg space-y-2 relative">
+                                                                <div className="flex items-center justify-between text-[11px] font-bold">
+                                                                    <span className="text-purple-900 uppercase flex items-center gap-1">
+                                                                        <Layers className="w-3.5 h-3.5" /> Ventilation active ({art.splits!.length} codes)
+                                                                    </span>
+                                                                    <span className={isSplitExact ? 'text-emerald-700 font-bold' : 'text-red-700 font-bold'}>
+                                                                        {isSplitExact ? '✓ Répartition exacte' : `⚠️ Reste : ${splitDifference} ${selectedReq.devise}`}
+                                                                    </span>
+                                                                </div>
 
-                                                                <span className="text-[10px] text-gray-500 block truncate mt-1" title={matchedLine ? matchedLine.libelle : (ligne.libelleAllocation || '')}>
-                                                                    {matchedLine ? <span className="text-emerald-700">✓ {matchedLine.libelle}</span> : (ligne.libelleAllocation || 'Aucune ligne sélectionnée')}
-                                                                </span>
-                                                            </div>
-                                                        ) : (
-                                                            <div>
-                                                                <span className="font-mono font-bold text-[#04326D] block">
-                                                                    {ligne.code_allocation || ligne.codeAllBudget}
-                                                                </span>
-                                                                <span className="text-[10px] text-gray-500 block truncate" title={ligne.libelleAllocation}>
-                                                                    {ligne.libelleAllocation}
-                                                                </span>
+                                                                {art.splits!.map((split, spIdx) => {
+                                                                    const splitInputId = `${art.id}-split-${spIdx}`;
+                                                                    const splitFilteredSuggestions = budgetLines.filter((b) => {
+                                                                        if (selectedReq.project_id && b.project_id && b.project_id !== selectedReq.project_id) {
+                                                                            return false;
+                                                                        }
+                                                                        const q = split.code_allocation.trim().toLowerCase();
+                                                                        if (!q) return false;
+                                                                        return b.code.toLowerCase().includes(q) || b.libelle.toLowerCase().includes(q);
+                                                                    });
+
+                                                                    return (
+                                                                        <div key={spIdx} className="flex gap-2 items-center">
+                                                                            <div className="relative w-48 shrink-0">
+                                                                                <Search className="w-3 h-3 text-purple-400 absolute left-1.5 top-1.5 pointer-events-none" />
+                                                                                <input
+                                                                                    type="text"
+                                                                                    placeholder="Code (ex: 1.1)..."
+                                                                                    value={split.code_allocation}
+                                                                                    onFocus={() => setActiveInputId(splitInputId)}
+                                                                                    onChange={(e) => {
+                                                                                        updateSplitField(artIdx, spIdx, 'code_allocation', e.target.value);
+                                                                                        setActiveInputId(splitInputId);
+                                                                                    }}
+                                                                                    className="w-full pl-6 pr-2 border border-purple-300 rounded p-1 text-xs font-mono font-bold bg-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                                                                                    disabled={!isDecidable}
+                                                                                />
+                                                                                {activeInputId === splitInputId && splitFilteredSuggestions.length > 0 && (
+                                                                                    <div className="absolute left-0 top-full mt-1 w-[260px] bg-white border-2 border-purple-400 rounded shadow-xl z-[250] max-h-48 overflow-y-auto divide-y text-xs">
+                                                                                        {splitFilteredSuggestions.map((sug) => (
+                                                                                            <button
+                                                                                                key={sug.id}
+                                                                                                type="button"
+                                                                                                onClick={() => {
+                                                                                                    updateSplitField(artIdx, spIdx, 'code_allocation', sug.code);
+                                                                                                    setActiveInputId(null);
+                                                                                                }}
+                                                                                                className="w-full p-2 text-left hover:bg-purple-50 flex flex-col transition"
+                                                                                            >
+                                                                                                <div className="flex items-center justify-between mb-0.5">
+                                                                                                    <span className="font-mono font-black text-purple-700 text-[12px]">{sug.code}</span>
+                                                                                                    <span className="font-mono text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
+                                                                                                        Solde: {sug.solde.toLocaleString()}
+                                                                                                    </span>
+                                                                                                </div>
+                                                                                                <span className="text-[10px] text-gray-700 font-medium break-words leading-tight">
+                                                                                                    {sug.libelle}
+                                                                                                </span>
+                                                                                            </button>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                            
+                                                                            <input
+                                                                                type="number"
+                                                                                step="any"
+                                                                                placeholder="Montant"
+                                                                                value={split.montant}
+                                                                                onChange={(e) => updateSplitField(artIdx, spIdx, 'montant', e.target.value)}
+                                                                                className="flex-1 w-24 border border-purple-300 rounded p-1 text-xs font-mono font-bold text-right bg-white focus:outline-none focus:border-purple-500"
+                                                                                disabled={!isDecidable}
+                                                                            />
+                                                                            <span className="text-[11px] font-bold text-gray-500 w-6">{selectedReq.devise}</span>
+
+                                                                            {isDecidable && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => removeSplitFromArticle(artIdx, spIdx)}
+                                                                                    className="p-1 text-red-500 hover:bg-red-50 hover:text-red-700 rounded transition"
+                                                                                    title="Supprimer cette part"
+                                                                                >
+                                                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                })}
+
+                                                                {isDecidable && (
+                                                                    <div className="flex justify-between items-center pt-1.5 mt-1 border-t border-purple-200">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => addSplitToArticle(artIdx)}
+                                                                            className="text-[10.5px] font-bold text-purple-700 hover:bg-purple-100 px-1.5 py-1 rounded flex items-center gap-1 transition"
+                                                                        >
+                                                                            <Plus className="w-3 h-3" /> Ajouter un autre code
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => updateArticleField(artIdx, 'splits', [])}
+                                                                            className="text-[10.5px] font-semibold text-red-600 hover:bg-red-50 px-1.5 py-1 rounded transition"
+                                                                        >
+                                                                            Annuler la ventilation
+                                                                        </button>
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         )}
                                                     </td>
-                                                    <td className="p-2.5 text-right font-mono font-bold whitespace-nowrap">
-                                                        {soldeDispo !== null && soldeDispo !== undefined ? (
-                                                            `${soldeDispo.toLocaleString()} ${selectedReq.devise}`
-                                                        ) : (
-                                                            <span className="text-gray-400 font-normal">Non défini</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="p-2.5 text-right font-mono font-bold text-[#0B192C] whitespace-nowrap">
-                                                        {ligne.total.toLocaleString()} {selectedReq.devise}
-                                                    </td>
-                                                    <td className="p-2.5 text-center whitespace-nowrap">
-                                                        {soldeDispo === null || soldeDispo === undefined ? (
+                                                    <td className="p-2.5 align-top text-center whitespace-nowrap">
+                                                        {hasSplits ? (
+                                                            <span className="text-[10px] text-gray-500">Multilignes (Backend)</span>
+                                                        ) : soldeDispo === null || soldeDispo === undefined ? (
                                                             <span className="text-[10px] text-gray-400">À vérifier</span>
                                                         ) : depassement ? (
-                                                            <span className="px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-black uppercase shadow-sm">
-                                                                Dépassement crédit
+                                                            <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-[10px] font-bold">
+                                                                Dépassement
                                                             </span>
                                                         ) : (
                                                             <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
@@ -891,42 +1147,15 @@ export default function ProjectManagerDashboard({
                                                             </span>
                                                         )}
                                                     </td>
-                                                    <td className="p-2.5">
-                                                        {ligne.justif && ligne.justif.length > 0 ? (
-                                                            <ul className="space-y-1">
-                                                                {ligne.justif.map((file) => (
-                                                                    <li key={file.id} className="text-[10px]">
-                                                                        {file.fileUrl ? (
-                                                                            <a
-                                                                                href={file.fileUrl}
-                                                                                target="_blank"
-                                                                                rel="noreferrer"
-                                                                                className="inline-flex items-center gap-1 font-semibold text-[#04326D] underline hover:text-blue-800"
-                                                                            >
-                                                                                <Paperclip className="h-3 w-3 shrink-0" />
-                                                                                <span className="truncate max-w-[100px]">{file.scan}</span>
-                                                                            </a>
-                                                                        ) : (
-                                                                            <span className="text-gray-500 truncate max-w-[100px] block">{file.scan}</span>
-                                                                        )}
-                                                                    </li>
-                                                                ))}
-                                                            </ul>
-                                                        ) : (
-                                                            <span className="text-gray-400 text-[10px]">Aucune</span>
-                                                        )}
-                                                    </td>
                                                 </tr>
                                             );
                                         })}
                                     </tbody>
-                                    <tfoot className="bg-gray-50 font-bold border-t">
+                                    <tfoot className="bg-gray-50 font-bold border-t border-[#E2E8F0]">
                                         <tr>
-                                            <td colSpan={3} className="p-2.5 text-right">
-                                                Montant Total :
-                                            </td>
-                                            <td className="p-2.5 text-right text-[#04326D] text-sm font-mono">
-                                                {selectedReq.montantTotal.toLocaleString()} {selectedReq.devise}
+                                            <td colSpan={3} className="p-2.5 text-right uppercase">Nouveau Total Calculé :</td>
+                                            <td className="p-2.5 text-right font-mono text-base text-[#04326D]">
+                                                {money(totalGeneralCalcule, selectedReq.devise)}
                                             </td>
                                             <td colSpan={2} />
                                         </tr>
@@ -988,7 +1217,6 @@ export default function ProjectManagerDashboard({
                                                     Fermer
                                                 </button>
                                                 
-                                                {/* BOUTON DÉSACTIVÉ EN CAS DE DÉPASSEMENT */}
                                                 <button
                                                     type="button"
                                                     onClick={handleDeclencherApprobation}
@@ -1001,7 +1229,7 @@ export default function ProjectManagerDashboard({
                                                     title={hasDepassement ? "Validation bloquée : dépassement budgétaire sur une ou plusieurs lignes" : "Valider et transmettre au PAM"}
                                                 >
                                                     <ShieldCheck className="w-4 h-4" />
-                                                    <span>{hasDepassement ? 'Validation Bloquée (Dépassement)' : 'Valider & Transmettre au PAM'}</span>
+                                                    <span>{hasDepassement ? 'Validation Bloquée (Dépassement)' : 'Enregistrer, Ventiler & Viser au PAM'}</span>
                                                 </button>
                                             </div>
                                         </div>

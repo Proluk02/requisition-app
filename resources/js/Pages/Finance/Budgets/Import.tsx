@@ -1,4 +1,5 @@
 import { Link, Head, useForm, usePage } from '@inertiajs/react';
+import { useEffect, useMemo, useState } from 'react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
 import {
@@ -12,6 +13,12 @@ import {
     FolderKanban,
     Info,
     FileCheck2,
+    X,
+    Download,
+    Copy,
+    Check,
+    AlertTriangle,
+    Table2,
 } from 'lucide-react';
 
 interface ProjectOption {
@@ -36,6 +43,8 @@ const requiredColumns = [
     { name: 'DONATEUR', desc: 'Nom ou code du bailleur de fonds' },
 ];
 
+const MAX_SIZE_BYTES = 10 * 1024 * 1024;
+
 export default function ImportBudgetLines({ projects = [] }: Props) {
     const { flash } = usePage<PageProps>().props;
 
@@ -44,14 +53,70 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
         file: null,
     });
 
+    const [copyDone, setCopyDone] = useState(false);
+    const [localError, setLocalError] = useState<string | null>(null);
+
     const handleSubmit = (event: React.FormEvent) => {
         event.preventDefault();
+        setLocalError(null);
+
+        // Validation locale taille
+        if (form.data.file && form.data.file.size > MAX_SIZE_BYTES) {
+            setLocalError(
+                `Le fichier dépasse la limite de 10 Mo (${(form.data.file.size / 1024 / 1024).toFixed(1)} Mo).`
+            );
+            return;
+        }
+
         form.post(route('finance.budgets.import'), {
             forceFormData: true,
             preserveScroll: true,
             onSuccess: () => form.reset('file'),
         });
     };
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const f = e.target.files ? e.target.files[0] : null;
+        setLocalError(null);
+        if (f && f.size > MAX_SIZE_BYTES) {
+            setLocalError(
+                `Le fichier « ${f.name} » dépasse la limite de 10 Mo (${(f.size / 1024 / 1024).toFixed(1)} Mo).`
+            );
+        }
+        form.setData('file', f);
+    };
+
+    const handleCopyHeaders = async () => {
+        const headers = requiredColumns.map((c) => c.name).join(',');
+        try {
+            await navigator.clipboard.writeText(headers);
+            setCopyDone(true);
+            setTimeout(() => setCopyDone(false), 2200);
+        } catch {
+            // clipboard peut échouer silencieusement
+        }
+    };
+
+    const handleDownloadTemplate = () => {
+        const headers = requiredColumns.map((c) => c.name).join(',');
+        const example = '1,1,3,a,1.1.3.a,Exemple activité,USD,1500.50,Bailleur Exemple';
+        const csv = `${headers}\n${example}\n`;
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'maquette-budget-modele.csv';
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const selectedProject = useMemo(
+        () => projects.find((p) => p.id === form.data.project_id),
+        [projects, form.data.project_id]
+    );
+
+    const canSubmit =
+        !!form.data.project_id && !!form.data.file && !form.processing && !localError;
 
     return (
         <AppLayout>
@@ -104,6 +169,12 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
                         <span>{flash.error}</span>
                     </div>
                 )}
+                {localError && (
+                    <div className="p-3.5 rounded bg-red-50 border border-red-300 text-red-900 text-xs font-semibold flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+                        <span>{localError}</span>
+                    </div>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex items-center justify-between">
@@ -152,6 +223,7 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                    {/* FORMULAIRE */}
                     <div className="lg:col-span-7 bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                         <div className="border-b border-[#E2E8F0] px-4 py-3 bg-[#F9F9FF] flex items-center justify-between">
                             <div className="flex items-center gap-2">
@@ -170,14 +242,23 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
                                 <label className="block font-bold text-gray-700 mb-1.5">
                                     Projet de Rattachement *
                                 </label>
-                                <select 
-                                    value={form.data.project_id} 
+                                <select
+                                    value={form.data.project_id}
                                     onChange={(e) => form.setData('project_id', e.target.value)}
                                     className="w-full border border-[#B2BED6] rounded p-2 text-xs font-semibold bg-white focus:outline-none focus:border-[#04326D]"
                                 >
                                     {projects.length === 0 && <option value="">Aucun projet disponible</option>}
-                                    {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                    {projects.map((p) => (
+                                        <option key={p.id} value={p.id}>
+                                            {p.name}
+                                        </option>
+                                    ))}
                                 </select>
+                                {selectedProject && (
+                                    <p className="text-[10.5px] text-gray-500 mt-1 italic">
+                                        {selectedProject.full_name}
+                                    </p>
+                                )}
                                 {form.errors.project_id && (
                                     <p className="text-[11px] text-red-600 mt-1">{form.errors.project_id}</p>
                                 )}
@@ -191,7 +272,7 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
                                     <input
                                         type="file"
                                         accept=".xlsx,.xls,.csv,.txt"
-                                        onChange={(e) => form.setData('file', e.target.files ? e.target.files[0] : null)}
+                                        onChange={handleFileChange}
                                         className="w-full text-xs text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-bold file:bg-[#04326D] file:text-white hover:file:bg-[#06428f] cursor-pointer"
                                         required
                                     />
@@ -203,9 +284,28 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
                                                     {form.data.file.name}
                                                 </span>
                                             </div>
-                                            <span className="text-[10px] text-gray-500 font-mono shrink-0 ml-2">
-                                                {(form.data.file.size / 1024).toFixed(1)} Ko
-                                            </span>
+                                            <div className="flex items-center gap-2 shrink-0 ml-2">
+                                                <span className="text-[10px] text-gray-500 font-mono">
+                                                    {(form.data.file.size / 1024).toFixed(1)} Ko
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => form.setData('file', null)}
+                                                    className="text-gray-400 hover:text-red-600 transition"
+                                                    aria-label="Retirer le fichier"
+                                                    title="Retirer le fichier"
+                                                >
+                                                    <X className="w-3.5 h-3.5" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {form.progress && (
+                                        <div className="mt-3 w-full bg-gray-200 rounded h-1.5 overflow-hidden">
+                                            <div
+                                                className="bg-[#04326D] h-full transition-all"
+                                                style={{ width: `${form.progress.percentage}%` }}
+                                            />
                                         </div>
                                     )}
                                 </div>
@@ -234,20 +334,23 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
 
                                 <button
                                     type="submit"
-                                    disabled={form.processing || !form.data.project_id}
-                                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#04326D] hover:bg-[#06428f] disabled:opacity-50 text-white rounded text-xs font-bold shadow-sm transition"
+                                    disabled={!canSubmit}
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#04326D] hover:bg-[#06428f] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-xs font-bold shadow-sm transition"
                                 >
                                     <Upload className="w-4 h-4" />
-                                    <span>{form.processing ? 'Importation en cours...' : 'Lancer l’importation'}</span>
+                                    <span>
+                                        {form.processing ? 'Importation en cours...' : 'Lancer l’importation'}
+                                    </span>
                                 </button>
                             </div>
                         </form>
                     </div>
 
+                    {/* STRUCTURE DES COLONNES */}
                     <div className="lg:col-span-5 bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                         <div className="border-b border-[#E2E8F0] px-4 py-3 bg-[#F9F9FF] flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                                <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                                <Table2 className="w-4 h-4 text-emerald-700" />
                                 <h2 className="text-xs font-bold uppercase tracking-wider text-[#0B192C]">
                                     Structure des 9 Colonnes Obligatoires
                                 </h2>
@@ -276,6 +379,37 @@ export default function ImportBudgetLines({ projects = [] }: Props) {
                                         </span>
                                     </div>
                                 ))}
+                            </div>
+
+                            {/* Actions utiles */}
+                            <div className="grid grid-cols-2 gap-2 pt-1">
+                                <button
+                                    type="button"
+                                    onClick={handleCopyHeaders}
+                                    className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-white border border-[#B2BED6] hover:bg-gray-50 text-[#04326D] rounded text-[11px] font-bold transition"
+                                    title="Copier les en-têtes dans le presse-papier"
+                                >
+                                    {copyDone ? (
+                                        <>
+                                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                            <span>Copié !</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Copy className="w-3.5 h-3.5" />
+                                            <span>Copier les en-têtes</span>
+                                        </>
+                                    )}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleDownloadTemplate}
+                                    className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-white border border-[#B2BED6] hover:bg-gray-50 text-[#04326D] rounded text-[11px] font-bold transition"
+                                    title="Télécharger un modèle CSV pré-rempli"
+                                >
+                                    <Download className="w-3.5 h-3.5" />
+                                    <span>Télécharger modèle</span>
+                                </button>
                             </div>
 
                             <div className="p-3 bg-gray-50 border border-gray-200 rounded text-[11px] text-gray-600 space-y-1">

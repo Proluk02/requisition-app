@@ -19,7 +19,15 @@ import {
     Info,
     FileText,
     ShieldCheck,
+    Layers,
 } from 'lucide-react';
+
+interface SplitOption {
+    id: string;
+    code_allocation: string;
+    libelle_allocation: string;
+    montant: number;
+}
 
 interface CaisseOption {
     id: string;
@@ -38,6 +46,7 @@ interface LigneItem {
     unite: string;
     prixUnitaire: number;
     total: number;
+    splits: SplitOption[];
 }
 
 interface RequisitionItem {
@@ -539,13 +548,13 @@ export default function DisbursementsIndex({
                 </div>
             </div>
 
-            {/* MODALE : Décaissement */}
+            {/* MODALE : Décaissement (AVEC AFFICHAGE DES SPLITS / VENTILATIONS) */}
             {disburseReq && (
                 <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in"
+                    className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 animate-fade-in"
                     onClick={(e) => e.target === e.currentTarget && handleCloseDisburse()}
                 >
-                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-lg w-full p-6 space-y-4 animate-slide-down max-h-[92vh] overflow-y-auto">
+                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-2xl w-full p-6 space-y-4 animate-slide-down max-h-[95vh] overflow-y-auto">
                         <header className="flex items-start justify-between border-b pb-3">
                             <div>
                                 <h3 className="text-sm font-bold text-[#0B192C] uppercase tracking-wide">
@@ -578,22 +587,63 @@ export default function DisbursementsIndex({
                             </div>
                         )}
 
-                        <div className="p-3 bg-blue-50/60 border border-blue-200 rounded flex justify-between items-center text-xs">
-                            <div>
-                                <span className="text-[10px] font-bold uppercase text-gray-500 block">
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="p-3 bg-blue-50/60 border border-blue-200 rounded flex flex-col justify-center text-xs">
+                                <span className="text-[10px] font-bold uppercase text-gray-500 block mb-0.5">
                                     Bénéficiaire
                                 </span>
-                                <strong className="text-[#0B192C]">{disburseReq.initiateurNom}</strong>
+                                <strong className="text-[#0B192C] text-sm">{disburseReq.initiateurNom}</strong>
                                 <span className="text-[11px] text-gray-500 block">{disburseReq.projet}</span>
                             </div>
-                            <div className="text-right">
-                                <span className="text-[10px] font-bold uppercase text-gray-500 block">
+                            <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded flex flex-col justify-center text-right text-xs">
+                                <span className="text-[10px] font-bold uppercase text-gray-500 block mb-0.5">
                                     Montant à décaisser
                                 </span>
-                                <span className="text-base font-black font-mono text-red-700">
+                                <span className="text-xl font-black font-mono text-emerald-700">
                                     {money(disburseReq.montantTotal, disburseReq.devise)}
                                 </span>
                             </div>
+                        </div>
+
+                        {/* NOUVEAU: Récapitulatif visuel des Imputations et Splits pour rassurer le caissier */}
+                        <div className="bg-gray-50 border border-gray-200 rounded p-3 text-xs max-h-40 overflow-y-auto">
+                            <h4 className="font-bold text-gray-700 flex items-center gap-1.5 uppercase tracking-wider text-[10px] mb-2 border-b border-gray-200 pb-1">
+                                <FileText className="w-3.5 h-3.5" />
+                                Détail des imputations (Déduit automatiquement en Euro)
+                            </h4>
+                            <ul className="space-y-2.5">
+                                {disburseReq.lignes.map((art) => (
+                                    <li key={art.id} className="flex flex-col">
+                                        <div className="flex justify-between items-start gap-2">
+                                            <span className="font-semibold text-gray-800 text-[11px] leading-tight truncate" title={art.activite}>
+                                                {art.activite}
+                                            </span>
+                                        </div>
+                                        {art.splits && art.splits.length > 0 ? (
+                                            <div className="pl-3 border-l-2 border-purple-300 space-y-1 mt-1">
+                                                <div className="text-[9px] text-purple-700 font-bold uppercase tracking-wide flex items-center gap-1">
+                                                    <Layers className="w-3 h-3" /> Ventilation Multi-Lignes
+                                                </div>
+                                                {art.splits.map((s) => (
+                                                    <div key={s.id} className="flex justify-between items-center text-[10px]">
+                                                        <span className="font-mono font-bold text-purple-700 bg-purple-50 px-1 rounded border border-purple-100">
+                                                            {s.code_allocation || 'Non spécifié'}
+                                                        </span>
+                                                        <span className="text-gray-600 font-mono font-medium">{money(s.montant, disburseReq.devise)}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="flex justify-between items-center text-[10px] pl-3 border-l-2 border-[#04326D] mt-1">
+                                                <span className="font-mono font-bold text-[#04326D] bg-blue-50 px-1 rounded border border-blue-100">
+                                                    {art.codeAllocation || 'Non spécifié'}
+                                                </span>
+                                                <span className="text-gray-600 font-mono font-medium">{money(art.total, disburseReq.devise)}</span>
+                                            </div>
+                                        )}
+                                    </li>
+                                ))}
+                            </ul>
                         </div>
 
                         {pinError && (
@@ -611,8 +661,8 @@ export default function DisbursementsIndex({
                                 </div>
                                 <p className="leading-snug text-[11px]">
                                     Vous allez débiter <strong>{money(disburseReq.montantTotal, disburseReq.devise)}</strong> de la caisse.
-                                    Cette opération est <strong>irréversible</strong> et générera automatiquement un BSC.
-                                    Cliquez à nouveau sur le bouton rouge pour confirmer.
+                                    Cette opération est <strong>irréversible</strong> et générera automatiquement un BSC avec déduction budgétaire.
+                                    Cliquez à nouveau sur le bouton vert pour confirmer.
                                 </p>
                             </div>
                         )}
@@ -685,7 +735,7 @@ export default function DisbursementsIndex({
                                         placeholder="Code PIN personnel (4 à 6 chiffres)"
                                         value={pin}
                                         onChange={(e) => setPin(e.target.value)}
-                                        className="w-full pl-8 pr-3 py-2 border border-amber-300 bg-white rounded text-xs font-mono tracking-widest text-[#0B192C] focus:outline-none focus:ring-1 focus:ring-amber-500 disabled:bg-gray-100"
+                                        className="w-full pl-8 pr-3 py-2 border border-amber-300 bg-white rounded text-lg text-center font-mono tracking-widest text-[#0B192C] focus:outline-none focus:ring-1 focus:ring-amber-500 disabled:bg-gray-100"
                                         autoFocus
                                         required
                                         disabled={isFondsInsuffisants || confirmStep}
@@ -706,16 +756,16 @@ export default function DisbursementsIndex({
                                     disabled={submitting || isFondsInsuffisants}
                                     className={`px-4 py-1.5 text-white rounded text-xs font-bold shadow transition disabled:opacity-40 disabled:cursor-not-allowed ${
                                         confirmStep
-                                            ? 'bg-red-600 hover:bg-red-700'
+                                            ? 'bg-amber-600 hover:bg-amber-700'
                                             : 'bg-[#10B981] hover:bg-[#059669]'
                                     }`}
                                 >
                                     {submitting
-                                        ? 'Validation...'
+                                        ? 'Traitement en cours...'
                                         : isFondsInsuffisants
                                         ? 'Fonds Insuffisants (Rejet)'
                                         : confirmStep
-                                        ? `Confirmer ${money(disburseReq.montantTotal, disburseReq.devise)}`
+                                        ? `Confirmer le décaissement`
                                         : 'Valider & Décaisser'}
                                 </button>
                             </div>
@@ -768,7 +818,7 @@ export default function DisbursementsIndex({
                             </span>
                         </p>
                         <p>
-                            <strong>Imputation :</strong>{' '}
+                            <strong>Imputation(s) :</strong>{' '}
                             <span className="border-b border-dotted border-black inline-block min-w-[280px] font-mono font-bold">
                                 {printBSC.imputation}
                             </span>
