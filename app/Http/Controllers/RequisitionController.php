@@ -12,6 +12,7 @@ use App\Models\Project;
 use App\Models\Requisition;
 use App\Models\RequisitionSignature;
 use App\Models\User;
+use App\Notifications\RequisitionReadyForDisbursement;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Endroid\QrCode\Encoding\Encoding;
 use Endroid\QrCode\ErrorCorrectionLevel;
@@ -1157,6 +1158,14 @@ class RequisitionController extends Controller
                     titre: 'Réquisition Approuvée (Prête pour Caisse)',
                     message: "Votre réquisition {$lockedRequisition->numero_requisition} a été approuvée par {$mentionAuteur}. Les fonds sont prêts au guichet : {$lockedRequisition->caisse_decaissement}."
                 );
+                $lockedRequisition->user->notify(
+                    (new RequisitionReadyForDisbursement(
+                        numero: $lockedRequisition->numero_requisition,
+                        montant: (float) $lockedRequisition->montant_total,
+                        devise: $lockedRequisition->devise,
+                        caisse: $lockedRequisition->caisse_decaissement,
+                    ))->afterCommit()
+                );
 
                 return;
             }
@@ -1256,6 +1265,14 @@ class RequisitionController extends Controller
                     userId: $lockedRequisition->user_id,
                     titre: 'Réquisition urgente approuvée',
                     message: "Votre réquisition {$lockedRequisition->numero_requisition} a été approuvée et transmise directement à la Caisse."
+                );
+                $lockedRequisition->user->notify(
+                    (new RequisitionReadyForDisbursement(
+                        numero: $lockedRequisition->numero_requisition,
+                        montant: (float) $lockedRequisition->montant_total,
+                        devise: $lockedRequisition->devise,
+                        caisse: $lockedRequisition->caisse_decaissement,
+                    ))->afterCommit()
                 );
 
                 return;

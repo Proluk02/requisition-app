@@ -8,8 +8,10 @@ use App\Models\DemandeJustificatif;
 use App\Models\Project;
 use App\Models\Requisition;
 use App\Models\User;
+use App\Notifications\RequisitionReadyForDisbursement;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia;
 use Spatie\Permission\Models\Role;
@@ -462,7 +464,43 @@ it('returns a Director rejection to the PAM and resumes at the Director after co
     $this->assertDatabaseHas('requisitions', ['id' => $requisition->id, 'status' => 'visa_admin']);
 });
 
+it('emails the initiator when a standard requisition is approved for disbursement', function () {
+    Notification::fake();
+
+    $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
+    $director = workflowUser('director');
+    $director->update(['signature_pin' => Hash::make('1234')]);
+    workflowUser('cashier');
+    $beneficiary = workflowUser('beneficiary');
+    $requisition = workflowRequisition($beneficiary, $project, 'visa_admin');
+
+    $this->actingAs($director)
+        ->patch(route('requisitions.director-decision', $requisition), [
+            'decision' => 'approve',
+            'pin' => '1234',
+        ])
+        ->assertRedirect();
+
+    $this->assertDatabaseHas('requisitions', ['id' => $requisition->id, 'status' => 'decaissement_caisse']);
+    Notification::assertSentTo(
+        $beneficiary,
+        RequisitionReadyForDisbursement::class,
+        function (RequisitionReadyForDisbursement $notification, array $channels) use ($beneficiary, $requisition) {
+            $mail = $notification->toMail($beneficiary);
+            $body = view($mail->view, $mail->viewData)->render();
+
+            return $channels === ['mail']
+                && $notification->numero === $requisition->numero_requisition
+                && str_contains($body, '100,00 USD')
+                && str_contains($body, 'background-color: #0B192C')
+                && str_contains($body, 'background-color: #04326D');
+        }
+    );
+});
+
 it('returns an urgent requisition to its initiator and sends approval directly to the cashier', function () {
+    Notification::fake();
+
     $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
     $director = workflowUser('director');
     $cashier = workflowUser('cashier');
@@ -487,6 +525,7 @@ it('returns an urgent requisition to its initiator and sends approval directly t
         ->patch(route('requisitions.urgent-director', $requisition), ['decision' => 'approve'])
         ->assertRedirect();
     $this->assertDatabaseHas('requisitions', ['id' => $requisition->id, 'status' => 'decaissement_caisse']);
+    Notification::assertSentTo($beneficiary, RequisitionReadyForDisbursement::class);
 });
 
 it('shows the PAM a complete requisition history separately from its actionable queue', function () {
