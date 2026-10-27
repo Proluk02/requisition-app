@@ -9,6 +9,7 @@ use App\Models\Project;
 use App\Models\Requisition;
 use App\Models\User;
 use App\Notifications\RequisitionReadyForDisbursement;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
@@ -466,6 +467,7 @@ it('returns a Director rejection to the PAM and resumes at the Director after co
 
 it('emails the initiator when a standard requisition is approved for disbursement', function () {
     Notification::fake();
+    expect(is_subclass_of(RequisitionReadyForDisbursement::class, ShouldQueue::class))->toBeFalse();
 
     $project = Project::create(['name' => 'USIMAMIZI BORA', 'full_name' => 'Bonne Gouvernance']);
     $director = workflowUser('director');
@@ -515,6 +517,7 @@ it('returns an urgent requisition to its initiator and sends approval directly t
         ])
         ->assertRedirect();
     $this->assertDatabaseHas('requisitions', ['id' => $requisition->id, 'status' => 'returned_to_urgent_initiator']);
+    Notification::assertNotSentTo($beneficiary, RequisitionReadyForDisbursement::class);
 
     $this->actingAs($beneficiary)
         ->patch(route('requisitions.update', $requisition), correctionPayload($demande))

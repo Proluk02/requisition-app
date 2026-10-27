@@ -1115,7 +1115,7 @@ class RequisitionController extends Controller
             }
         }
 
-        DB::transaction(function () use ($validated, $requisition, $user) {
+        $approved = DB::transaction(function () use ($validated, $requisition, $user) {
             $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
             abort_unless($lockedRequisition->status === 'visa_admin', 403, 'Cette réquisition n’est plus en attente d’approbation finale.');
 
@@ -1158,16 +1158,8 @@ class RequisitionController extends Controller
                     titre: 'Réquisition Approuvée (Prête pour Caisse)',
                     message: "Votre réquisition {$lockedRequisition->numero_requisition} a été approuvée par {$mentionAuteur}. Les fonds sont prêts au guichet : {$lockedRequisition->caisse_decaissement}."
                 );
-                $lockedRequisition->user->notify(
-                    (new RequisitionReadyForDisbursement(
-                        numero: $lockedRequisition->numero_requisition,
-                        montant: (float) $lockedRequisition->montant_total,
-                        devise: $lockedRequisition->devise,
-                        caisse: $lockedRequisition->caisse_decaissement,
-                    ))->afterCommit()
-                );
 
-                return;
+                return true;
             }
 
             $lockedRequisition->update([
@@ -1196,7 +1188,15 @@ class RequisitionController extends Controller
                 titre: 'Réquisition refusée par la Direction',
                 message: "La réquisition {$lockedRequisition->numero_requisition} a été refusée par la Direction : {$validated['motif_rejet']}"
             );
+
+            return false;
         });
+
+        if ($approved) {
+            $this->notifierInitiateurRequisitionPrete(
+                Requisition::query()->findOrFail($requisition->getKey())
+            );
+        }
 
         $isInterim = ! $user->hasRole('director') && (bool) $user->is_director_interim;
 
@@ -1229,7 +1229,7 @@ class RequisitionController extends Controller
         ]);
         $decision = $validated['decision'] ?? 'approve';
 
-        DB::transaction(function () use ($requisition, $user, $validated, $decision) {
+        $approved = DB::transaction(function () use ($requisition, $user, $validated, $decision) {
             $lockedRequisition = Requisition::query()->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
             abort_unless($lockedRequisition->status === 'urgent_direction', 403, 'Cette réquisition n’est plus en attente de dérogation urgente.');
             $isInterim = ! $user->hasRole('director') && (bool) $user->is_director_interim;
@@ -1266,16 +1266,8 @@ class RequisitionController extends Controller
                     titre: 'Réquisition urgente approuvée',
                     message: "Votre réquisition {$lockedRequisition->numero_requisition} a été approuvée et transmise directement à la Caisse."
                 );
-                $lockedRequisition->user->notify(
-                    (new RequisitionReadyForDisbursement(
-                        numero: $lockedRequisition->numero_requisition,
-                        montant: (float) $lockedRequisition->montant_total,
-                        devise: $lockedRequisition->devise,
-                        caisse: $lockedRequisition->caisse_decaissement,
-                    ))->afterCommit()
-                );
 
-                return;
+                return true;
             }
 
             $lockedRequisition->update([
@@ -1296,7 +1288,15 @@ class RequisitionController extends Controller
                 titre: 'Réquisition urgente renvoyée pour correction',
                 message: "Votre réquisition urgente {$lockedRequisition->numero_requisition} a été renvoyée pour correction : {$validated['motif_rejet']}"
             );
+
+            return false;
         });
+
+        if ($approved) {
+            $this->notifierInitiateurRequisitionPrete(
+                Requisition::query()->findOrFail($requisition->getKey())
+            );
+        }
 
         return Redirect::back()->with(
             $decision === 'approve' ? 'success' : 'error',
@@ -1304,6 +1304,16 @@ class RequisitionController extends Controller
                 ? 'Réquisition urgente approuvée et transmise directement à la Caisse.'
                 : 'Réquisition urgente renvoyée à son initiateur pour correction.'
         );
+    }
+
+    private function notifierInitiateurRequisitionPrete(Requisition $requisition): void
+    {
+        $requisition->user()->firstOrFail()->notify(new RequisitionReadyForDisbursement(
+            numero: $requisition->numero_requisition,
+            montant: (float) $requisition->montant_total,
+            devise: $requisition->devise,
+            caisse: $requisition->caisse_decaissement,
+        ));
     }
 
     protected function verifierSecretSignature(User $user, ?string $secret): bool

@@ -2,15 +2,11 @@
 
 namespace App\Notifications;
 
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class RequisitionReadyForDisbursement extends Notification implements ShouldQueue
+class RequisitionReadyForDisbursement extends Notification
 {
-    use Queueable;
-
     public function __construct(
         public string $numero,
         public float $montant,

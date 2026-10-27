@@ -10,8 +10,8 @@ interface StepDefinition {
 const STEPS: StepDefinition[] = [
     { id: 1, title: 'Brouillon', subtitle: 'Initiateur' },
     { id: 2, title: 'Visa MP', subtitle: 'Manager Projet' },
-    { id: 3, title: 'Finances', subtitle: 'Manager Finances' },
-    { id: 4, title: 'Administration', subtitle: 'Manager Admin' },
+    { id: 3, title: 'Visa PAM', subtitle: 'Manager Admin' },
+    { id: 4, title: 'Finances', subtitle: 'Manager Finances' },
     { id: 5, title: 'Direction', subtitle: 'Directrice Générale' },
     { id: 6, title: 'Caisse', subtitle: 'Guichet' },
     { id: 7, title: 'Clôturé', subtitle: 'Retour' },
@@ -36,12 +36,14 @@ export default function WorkflowStepper({ statusCode, isUrgent = false }: Workfl
                 return { currentStep: 2, isRejected: true, rejectStep: 2 };
             case 'visa_mp':
                 return { currentStep: 3, isRejected: false, rejectStep: null };
-            case 'returned_to_finance':
-                return { currentStep: 3, isRejected: true, rejectStep: 3 };
-            case 'controle_finance':
+            case 'visa_pam':
                 return { currentStep: 4, isRejected: false, rejectStep: null };
-            case 'returned_to_admin_manager':
+            case 'returned_to_finance':
                 return { currentStep: 4, isRejected: true, rejectStep: 4 };
+            case 'controle_finance':
+                return { currentStep: 5, isRejected: false, rejectStep: null };
+            case 'returned_to_admin_manager':
+                return { currentStep: 3, isRejected: true, rejectStep: 3 };
             case 'visa_admin':
             case 'urgent_direction':
                 return { currentStep: 5, isRejected: false, rejectStep: null };
