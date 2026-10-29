@@ -8,14 +8,24 @@ import {
     Calendar,
     Building2,
     Coins,
-    AlertTriangle,
     CalendarX2,
     RotateCcw,
     History,
-    CheckCircle2,
     User,
     ArrowRight,
     Info,
+    TrendingUp,
+    TrendingDown,
+    Wallet,
+    Clock,
+    CheckCircle2,
+    AlertTriangle,
+    FileText,
+    CreditCard,
+    Banknote,
+    Smartphone,
+    ShieldCheck,
+    Eye,
 } from 'lucide-react';
 
 interface CaisseOption {
@@ -82,6 +92,14 @@ const money = (n: number | null | undefined, dev: string) => {
     return `${val.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${dev}`.trim();
 };
 
+const modeIcon = (mode?: string) => {
+    const m = (mode ?? '').toLowerCase();
+    if (m.includes('esp') || m.includes('cash') || m.includes('liquide')) return Banknote;
+    if (m.includes('virement') || m.includes('banque') || m.includes('transfer')) return CreditCard;
+    if (m.includes('mobile') || m.includes('momo') || m.includes('airtel') || m.includes('orange')) return Smartphone;
+    return Wallet;
+};
+
 export default function JournalDuJour({
     userCaisses = [],
     selectedCaisse,
@@ -124,34 +142,45 @@ export default function JournalDuJour({
     const totalEntrees = session ? session.total_entrees : totalEntreesJour;
     const totalSorties = session ? session.total_sorties : totalSortiesJour;
     const soldeTheorique = session ? session.solde_theorique : soldeTheoriqueJour;
+    const ecart = session?.ecart ?? 0;
+    const isEcartOk = Math.abs(ecart) < 0.01;
+    const tauxRotation = soldeOuverture > 0 ? ((totalEntrees + totalSorties) / soldeOuverture) * 100 : 0;
 
-    // Détail par mode de paiement
     const detailParMode = mouvements.reduce((acc, m) => {
         const key = m.mode_paiement || 'Non spécifié';
-        if (!acc[key]) acc[key] = { entrees: 0, sorties: 0 };
+        if (!acc[key]) acc[key] = { entrees: 0, sorties: 0, count: 0 };
         if (m.type === 'entree') acc[key].entrees += m.montant;
         else acc[key].sorties += m.montant;
+        acc[key].count += 1;
         return acc;
-    }, {} as Record<string, { entrees: number; sorties: number }>);
+    }, {} as Record<string, { entrees: number; sorties: number; count: number }>);
 
     return (
         <AppLayout>
             <Head title={`Journal de Caisse du ${selectedDate}`} />
 
             <style>{`
+                @media screen {
+                    #journal-print-document { display: none !important; }
+                }
                 @media print {
                     nav, aside, header, .no-print-area, button, select, input {
                         display: none !important;
                     }
+                    body * { visibility: hidden !important; }
+                    #journal-print-document,
+                    #journal-print-document * { visibility: visible !important; }
                     #journal-print-document {
                         display: block !important;
-                        position: absolute;
-                        left: 0;
-                        top: 0;
+                        position: absolute !important;
+                        left: 0 !important;
+                        top: 0 !important;
                         width: 100% !important;
                         background: white !important;
                         color: black !important;
                         padding: 20px !important;
+                        margin: 0 !important;
+                        z-index: 2147483647 !important;
                     }
                 }
             `}</style>
@@ -160,8 +189,9 @@ export default function JournalDuJour({
                 <div className="fixed top-0 left-0 right-0 h-0.5 bg-[#04326D] z-[100] animate-pulse" />
             )}
 
-            <div className="space-y-6">
-                <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0] no-print-area">
+            <div className="space-y-6 no-print-area">
+                {/* EN-TÊTE */}
+                <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
                     <div>
                         <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1.5 flex items-center gap-1.5">
                             <Coins className="w-3.5 h-3.5 text-[#04326D]" />
@@ -171,8 +201,19 @@ export default function JournalDuJour({
                             <span className="mx-1">/</span>
                             <span className="text-[#04326D]">Journal Quotidien</span>
                         </nav>
-                        <h1 className="text-xl font-bold text-[#0B192C]">
-                            Journal Quotidien de Caisse (Arrêté du Jour)
+                        <h1 className="text-xl font-bold text-[#0B192C] flex items-center gap-2">
+                            Journal Quotidien de Caisse
+                            {session && (
+                                <span
+                                    className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
+                                        session.status === 'fermee'
+                                            ? 'bg-gray-100 text-gray-700 border-gray-300'
+                                            : 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                    }`}
+                                >
+                                    {session.status === 'fermee' ? 'Clôturée' : 'En cours'}
+                                </span>
+                            )}
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
                             Arrêté journalier chronologique et traçabilité historique des sessions.
@@ -239,8 +280,9 @@ export default function JournalDuJour({
                     </div>
                 </header>
 
+                {/* BANDEAUX D'ALERTE */}
                 {isPastDateWithoutSession && (
-                    <div className="p-4 rounded-lg bg-amber-50/80 border border-amber-200 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print-area shadow-sm">
+                    <div className="p-4 rounded-lg bg-amber-50/80 border border-amber-200 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
                         <div className="flex items-start gap-3">
                             <CalendarX2 className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
                             <div>
@@ -253,7 +295,6 @@ export default function JournalDuJour({
                                 </p>
                             </div>
                         </div>
-
                         <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
                             {latestSessionDate && (
                                 <button
@@ -283,7 +324,7 @@ export default function JournalDuJour({
                 )}
 
                 {isToday && !session && (
-                    <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 text-blue-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print-area shadow-sm">
+                    <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 text-blue-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
                         <div className="flex items-center gap-3">
                             <Calendar className="w-5 h-5 text-[#04326D] shrink-0" />
                             <div>
@@ -305,9 +346,87 @@ export default function JournalDuJour({
                     </div>
                 )}
 
-                {/* Bandeau caissier */}
+                {/* KPI CARDS ENRICHIES */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="relative bg-white rounded-lg border border-[#B2BED6] shadow-sm p-4 overflow-hidden">
+                        <div className="absolute right-0 top-0 h-full w-1 bg-gradient-to-b from-[#04326D] to-[#06428f]" />
+                        <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                                Solde d'Ouverture
+                            </span>
+                            <Wallet className="w-4 h-4 text-[#04326D]" />
+                        </div>
+                        <p className="text-lg font-black text-[#0B192C] font-mono mt-1.5">
+                            {money(soldeOuverture, devise)}
+                        </p>
+                        <p className="text-[10px] text-gray-500 mt-0.5 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {session?.opened_at ? `Ouvert à ${session.opened_at}` : 'Session non démarrée'}
+                        </p>
+                    </div>
+
+                    <div className="relative bg-white rounded-lg border border-emerald-200 shadow-sm p-4 overflow-hidden">
+                        <div className="absolute right-0 top-0 h-full w-1 bg-gradient-to-b from-emerald-500 to-emerald-700" />
+                        <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                                Total Entrées
+                            </span>
+                            <TrendingUp className="w-4 h-4 text-emerald-600" />
+                        </div>
+                        <p className="text-lg font-black text-emerald-700 font-mono mt-1.5">
+                            + {money(totalEntrees, devise)}
+                        </p>
+                        <p className="text-[10px] text-gray-500 mt-0.5">
+                            {mouvements.filter((m) => m.type === 'entree').length} opération(s) entrante(s)
+                        </p>
+                    </div>
+
+                    <div className="relative bg-white rounded-lg border border-red-200 shadow-sm p-4 overflow-hidden">
+                        <div className="absolute right-0 top-0 h-full w-1 bg-gradient-to-b from-red-500 to-red-700" />
+                        <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-red-700">
+                                Total Sorties
+                            </span>
+                            <TrendingDown className="w-4 h-4 text-red-600" />
+                        </div>
+                        <p className="text-lg font-black text-red-700 font-mono mt-1.5">
+                            − {money(totalSorties, devise)}
+                        </p>
+                        <p className="text-[10px] text-gray-500 mt-0.5">
+                            {mouvements.filter((m) => m.type === 'sortie').length} opération(s) sortante(s)
+                        </p>
+                    </div>
+
+                    <div className="relative bg-[#0B192C] rounded-lg shadow-sm p-4 overflow-hidden text-white">
+                        <div className="absolute right-0 top-0 h-full w-1 bg-gradient-to-b from-emerald-400 to-emerald-600" />
+                        <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-[#B2BED6]">
+                                Solde Théorique
+                            </span>
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        </div>
+                        <p className="text-lg font-black text-emerald-400 font-mono mt-1.5">
+                            {money(soldeTheorique, devise)}
+                        </p>
+                        <p className="text-[10px] text-[#B2BED6] mt-0.5 flex items-center gap-1">
+                            {isEcartOk ? (
+                                <>
+                                    <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                                    Écart : 0,00 {devise}
+                                </>
+                            ) : (
+                                <>
+                                    <AlertTriangle className="w-3 h-3 text-amber-400" />
+                                    Écart : {money(ecart, devise)}
+                                </>
+                            )}
+                        </p>
+                    </div>
+                </div>
+
+                {/* BANDEAU META SESSION */}
                 {session && (
-                    <div className="no-print-area flex flex-wrap items-center gap-3 text-xs text-gray-700 bg-white border border-[#B2BED6] rounded p-3">
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-700 bg-white border border-[#B2BED6] rounded-lg p-3 shadow-sm">
                         <div className="flex items-center gap-1.5">
                             <User className="w-3.5 h-3.5 text-[#04326D]" />
                             <span className="font-semibold">Caissier :</span>
@@ -316,11 +435,7 @@ export default function JournalDuJour({
                         <span className="text-gray-300">•</span>
                         <div>
                             <span className="font-semibold">Statut :</span>{' '}
-                            <strong
-                                className={
-                                    session.status === 'fermee' ? 'text-gray-700' : 'text-emerald-700'
-                                }
-                            >
+                            <strong className={session.status === 'fermee' ? 'text-gray-700' : 'text-emerald-700'}>
                                 {session.status === 'fermee' ? 'Clôturée' : 'Ouverte'}
                             </strong>
                         </div>
@@ -340,55 +455,58 @@ export default function JournalDuJour({
                                 </span>
                             </>
                         )}
+                        <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[#04326D] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">
+                            <Eye className="w-3 h-3" />
+                            Aperçu avant impression
+                        </span>
                     </div>
                 )}
 
-                <div
-                    id="journal-print-document"
-                    className={`bg-white border border-[#B2BED6] rounded shadow-sm p-8 space-y-6 max-w-4xl mx-auto text-black transition-opacity ${
-                        isLoading ? 'opacity-50 pointer-events-none' : ''
-                    }`}
-                >
-                    <div className="flex justify-between items-start border-b-2 border-black pb-4">
-                        <div>
-                            <p className="text-xs font-bold uppercase tracking-wider text-gray-800">
-                                Bon Pasteur A.S.B.L. — Kolwezi
-                            </p>
-                            <h2 className="text-lg font-black uppercase tracking-wide text-black mt-0.5">
-                                Journal Quotidien de Caisse
-                            </h2>
-                            <p className="text-xs text-gray-600 mt-1">
-                                Guichet : <strong>{selectedCaisse?.name}</strong> • Devise : <strong>{devise}</strong>
-                            </p>
-                        </div>
-                        <div className="text-right">
-                            <span className="text-xs font-mono font-bold block">
-                                Date : {session?.date_session ?? new Date(selectedDate).toLocaleDateString('fr-FR')}
-                            </span>
-                            <span
-                                className={`text-[11px] font-bold uppercase block mt-0.5 ${
-                                    session
+                {/* APERÇU PAPIER (ce que l'utilisateur voit à l'écran) */}
+                <div className="bg-gray-100 rounded-lg p-3 sm:p-6 shadow-inner border border-gray-300">
+                    <div className="bg-white shadow-2xl mx-auto max-w-4xl border border-gray-300 p-8 space-y-6 text-black">
+                        {/* En-tête papier */}
+                        <div className="flex justify-between items-start border-b-2 border-black pb-4">
+                            <div>
+                                <p className="text-xs font-bold uppercase tracking-wider text-gray-800">
+                                    Bon Pasteur A.S.B.L. — Kolwezi
+                                </p>
+                                <h2 className="text-lg font-black uppercase tracking-wide text-black mt-0.5">
+                                    Journal Quotidien de Caisse
+                                </h2>
+                                <p className="text-xs text-gray-600 mt-1">
+                                    Guichet : <strong>{selectedCaisse?.name}</strong> • Devise :{' '}
+                                    <strong>{devise}</strong>
+                                </p>
+                            </div>
+                            <div className="text-right">
+                                <span className="text-xs font-mono font-bold block">
+                                    Date : {session?.date_session ?? new Date(selectedDate).toLocaleDateString('fr-FR')}
+                                </span>
+                                <span
+                                    className={`text-[11px] font-bold uppercase block mt-0.5 ${
+                                        session
+                                            ? session.status === 'fermee'
+                                                ? 'text-gray-700'
+                                                : 'text-emerald-700'
+                                            : 'text-amber-800'
+                                    }`}
+                                >
+                                    {session
                                         ? session.status === 'fermee'
-                                            ? 'text-gray-700'
-                                            : 'text-emerald-700'
-                                        : 'text-amber-800'
-                                }`}
-                            >
-                                {session
-                                    ? session.status === 'fermee'
-                                        ? 'Session Clôturée'
-                                        : 'Session Ouverte'
-                                    : 'Non ouverte (Guichet fermé)'}
-                            </span>
+                                            ? 'Session Clôturée'
+                                            : 'Session Ouverte'
+                                        : 'Non ouverte (Guichet fermé)'}
+                                </span>
+                            </div>
                         </div>
-                    </div>
 
-                    <div className="space-y-6 text-xs text-black">
+                        {/* 1. Ouverture */}
                         <div className="border border-black p-3 space-y-1.5 bg-gray-50/30">
                             <span className="font-bold uppercase tracking-wider block text-[11px] underline">
                                 1. Ouverture du Guichet
                             </span>
-                            <div className="grid grid-cols-2 gap-4 pt-1">
+                            <div className="grid grid-cols-2 gap-4 pt-1 text-xs">
                                 <div>
                                     <p>
                                         Origine du solde :{' '}
@@ -401,7 +519,8 @@ export default function JournalDuJour({
                                         </strong>
                                     </p>
                                     <p>
-                                        Caissier : <strong>{session?.cashier_nom ?? (session ? 'Non assigné' : '—')}</strong>{' '}
+                                        Caissier :{' '}
+                                        <strong>{session?.cashier_nom ?? (session ? 'Non assigné' : '—')}</strong>{' '}
                                         {session?.opened_at && `(à ${session.opened_at})`}
                                     </p>
                                     <p>
@@ -420,6 +539,7 @@ export default function JournalDuJour({
                             </div>
                         </div>
 
+                        {/* 2. Mouvements */}
                         <div className="space-y-2">
                             <span className="font-bold uppercase tracking-wider block text-[11px] underline">
                                 2. Mouvements de la Journée ({mouvements.length})
@@ -430,6 +550,7 @@ export default function JournalDuJour({
                                         <th className="p-2 border-r border-black w-24">N° Pièce</th>
                                         <th className="p-2 border-r border-black">Bénéficiaire / Déposant</th>
                                         <th className="p-2 border-r border-black">Motif & Imputation</th>
+                                        <th className="p-2 border-r border-black text-center">Mode</th>
                                         <th className="p-2 text-right border-r border-black">Entrée (+)</th>
                                         <th className="p-2 text-right border-r border-black">Sortie (−)</th>
                                         <th className="p-2 text-right font-black">Solde ({devise})</th>
@@ -440,9 +561,7 @@ export default function JournalDuJour({
                                         <td className="p-2 border-r border-black font-mono text-center text-[10px]">
                                             REPORT
                                         </td>
-                                        <td className="p-2 border-r border-black italic">
-                                            Solde d'Ouverture
-                                        </td>
+                                        <td className="p-2 border-r border-black italic">Solde d'Ouverture</td>
                                         <td className="p-2 border-r border-black italic text-gray-700">
                                             {session
                                                 ? 'Report de la session précédente'
@@ -450,6 +569,7 @@ export default function JournalDuJour({
                                                 ? 'Caisse sans antécédent (0,00)'
                                                 : 'Solde historique reporté'}
                                         </td>
+                                        <td className="p-2 border-r border-black text-center">—</td>
                                         <td className="p-2 text-right border-r border-black font-mono">—</td>
                                         <td className="p-2 text-right border-r border-black font-mono">—</td>
                                         <td className="p-2 text-right font-mono font-bold text-[#04326D]">
@@ -459,7 +579,7 @@ export default function JournalDuJour({
 
                                     {mouvements.length === 0 ? (
                                         <tr>
-                                            <td colSpan={6} className="p-3 text-center text-gray-500 italic">
+                                            <td colSpan={7} className="p-3 text-center text-gray-500 italic">
                                                 {session
                                                     ? 'Aucun mouvement de caisse enregistré pendant cette session.'
                                                     : 'Aucune session ouverte ni opération effectuée pour cette journée.'}
@@ -480,6 +600,9 @@ export default function JournalDuJour({
                                                         [Imp: {m.imputation}]
                                                     </span>
                                                 </td>
+                                                <td className="p-2 border-r border-black text-center text-[10px] uppercase">
+                                                    {m.mode_paiement || '—'}
+                                                </td>
                                                 <td className="p-2 text-right font-mono border-r border-black font-bold text-emerald-800">
                                                     {m.type === 'entree' ? `+${money(m.montant, '')}` : '—'}
                                                 </td>
@@ -495,7 +618,7 @@ export default function JournalDuJour({
                                 </tbody>
                                 <tfoot>
                                     <tr className="border-t-2 border-black font-bold bg-gray-50">
-                                        <td colSpan={3} className="p-2 text-right uppercase border-r border-black">
+                                        <td colSpan={4} className="p-2 text-right uppercase border-r border-black">
                                             Totaux des flux :
                                         </td>
                                         <td className="p-2 text-right font-mono text-emerald-800 border-r border-black">
@@ -510,46 +633,63 @@ export default function JournalDuJour({
                                     </tr>
                                 </tfoot>
                             </table>
-
-                            {mouvements.length === 0 && session && (
-                                <div className="text-center text-[11px] text-gray-500 italic flex items-center justify-center gap-1.5">
-                                    <Info className="w-3.5 h-3.5" />
-                                    <span>Aucun mouvement pour cette session.</span>
-                                    <Link
-                                        href={route('cashier.receipts.index', { caisse_id: caisseId })}
-                                        className="text-[#04326D] underline font-bold no-print-area"
-                                    >
-                                        Enregistrer un BEC →
-                                    </Link>
-                                </div>
-                            )}
-
-                            {Object.keys(detailParMode).length > 0 && (
-                                <div className="text-[10px] text-gray-600 border-t border-dashed pt-2 mt-2">
-                                    <strong>Détail par mode de paiement :</strong>{' '}
-                                    {Object.entries(detailParMode).map(([mode, vals], idx) => (
-                                        <span key={mode}>
-                                            {idx > 0 && ' • '}
-                                            <strong>{mode}</strong>
-                                            {vals.entrees > 0 && ` (+${money(vals.entrees, devise)})`}
-                                            {vals.sorties > 0 && ` (−${money(vals.sorties, devise)})`}
-                                        </span>
-                                    ))}
-                                </div>
-                            )}
                         </div>
 
+                        {/* Détail par mode (enrichi) */}
+                        {Object.keys(detailParMode).length > 0 && (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                {Object.entries(detailParMode).map(([mode, vals]) => {
+                                    const Icon = modeIcon(mode);
+                                    return (
+                                        <div
+                                            key={mode}
+                                            className="border border-gray-300 rounded p-2 bg-gray-50 flex items-center gap-2"
+                                        >
+                                            <Icon className="w-4 h-4 text-[#04326D] shrink-0" />
+                                            <div className="min-w-0 flex-1">
+                                                <p className="font-bold text-[10px] uppercase truncate">{mode}</p>
+                                                <p className="text-[10px] text-gray-600">
+                                                    {vals.count} op.
+                                                    {vals.entrees > 0 && (
+                                                        <span className="text-emerald-700"> • +{money(vals.entrees, '')}</span>
+                                                    )}
+                                                    {vals.sorties > 0 && (
+                                                        <span className="text-red-700"> • −{money(vals.sorties, '')}</span>
+                                                    )}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+
+                        {/* 3. Arrêté */}
                         <div className="border border-black p-4 space-y-3 bg-gray-50/50">
                             <span className="font-bold uppercase tracking-wider block text-[11px] underline">
                                 3. Arrêté de Caisse & Rapprochement
                             </span>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-2 gap-4 text-xs">
                                 <div className="space-y-1">
-                                    <p>Fond d'ouverture : <strong className="font-mono">{money(soldeOuverture, devise)}</strong></p>
-                                    <p>+ Total Entrées : <strong className="font-mono text-emerald-700">+{money(totalEntrees, devise)}</strong></p>
-                                    <p>− Total Sorties : <strong className="font-mono text-red-700">−{money(totalSorties, devise)}</strong></p>
+                                    <p>
+                                        Fond d'ouverture :{' '}
+                                        <strong className="font-mono">{money(soldeOuverture, devise)}</strong>
+                                    </p>
+                                    <p>
+                                        + Total Entrées :{' '}
+                                        <strong className="font-mono text-emerald-700">
+                                            +{money(totalEntrees, devise)}
+                                        </strong>
+                                    </p>
+                                    <p>
+                                        − Total Sorties :{' '}
+                                        <strong className="font-mono text-red-700">
+                                            −{money(totalSorties, devise)}
+                                        </strong>
+                                    </p>
                                     <p className="border-t pt-1 font-bold">
-                                        = Solde Théorique Final : <strong className="font-mono text-base">{money(soldeTheorique, devise)}</strong>
+                                        = Solde Théorique Final :{' '}
+                                        <strong className="font-mono text-base">{money(soldeTheorique, devise)}</strong>
                                     </p>
                                 </div>
                                 <div className="space-y-1 text-right">
@@ -567,15 +707,16 @@ export default function JournalDuJour({
                                         Écart constaté :{' '}
                                         <strong
                                             className={`font-mono text-sm ${
-                                                session?.ecart === 0 || !session?.ecart
-                                                    ? 'text-emerald-800'
-                                                    : 'text-red-700'
+                                                isEcartOk ? 'text-emerald-800' : 'text-red-700'
                                             }`}
                                         >
                                             {session?.ecart !== null && session?.ecart !== undefined
                                                 ? money(session.ecart, devise)
                                                 : '0,00 ' + devise}
                                         </strong>
+                                    </p>
+                                    <p className="text-[10px] text-gray-500 mt-1">
+                                        Taux de rotation : <strong>{tauxRotation.toFixed(1)} %</strong>
                                     </p>
                                 </div>
                             </div>
@@ -587,15 +728,277 @@ export default function JournalDuJour({
                             )}
                         </div>
 
+                        {/* Signatures */}
                         <div className="grid grid-cols-2 gap-8 pt-8 text-center text-xs">
                             <div className="space-y-16 border-t border-black pt-2">
                                 <p className="font-bold uppercase tracking-wider">Le Caissier Titulaire</p>
-                                <p className="font-medium text-gray-700">{session?.cashier_nom ?? (session ? 'Signature' : '—')}</p>
+                                <p className="font-medium text-gray-700">
+                                    {session?.cashier_nom ?? (session ? 'Signature' : '—')}
+                                </p>
                             </div>
                             <div className="space-y-16 border-t border-black pt-2">
                                 <p className="font-bold uppercase tracking-wider">Le Manager Finance</p>
-                                <p className="font-medium text-gray-700">{session?.authorized_by_nom ?? (session ? 'Visa & Signature' : '—')}</p>
+                                <p className="font-medium text-gray-700">
+                                    {session?.authorized_by_nom ?? (session ? 'Visa & Signature' : '—')}
+                                </p>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* ZONE D'IMPRESSION OFFICIELLE (cachée à l'écran) */}
+            <div
+                id="journal-print-document"
+                className="bg-white border border-[#B2BED6] rounded shadow-sm p-8 space-y-6 max-w-4xl mx-auto text-black"
+            >
+                <div className="flex justify-between items-start border-b-2 border-black pb-4">
+                    <div>
+                        <p className="text-xs font-bold uppercase tracking-wider text-gray-800">
+                            Bon Pasteur A.S.B.L. — Kolwezi
+                        </p>
+                        <h2 className="text-lg font-black uppercase tracking-wide text-black mt-0.5">
+                            Journal Quotidien de Caisse
+                        </h2>
+                        <p className="text-xs text-gray-600 mt-1">
+                            Guichet : <strong>{selectedCaisse?.name}</strong> • Devise : <strong>{devise}</strong>
+                        </p>
+                    </div>
+                    <div className="text-right">
+                        <span className="text-xs font-mono font-bold block">
+                            Date : {session?.date_session ?? new Date(selectedDate).toLocaleDateString('fr-FR')}
+                        </span>
+                        <span
+                            className={`text-[11px] font-bold uppercase block mt-0.5 ${
+                                session
+                                    ? session.status === 'fermee'
+                                        ? 'text-gray-700'
+                                        : 'text-emerald-700'
+                                    : 'text-amber-800'
+                            }`}
+                        >
+                            {session
+                                ? session.status === 'fermee'
+                                    ? 'Session Clôturée'
+                                    : 'Session Ouverte'
+                                : 'Non ouverte (Guichet fermé)'}
+                        </span>
+                    </div>
+                </div>
+
+                <div className="space-y-6 text-xs text-black">
+                    <div className="border border-black p-3 space-y-1.5 bg-gray-50/30">
+                        <span className="font-bold uppercase tracking-wider block text-[11px] underline">
+                            1. Ouverture du Guichet
+                        </span>
+                        <div className="grid grid-cols-2 gap-4 pt-1">
+                            <div>
+                                <p>
+                                    Origine du solde :{' '}
+                                    <strong>
+                                        {session?.origine_ouverture === 'report_veille'
+                                            ? 'Report de la session précédente'
+                                            : soldeOuverture > 0
+                                            ? 'Solde historique reporté'
+                                            : 'Solde initial vierge (0,00)'}
+                                    </strong>
+                                </p>
+                                <p>
+                                    Caissier : <strong>{session?.cashier_nom ?? (session ? 'Non assigné' : '—')}</strong>{' '}
+                                    {session?.opened_at && `(à ${session.opened_at})`}
+                                </p>
+                                <p>
+                                    Visa Finance :{' '}
+                                    <strong>{session?.authorized_by_nom ?? (session ? 'En attente' : '—')}</strong>
+                                </p>
+                            </div>
+                            <div className="text-right">
+                                <span className="text-[10px] uppercase text-gray-600 block">
+                                    Solde d'Ouverture Constaté
+                                </span>
+                                <span className="text-lg font-mono font-black text-[#04326D]">
+                                    {money(soldeOuverture, devise)}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <span className="font-bold uppercase tracking-wider block text-[11px] underline">
+                            2. Mouvements de la Journée ({mouvements.length})
+                        </span>
+                        <table className="w-full text-left border-collapse border border-black text-[11px]">
+                            <thead>
+                                <tr className="bg-gray-100 border-b border-black font-bold uppercase text-[10px]">
+                                    <th className="p-2 border-r border-black w-24">N° Pièce</th>
+                                    <th className="p-2 border-r border-black">Bénéficiaire / Déposant</th>
+                                    <th className="p-2 border-r border-black">Motif & Imputation</th>
+                                    <th className="p-2 text-right border-r border-black">Entrée (+)</th>
+                                    <th className="p-2 text-right border-r border-black">Sortie (−)</th>
+                                    <th className="p-2 text-right font-black">Solde ({devise})</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-300">
+                                <tr className="bg-amber-50/40 font-bold">
+                                    <td className="p-2 border-r border-black font-mono text-center text-[10px]">
+                                        REPORT
+                                    </td>
+                                    <td className="p-2 border-r border-black italic">Solde d'Ouverture</td>
+                                    <td className="p-2 border-r border-black italic text-gray-700">
+                                        {session
+                                            ? 'Report de la session précédente'
+                                            : soldeOuverture === 0
+                                            ? 'Caisse sans antécédent (0,00)'
+                                            : 'Solde historique reporté'}
+                                    </td>
+                                    <td className="p-2 text-right border-r border-black font-mono">—</td>
+                                    <td className="p-2 text-right border-r border-black font-mono">—</td>
+                                    <td className="p-2 text-right font-mono font-bold text-[#04326D]">
+                                        {money(soldeOuverture, '')}
+                                    </td>
+                                </tr>
+
+                                {mouvements.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={6} className="p-3 text-center text-gray-500 italic">
+                                            {session
+                                                ? 'Aucun mouvement de caisse enregistré pendant cette session.'
+                                                : 'Aucune session ouverte ni opération effectuée pour cette journée.'}
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    mouvements.map((m) => (
+                                        <tr key={m.id}>
+                                            <td className="p-2 border-r border-black font-mono font-bold whitespace-nowrap">
+                                                {m.numero_piece}
+                                            </td>
+                                            <td className="p-2 border-r border-black font-medium">
+                                                {m.tiers_nom}
+                                            </td>
+                                            <td className="p-2 border-r border-black">
+                                                <span>{m.motif}</span>
+                                                <span className="font-mono text-gray-600 block text-[10px]">
+                                                    [Imp: {m.imputation}]
+                                                </span>
+                                            </td>
+                                            <td className="p-2 text-right font-mono border-r border-black font-bold text-emerald-800">
+                                                {m.type === 'entree' ? `+${money(m.montant, '')}` : '—'}
+                                            </td>
+                                            <td className="p-2 text-right font-mono border-r border-black font-bold text-red-800">
+                                                {m.type === 'sortie' ? `−${money(m.montant, '')}` : '—'}
+                                            </td>
+                                            <td className="p-2 text-right font-mono font-bold bg-gray-50">
+                                                {money(m.solde_progressif, '')}
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                            <tfoot>
+                                <tr className="border-t-2 border-black font-bold bg-gray-50">
+                                    <td colSpan={3} className="p-2 text-right uppercase border-r border-black">
+                                        Totaux des flux :
+                                    </td>
+                                    <td className="p-2 text-right font-mono text-emerald-800 border-r border-black">
+                                        +{money(totalEntrees, devise)}
+                                    </td>
+                                    <td className="p-2 text-right font-mono text-red-800 border-r border-black">
+                                        −{money(totalSorties, devise)}
+                                    </td>
+                                    <td className="p-2 text-right font-mono font-black text-black">
+                                        {money(soldeTheorique, devise)}
+                                    </td>
+                                </tr>
+                            </tfoot>
+                        </table>
+
+                        {Object.keys(detailParMode).length > 0 && (
+                            <div className="text-[10px] text-gray-600 border-t border-dashed pt-2 mt-2">
+                                <strong>Détail par mode de paiement :</strong>{' '}
+                                {Object.entries(detailParMode).map(([mode, vals], idx) => (
+                                    <span key={mode}>
+                                        {idx > 0 && ' • '}
+                                        <strong>{mode}</strong>
+                                        {vals.entrees > 0 && ` (+${money(vals.entrees, devise)})`}
+                                        {vals.sorties > 0 && ` (−${money(vals.sorties, devise)})`}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="border border-black p-4 space-y-3 bg-gray-50/50">
+                        <span className="font-bold uppercase tracking-wider block text-[11px] underline">
+                            3. Arrêté de Caisse & Rapprochement
+                        </span>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1">
+                                <p>
+                                    Fond d'ouverture :{' '}
+                                    <strong className="font-mono">{money(soldeOuverture, devise)}</strong>
+                                </p>
+                                <p>
+                                    + Total Entrées :{' '}
+                                    <strong className="font-mono text-emerald-700">
+                                        +{money(totalEntrees, devise)}
+                                    </strong>
+                                </p>
+                                <p>
+                                    − Total Sorties :{' '}
+                                    <strong className="font-mono text-red-700">
+                                        −{money(totalSorties, devise)}
+                                    </strong>
+                                </p>
+                                <p className="border-t pt-1 font-bold">
+                                    = Solde Théorique Final :{' '}
+                                    <strong className="font-mono text-base">{money(soldeTheorique, devise)}</strong>
+                                </p>
+                            </div>
+                            <div className="space-y-1 text-right">
+                                <p>
+                                    Comptage physique réel :{' '}
+                                    <strong className="font-mono text-sm">
+                                        {session?.solde_physique !== null && session?.solde_physique !== undefined
+                                            ? money(session.solde_physique, devise)
+                                            : session
+                                            ? 'Session en cours'
+                                            : 'Guichet non ouvert'}
+                                    </strong>
+                                </p>
+                                <p className="border-t pt-1 font-bold">
+                                    Écart constaté :{' '}
+                                    <strong
+                                        className={`font-mono text-sm ${
+                                            isEcartOk ? 'text-emerald-800' : 'text-red-700'
+                                        }`}
+                                    >
+                                        {session?.ecart !== null && session?.ecart !== undefined
+                                            ? money(session.ecart, devise)
+                                            : '0,00 ' + devise}
+                                    </strong>
+                                </p>
+                            </div>
+                        </div>
+                        {session?.justification_ecart && (
+                            <div className="border-t border-dashed border-gray-400 pt-2 text-[11px]">
+                                <strong className="text-red-800">Justification de l'écart :</strong>
+                                <p className="italic text-gray-700 mt-0.5">{session.justification_ecart}</p>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-8 pt-8 text-center text-xs">
+                        <div className="space-y-16 border-t border-black pt-2">
+                            <p className="font-bold uppercase tracking-wider">Le Caissier Titulaire</p>
+                            <p className="font-medium text-gray-700">
+                                {session?.cashier_nom ?? (session ? 'Signature' : '—')}
+                            </p>
+                        </div>
+                        <div className="space-y-16 border-t border-black pt-2">
+                            <p className="font-bold uppercase tracking-wider">Le Manager Finance</p>
+                            <p className="font-medium text-gray-700">
+                                {session?.authorized_by_nom ?? (session ? 'Visa & Signature' : '—')}
+                            </p>
                         </div>
                     </div>
                 </div>

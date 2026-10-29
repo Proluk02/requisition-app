@@ -7,10 +7,10 @@ import { createRoot, hydrateRoot } from 'react-dom/client';
 import { ThemeProvider } from '@/Contexts/ThemeContext';
 import { LanguageProvider } from '@/Contexts/LanguageContext';
 
-const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
+const appName = import.meta.env.VITE_APP_NAME || 'RMS BPKLZ';
 
 createInertiaApp({
-    title: (title) => `${title} - ${appName}`,
+    title: (title) => (title ? `${title} - ${appName}` : appName),
     resolve: (name) =>
         resolvePageComponent(
             `./Pages/${name}.tsx`,
@@ -33,6 +33,6 @@ createInertiaApp({
         createRoot(el).render(app);
     },
     progress: {
-        color: '#4B5563',
+        color: '#396cb3',
     },
 });

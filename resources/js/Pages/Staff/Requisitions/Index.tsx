@@ -182,9 +182,9 @@ export default function RequisitionsIndex({
             );
         }
 
-        if (statusCode === 'returned_to_finance') {
+        if (statusCode === 'returned_to_finance' || statusCode === 'returned_to_admin_manager') {
             return (
-                <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300">
+                <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
                     En révision (Chef de Projet)
                 </span>
             );
@@ -197,7 +197,7 @@ export default function RequisitionsIndex({
                 </span>
             );
         }
-        
+
         const badges: Record<string, string> = {
             brouillon: 'bg-gray-100 text-gray-700 border-gray-200',
             visa_mp: 'bg-amber-50 text-[#F58F20] border-amber-200',
@@ -210,11 +210,11 @@ export default function RequisitionsIndex({
         };
         const labels: Record<string, string> = {
             brouillon: 'En attente Chef Projet',
-            visa_mp: 'En examen PAM',
-            visa_pam: 'En contrôle Finances',
-            controle_finance: 'Contrôle Finances validé',
+            visa_mp: 'En attente du PAM',
+            visa_pam: 'En attente des Finances',
+            controle_finance: 'En attente des Finances',
             visa_admin: 'En attente Direction',
-            approbation_direction: 'Approbation Direction',
+            approbation_direction: 'En attente Direction',
             decaissement_caisse: 'Prêt pour Caisse',
             cloture: 'Clôturé',
         };
@@ -299,11 +299,10 @@ export default function RequisitionsIndex({
                         >
                             <option value="all">Toutes les étapes</option>
                             <option value="brouillon">En attente / À corriger</option>
-                            <option value="visa_mp">Visa Manager Projet</option>
-                            <option value="visa_pam">Examen PAM</option>
-                            <option value="controle_finance">Contrôle Finances</option>
-                            <option value="visa_admin">Visa Administration</option>
-                            <option value="approbation_direction">Approbation Direction</option>
+                            <option value="visa_mp">En attente Chef Projet</option>
+                            <option value="visa_pam">En attente du PAM</option>
+                            <option value="controle_finance">En attente des Finances</option>
+                            <option value="approbation_direction">En attente Direction</option>
                             <option value="decaissement_caisse">Caisse (Prêt)</option>
                             <option value="cloture">Clôturé</option>
                         </select>
@@ -474,7 +473,6 @@ export default function RequisitionsIndex({
                 </div>
             </div>
 
-            {/* MODALE VIEW */}
             {viewReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 no-print-zone animate-fade-in" onClick={() => setViewReq(null)}>
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-3xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto animate-slide-down" onClick={e => e.stopPropagation()}>
@@ -510,7 +508,6 @@ export default function RequisitionsIndex({
                             </div>
                         </div>
 
-                        {/* Motif de rejet explicite selon le destinataire */}
                         {(viewReq.statusCode === 'returned_to_beneficiary' || viewReq.statusCode === 'returned_to_urgent_initiator') && (
                             <div className="bg-red-50 border border-red-200 p-3.5 rounded flex gap-3 items-start shadow-sm">
                                 <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
@@ -670,7 +667,6 @@ export default function RequisitionsIndex({
                 </div>
             )}
 
-            {/* MODALE EDIT */}
             {editReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 no-print-zone animate-fade-in">
                     <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-4xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto animate-slide-down">
@@ -878,7 +874,6 @@ export default function RequisitionsIndex({
                 </div>
             )}
 
-            {/* ZONE D'IMPRESSION CACHÉE */}
             {printReq && (
                 <div id="bon-pasteur-print-zone">
                     <OfficialPrintSheet requisition={printReq as any} />

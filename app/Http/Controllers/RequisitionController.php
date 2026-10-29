@@ -1418,13 +1418,10 @@ class RequisitionController extends Controller
             'returned_to_beneficiary', 'returned_to_urgent_initiator' => 'brouillon',
             'returned_to_project_manager', 'returned_to_finance', 'returned_to_admin_manager' => 'visa_mp',
             'visa_mp' => 'visa_pam',
-            'visa_pam' => 'controle_finance',
-            'controle_finance' => 'visa_admin',
-            'visa_admin' => 'approbation_direction',
-            'approbation_direction' => 'approbation_direction',
+            'visa_pam', 'controle_finance' => 'controle_finance',
+            'visa_admin', 'approbation_direction' => 'approbation_direction',
             'decaissement_caisse' => 'decaissement_caisse',
-            'decaisse' => 'cloture',
-            'cloture' => 'cloture',
+            'decaisse', 'cloture' => 'cloture',
             default => 'brouillon',
         };
     }

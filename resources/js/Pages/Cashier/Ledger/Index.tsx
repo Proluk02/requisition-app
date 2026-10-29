@@ -8,11 +8,19 @@ import {
     Building2,
     Calendar,
     Printer,
-    Download,
     RotateCcw,
     Info,
     FileSpreadsheet,
     Search,
+    TrendingUp,
+    TrendingDown,
+    Wallet,
+    CheckCircle2,
+    Eye,
+    Layers,
+    BarChart3,
+    ArrowUpRight,
+    ArrowDownRight,
 } from 'lucide-react';
 
 interface CaisseOption {
@@ -108,24 +116,40 @@ export default function LedgerIndex({
         );
     };
 
+    const nbEntrees = useMemo(() => filteredMouvements.filter((m) => m.entree > 0).length, [filteredMouvements]);
+    const nbSorties = useMemo(() => filteredMouvements.filter((m) => m.sortie > 0).length, [filteredMouvements]);
+    const projetsUniques = useMemo(
+        () => Array.from(new Set(filteredMouvements.map((m) => m.projet).filter(Boolean))).length,
+        [filteredMouvements]
+    );
+    const fluxNet = totalEntreesMois - totalSortiesMois;
+
     return (
         <AppLayout>
             <Head title={`Grand Livre ${selectedCaisse?.name ?? 'Caisse'} - ${period}`} />
 
             <style>{`
+                @media screen {
+                    #grand-livre-print-document { display: none !important; }
+                }
                 @media print {
                     nav, aside, header, .no-print-area, button, select, input {
                         display: none !important;
                     }
+                    body * { visibility: hidden !important; }
+                    #grand-livre-print-document,
+                    #grand-livre-print-document * { visibility: visible !important; }
                     #grand-livre-print-document {
                         display: block !important;
-                        position: absolute;
-                        left: 0;
-                        top: 0;
+                        position: absolute !important;
+                        left: 0 !important;
+                        top: 0 !important;
                         width: 100% !important;
                         background: white !important;
                         color: black !important;
                         padding: 10px !important;
+                        margin: 0 !important;
+                        z-index: 2147483647 !important;
                     }
                 }
             `}</style>
@@ -134,8 +158,8 @@ export default function LedgerIndex({
                 <div className="fixed top-0 left-0 right-0 h-0.5 bg-[#04326D] z-[100] animate-pulse" />
             )}
 
-            <div className="space-y-6">
-                <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0] no-print-area">
+            <div className="space-y-6 no-print-area">
+                <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
                     <div>
                         <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1.5 flex items-center gap-1.5">
                             <BookOpen className="w-3.5 h-3.5 text-purple-600" />
@@ -143,8 +167,11 @@ export default function LedgerIndex({
                             <span className="mx-1">/</span>
                             <span className="text-[#04326D]">Grand Livre</span>
                         </nav>
-                        <h1 className="text-xl font-bold text-[#0B192C]">
+                        <h1 className="text-xl font-bold text-[#0B192C] flex items-center gap-2">
                             Grand Livre de Caisse Mensuel
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border bg-purple-50 text-purple-700 border-purple-300">
+                                {period.replace('-', '/')}
+                            </span>
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
                             Journal chronologique officiel avec report historique vérifié et solde progressif.
@@ -220,7 +247,7 @@ export default function LedgerIndex({
                 </header>
 
                 {isFutureMonth && (
-                    <div className="p-3.5 rounded bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center gap-2 no-print-area">
+                    <div className="p-3.5 rounded bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center gap-2">
                         <Info className="w-4 h-4 text-amber-700 shrink-0" />
                         <span>
                             Vous consultez une période <strong>future</strong> ({period}). Aucun mouvement ne peut y être enregistré.
@@ -229,11 +256,12 @@ export default function LedgerIndex({
                 )}
 
                 {hasZeroActivity && !isFutureMonth && (
-                    <div className="p-3.5 rounded bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-center justify-between no-print-area">
+                    <div className="p-3.5 rounded bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-center justify-between">
                         <div className="flex items-center gap-2">
                             <Info className="w-4 h-4 text-blue-700 shrink-0" />
                             <span>
-                                Aucun mouvement ni session de caisse n'a été enregistré pour la période <strong>{period}</strong>. Le solde initial et final est de 0,00 {devise}.
+                                Aucun mouvement ni session de caisse n'a été enregistré pour la période{' '}
+                                <strong>{period}</strong>. Le solde initial et final est de 0,00 {devise}.
                             </span>
                         </div>
                         {!isCurrentMonth && (
@@ -251,63 +279,118 @@ export default function LedgerIndex({
                     </div>
                 )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 no-print-area">
-                    <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                            Solde Initial au 1er du mois
-                        </span>
-                        <p className="text-lg font-black text-gray-800 font-mono mt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="relative bg-white rounded-lg border border-[#B2BED6] shadow-sm p-4 overflow-hidden">
+                        <div className="absolute right-0 top-0 h-full w-1 bg-gradient-to-b from-gray-400 to-gray-600" />
+                        <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                                Solde Initial
+                            </span>
+                            <Wallet className="w-4 h-4 text-gray-500" />
+                        </div>
+                        <p className="text-lg font-black text-gray-800 font-mono mt-1.5">
                             {money(soldeInitialMois, devise)}
                         </p>
+                        <p className="text-[10px] text-gray-500 mt-0.5">
+                            Au 1er {period.split('-')[1]}/{period.split('-')[0]}
+                        </p>
                     </div>
-                    <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#04326D]">
-                            Total Entrées du Mois (BEC)
-                        </span>
-                        <p className="text-lg font-black text-[#04326D] font-mono mt-1">
+
+                    <div className="relative bg-white rounded-lg border border-emerald-200 shadow-sm p-4 overflow-hidden">
+                        <div className="absolute right-0 top-0 h-full w-1 bg-gradient-to-b from-emerald-500 to-emerald-700" />
+                        <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                                Total Entrées (BEC)
+                            </span>
+                            <TrendingUp className="w-4 h-4 text-emerald-600" />
+                        </div>
+                        <p className="text-lg font-black text-emerald-700 font-mono mt-1.5">
                             + {money(totalEntreesMois, devise)}
                         </p>
-                    </div>
-                    <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-red-700">
-                            Total Sorties du Mois (BSC)
-                        </span>
-                        <p className="text-lg font-black text-red-700 font-mono mt-1">
-                            - {money(totalSortiesMois, devise)}
+                        <p className="text-[10px] text-gray-500 mt-0.5">
+                            {nbEntrees} opération(s) entrante(s)
                         </p>
                     </div>
-                    <div className="bg-[#0B192C] p-4 rounded text-white shadow-sm">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#B2BED6]">
-                            Solde de Clôture
-                        </span>
-                        <p className="text-lg font-black text-emerald-400 font-mono mt-1">
+
+                    <div className="relative bg-white rounded-lg border border-red-200 shadow-sm p-4 overflow-hidden">
+                        <div className="absolute right-0 top-0 h-full w-1 bg-gradient-to-b from-red-500 to-red-700" />
+                        <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-red-700">
+                                Total Sorties (BSC)
+                            </span>
+                            <TrendingDown className="w-4 h-4 text-red-600" />
+                        </div>
+                        <p className="text-lg font-black text-red-700 font-mono mt-1.5">
+                            − {money(totalSortiesMois, devise)}
+                        </p>
+                        <p className="text-[10px] text-gray-500 mt-0.5">
+                            {nbSorties} opération(s) sortante(s)
+                        </p>
+                    </div>
+
+                    <div className="relative bg-[#0B192C] rounded-lg shadow-sm p-4 overflow-hidden text-white">
+                        <div className="absolute right-0 top-0 h-full w-1 bg-gradient-to-b from-emerald-400 to-emerald-600" />
+                        <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-[#B2BED6]">
+                                Solde de Clôture
+                            </span>
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        </div>
+                        <p className="text-lg font-black text-emerald-400 font-mono mt-1.5">
                             {money(soldeFinMois, devise)}
                         </p>
+                        <p className="text-[10px] text-[#B2BED6] mt-0.5 flex items-center gap-1">
+                            {fluxNet >= 0 ? (
+                                <>
+                                    <ArrowUpRight className="w-3 h-3 text-emerald-400" />
+                                    Flux net : +{money(fluxNet, devise)}
+                                </>
+                            ) : (
+                                <>
+                                    <ArrowDownRight className="w-3 h-3 text-red-400" />
+                                    Flux net : {money(fluxNet, devise)}
+                                </>
+                            )}
+                        </p>
                     </div>
                 </div>
 
-                <div className="relative no-print-area">
-                    <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                        type="text"
-                        placeholder="Filtrer les écritures (projet, imputation, désignation, N° pièce)..."
-                        value={searchProjet}
-                        onChange={(e) => setSearchProjet(e.target.value)}
-                        className="w-full sm:w-96 pl-8 pr-3 py-1.5 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D]"
-                    />
-                    {searchProjet && (
-                        <span className="ml-2 text-[11px] text-gray-500">
-                            {filteredMouvements.length} résultat(s) sur {mouvements.length}
-                        </span>
-                    )}
-                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                            type="text"
+                            placeholder="Filtrer les écritures (projet, imputation, désignation, N° pièce)..."
+                            value={searchProjet}
+                            onChange={(e) => setSearchProjet(e.target.value)}
+                            className="w-full sm:w-96 pl-8 pr-3 py-1.5 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D]"
+                        />
+                        {searchProjet && (
+                            <span className="ml-2 text-[11px] text-gray-500">
+                                {filteredMouvements.length} / {mouvements.length}
+                            </span>
+                        )}
+                    </div>
 
-                <div
-                    id="grand-livre-print-document"
-                    className={`bg-white border border-gray-400 p-6 space-y-4 max-w-full overflow-x-auto text-black transition-opacity ${
-                        isLoading ? 'opacity-50 pointer-events-none' : ''
-                    }`}
-                >
+                    <div className="flex items-center gap-2 text-[11px]">
+                        <span className="inline-flex items-center gap-1 bg-white border border-[#B2BED6] rounded px-2 py-1">
+                            <Layers className="w-3 h-3 text-purple-600" />
+                            <strong>{projetsUniques}</strong> projet(s)
+                        </span>
+                        <span className="inline-flex items-center gap-1 bg-white border border-[#B2BED6] rounded px-2 py-1">
+                            <BarChart3 className="w-3 h-3 text-[#04326D]" />
+                            <strong>{filteredMouvements.length}</strong> écriture(s)
+                        </span>
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[#04326D] bg-blue-50 border border-blue-200 px-2 py-1 rounded">
+                            <Eye className="w-3 h-3" />
+                            Aperçu avant impression
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div className="bg-gray-100 rounded-lg p-3 sm:p-6 shadow-inner border border-gray-300 no-print-area">
+                <div className="bg-white shadow-2xl mx-auto border border-gray-300 p-6 space-y-4 text-black overflow-x-auto">
                     <div className="flex items-start justify-between border-b pb-3">
                         <div className="text-[11px] leading-tight space-y-0.5">
                             <p className="font-bold uppercase text-xs">Bon Pasteur A.S.B.L.</p>
@@ -335,15 +418,25 @@ export default function LedgerIndex({
                                 <th className="p-1.5 border border-black">N°BON</th>
                                 <th className="p-1.5 border border-black">PIÈCE / REF</th>
                                 <th className="p-1.5 border border-black">IMPUTATION</th>
-                                <th className="p-1.5 border border-black text-left min-w-[220px]">DÉSIGNATION / MOTIF</th>
-                                <th className="p-1.5 border border-black text-right bg-blue-50/50">ENTRÉE ({devise})</th>
-                                <th className="p-1.5 border border-black text-right bg-red-50/50">SORTIE ({devise})</th>
-                                <th className="p-1.5 border border-black text-right bg-gray-100 font-black">SOLDE ({devise})</th>
+                                <th className="p-1.5 border border-black text-left min-w-[220px]">
+                                    DÉSIGNATION / MOTIF
+                                </th>
+                                <th className="p-1.5 border border-black text-right bg-blue-50/50">
+                                    ENTRÉE ({devise})
+                                </th>
+                                <th className="p-1.5 border border-black text-right bg-red-50/50">
+                                    SORTIE ({devise})
+                                </th>
+                                <th className="p-1.5 border border-black text-right bg-gray-100 font-black">
+                                    SOLDE ({devise})
+                                </th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-300">
                             <tr className="font-bold bg-amber-50/30">
-                                <td className="p-1.5 border border-black text-center font-mono">01/{period.split('-')[1]}/{period.split('-')[0]}</td>
+                                <td className="p-1.5 border border-black text-center font-mono">
+                                    01/{period.split('-')[1]}/{period.split('-')[0]}
+                                </td>
                                 <td className="p-1.5 border border-black text-center">1</td>
                                 <td className="p-1.5 border border-black"></td>
                                 <td className="p-1.5 border border-black"></td>
@@ -372,25 +465,41 @@ export default function LedgerIndex({
                                     <tr
                                         key={m.id}
                                         className={`hover:bg-gray-50 ${
-                                            m.entree > 0 ? 'border-l-2 border-l-emerald-500' : 'border-l-2 border-l-red-500'
+                                            m.entree > 0
+                                                ? 'border-l-2 border-l-emerald-500'
+                                                : 'border-l-2 border-l-red-500'
                                         }`}
                                     >
-                                        <td className="p-1.5 border border-black text-center whitespace-nowrap">{m.date_mouvement}</td>
+                                        <td className="p-1.5 border border-black text-center whitespace-nowrap">
+                                            {m.date_mouvement}
+                                        </td>
                                         <td className="p-1.5 border border-black text-center">{idx + 2}</td>
                                         <td className="p-1.5 border border-black">{m.projet}</td>
-                                        <td className="p-1.5 border border-black font-mono font-bold text-center">{m.numero_piece}</td>
-                                        <td className="p-1.5 border border-black font-mono text-center">{m.reference_externe || ''}</td>
+                                        <td className="p-1.5 border border-black font-mono font-bold text-center">
+                                            {m.numero_piece}
+                                        </td>
+                                        <td className="p-1.5 border border-black font-mono text-center">
+                                            {m.reference_externe || ''}
+                                        </td>
                                         <td className="p-1.5 border border-black italic">{m.imputation}</td>
                                         <td className="p-1.5 border border-black">{m.designation}</td>
-                                        <td className="p-1.5 border border-black text-right font-mono">{fmt(m.entree)}</td>
-                                        <td className="p-1.5 border border-black text-right font-mono">{fmt(m.sortie)}</td>
-                                        <td className="p-1.5 border border-black text-right font-mono font-bold bg-gray-50/70">{fmt(m.solde_progressif, true)}</td>
+                                        <td className="p-1.5 border border-black text-right font-mono text-emerald-700">
+                                            {fmt(m.entree)}
+                                        </td>
+                                        <td className="p-1.5 border border-black text-right font-mono text-red-700">
+                                            {fmt(m.sortie)}
+                                        </td>
+                                        <td className="p-1.5 border border-black text-right font-mono font-bold bg-gray-50/70">
+                                            {fmt(m.solde_progressif, true)}
+                                        </td>
                                     </tr>
                                 ))
                             )}
 
                             <tr className="font-bold bg-gray-100">
-                                <td className="p-1.5 border border-black text-center font-mono">Fin/{period.split('-')[1]}</td>
+                                <td className="p-1.5 border border-black text-center font-mono">
+                                    Fin/{period.split('-')[1]}
+                                </td>
                                 <td className="p-1.5 border border-black" colSpan={5}></td>
                                 <td className="p-1.5 border border-black uppercase font-bold text-black">
                                     Solde de cloture
@@ -405,8 +514,12 @@ export default function LedgerIndex({
                                 <td className="p-1.5 border border-black text-right" colSpan={7}>
                                     TOTAL
                                 </td>
-                                <td className="p-1.5 border border-black text-right font-mono">{fmt(totalEntreesMois, true)}</td>
-                                <td className="p-1.5 border border-black text-right font-mono">{fmt(totalSortiesMois, true)}</td>
+                                <td className="p-1.5 border border-black text-right font-mono">
+                                    {fmt(totalEntreesMois, true)}
+                                </td>
+                                <td className="p-1.5 border border-black text-right font-mono">
+                                    {fmt(totalSortiesMois, true)}
+                                </td>
                                 <td className="p-1.5 border border-black"></td>
                             </tr>
                         </tbody>
@@ -425,6 +538,158 @@ export default function LedgerIndex({
                             <p className="uppercase">Approved by</p>
                             <p className="border-t border-black pt-1 font-normal text-gray-700">Direction Générale</p>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <div
+                id="grand-livre-print-document"
+                className="bg-white border border-gray-400 p-6 space-y-4 max-w-full overflow-x-auto text-black"
+            >
+                <div className="flex items-start justify-between border-b pb-3">
+                    <div className="text-[11px] leading-tight space-y-0.5">
+                        <p className="font-bold uppercase text-xs">Bon Pasteur A.S.B.L.</p>
+                        <p>N° 04, Avenue Bon Pasteur contre Sendwe,</p>
+                        <p>Quartier Kanina, Commune Dilala,</p>
+                        <p>Ville de Kolwezi, Province du Lualaba/RDC</p>
+                        <p className="italic text-[10px]">Référence : Concession Domaine Mariale</p>
+                    </div>
+                    <div className="text-right">
+                        <span className="text-[10px] font-bold tracking-widest uppercase block text-gray-500">
+                            SYSTÈME CENTRALISÉ DES COÛTS
+                        </span>
+                        <h2 className="text-sm font-black uppercase text-black mt-1">
+                            GRAND LIVRE CAISSE {selectedCaisse?.name ?? ''} — {period.replace('-', '/')} ({devise})
+                        </h2>
+                    </div>
+                </div>
+
+                <table className="w-full text-left border-collapse border border-black text-[10px]">
+                    <thead>
+                        <tr className="bg-gray-100 border-b border-black font-bold uppercase text-center">
+                            <th className="p-1.5 border border-black">DATE</th>
+                            <th className="p-1.5 border border-black w-8">N°</th>
+                            <th className="p-1.5 border border-black">PROJET</th>
+                            <th className="p-1.5 border border-black">N°BON</th>
+                            <th className="p-1.5 border border-black">PIÈCE / REF</th>
+                            <th className="p-1.5 border border-black">IMPUTATION</th>
+                            <th className="p-1.5 border border-black text-left min-w-[220px]">
+                                DÉSIGNATION / MOTIF
+                            </th>
+                            <th className="p-1.5 border border-black text-right bg-blue-50/50">
+                                ENTRÉE ({devise})
+                            </th>
+                            <th className="p-1.5 border border-black text-right bg-red-50/50">
+                                SORTIE ({devise})
+                            </th>
+                            <th className="p-1.5 border border-black text-right bg-gray-100 font-black">
+                                SOLDE ({devise})
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-300">
+                        <tr className="font-bold bg-amber-50/30">
+                            <td className="p-1.5 border border-black text-center font-mono">
+                                01/{period.split('-')[1]}/{period.split('-')[0]}
+                            </td>
+                            <td className="p-1.5 border border-black text-center">1</td>
+                            <td className="p-1.5 border border-black"></td>
+                            <td className="p-1.5 border border-black"></td>
+                            <td className="p-1.5 border border-black"></td>
+                            <td className="p-1.5 border border-black"></td>
+                            <td className="p-1.5 border border-black text-red-700 font-bold italic tracking-wide">
+                                SOLDE D'OUVERTURE
+                            </td>
+                            <td className="p-1.5 border border-black text-right"></td>
+                            <td className="p-1.5 border border-black text-right"></td>
+                            <td className="p-1.5 border border-black text-right font-mono font-bold text-red-700">
+                                {fmt(soldeInitialMois, true)}
+                            </td>
+                        </tr>
+
+                        {filteredMouvements.length === 0 ? (
+                            <tr>
+                                <td colSpan={10} className="p-4 text-center text-gray-500 italic bg-gray-50/40">
+                                    {searchProjet
+                                        ? `Aucune écriture ne correspond à « ${searchProjet} ».`
+                                        : 'Aucune écriture comptable enregistrée au cours de cette période.'}
+                                </td>
+                            </tr>
+                        ) : (
+                            filteredMouvements.map((m, idx) => (
+                                <tr
+                                    key={m.id}
+                                    className={`hover:bg-gray-50 ${
+                                        m.entree > 0 ? 'border-l-2 border-l-emerald-500' : 'border-l-2 border-l-red-500'
+                                    }`}
+                                >
+                                    <td className="p-1.5 border border-black text-center whitespace-nowrap">
+                                        {m.date_mouvement}
+                                    </td>
+                                    <td className="p-1.5 border border-black text-center">{idx + 2}</td>
+                                    <td className="p-1.5 border border-black">{m.projet}</td>
+                                    <td className="p-1.5 border border-black font-mono font-bold text-center">
+                                        {m.numero_piece}
+                                    </td>
+                                    <td className="p-1.5 border border-black font-mono text-center">
+                                        {m.reference_externe || ''}
+                                    </td>
+                                    <td className="p-1.5 border border-black italic">{m.imputation}</td>
+                                    <td className="p-1.5 border border-black">{m.designation}</td>
+                                    <td className="p-1.5 border border-black text-right font-mono">
+                                        {fmt(m.entree)}
+                                    </td>
+                                    <td className="p-1.5 border border-black text-right font-mono">
+                                        {fmt(m.sortie)}
+                                    </td>
+                                    <td className="p-1.5 border border-black text-right font-mono font-bold bg-gray-50/70">
+                                        {fmt(m.solde_progressif, true)}
+                                    </td>
+                                </tr>
+                            ))
+                        )}
+
+                        <tr className="font-bold bg-gray-100">
+                            <td className="p-1.5 border border-black text-center font-mono">
+                                Fin/{period.split('-')[1]}
+                            </td>
+                            <td className="p-1.5 border border-black" colSpan={5}></td>
+                            <td className="p-1.5 border border-black uppercase font-bold text-black">
+                                Solde de cloture
+                            </td>
+                            <td className="p-1.5 border border-black" colSpan={2}></td>
+                            <td className="p-1.5 border border-black text-right font-mono font-bold text-black">
+                                {fmt(soldeFinMois, true)}
+                            </td>
+                        </tr>
+
+                        <tr className="font-black bg-gray-200 uppercase">
+                            <td className="p-1.5 border border-black text-right" colSpan={7}>
+                                TOTAL
+                            </td>
+                            <td className="p-1.5 border border-black text-right font-mono">
+                                {fmt(totalEntreesMois, true)}
+                            </td>
+                            <td className="p-1.5 border border-black text-right font-mono">
+                                {fmt(totalSortiesMois, true)}
+                            </td>
+                            <td className="p-1.5 border border-black"></td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div className="grid grid-cols-3 gap-8 pt-8 text-center text-[11px] font-bold">
+                    <div className="space-y-12">
+                        <p className="uppercase">Prepared by</p>
+                        <p className="border-t border-black pt-1 font-normal text-gray-700">Le Caissier</p>
+                    </div>
+                    <div className="space-y-12">
+                        <p className="uppercase">Verified by</p>
+                        <p className="border-t border-black pt-1 font-normal text-gray-700">Manager Finance</p>
+                    </div>
+                    <div className="space-y-12">
+                        <p className="uppercase">Approved by</p>
+                        <p className="border-t border-black pt-1 font-normal text-gray-700">Direction Générale</p>
                     </div>
                 </div>
             </div>
