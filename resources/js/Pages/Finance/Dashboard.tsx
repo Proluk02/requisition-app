@@ -83,6 +83,7 @@ interface FinanceRequisition {
     observation: string | null;
     derniere_observation?: string | null;
     is_urgent?: boolean;
+    is_delayed?: boolean; // NOUVEAU: Pour la gestion des 48h
     statusCode: string;
     statusLabel: string;
     canDecide: boolean;
@@ -156,7 +157,7 @@ interface Props extends PageProps {
 const money = (amount: number, currency: string) =>
     `${amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${currency}`;
 
-// Composant réutilisable pour rechercher un code budgétaire (utilisé pour lignes simples ET ventilations)
+// Composant réutilisable pour rechercher un code budgétaire
 function BudgetLineSearchPicker({
     currentCode,
     projectId,
@@ -467,23 +468,19 @@ export default function FinanceDashboard({
         setRejectionReason('');
         setObservationFinance('');
         
-        // Restriction stricte de la devise pour l'affectation de la caisse
         const matchedCaisses = cashRegisters.filter(c => c.devise === item.devise);
         const initialCaisse = matchedCaisses.some(c => c.name === item.caisseAttribuee)
             ? item.caisseAttribuee
             : matchedCaisses[0]?.name || '';
         setFinanceCaisse(initialCaisse || '');
 
-        // Copie de travail (édition de l'activité, codes, et des ventilations)
         setEditedArticles(item.lignes.map(l => ({
             ...l,
             splits: l.splits ? l.splits.map(s => ({ ...s })) : []
         })));
     };
 
-    // --- LOGIQUE D'ÉDITION POUR LE FINANCIER ---
     const updateArticleField = (index: number, field: keyof FinanceLine, value: any) => {
-        // Restriction formelle : Le Financier ne modifie ni Qté, ni P.U., ni Total.
         if (field === 'quantiteOuDuree' || field === 'prixUnitaire' || field === 'total') return;
 
         setEditedArticles((prev) => {
@@ -529,12 +526,10 @@ export default function FinanceDashboard({
         });
     };
 
-    // DÉTECTION STRICTE DES DÉPASSEMENTS BUDGÉTAIRES (Lignes et Splits)
     const hasDepassement = useMemo(() => {
         if (!selected) return false;
         return editedArticles.some((ligne) => {
             if (ligne.splits && ligne.splits.length > 0) {
-                // Vérifier si un des splits dépasse son propre solde disponible
                 return ligne.splits.some(split => {
                     const bLine = getBudgetLineObject(split.code_allocation, selected.project_id);
                     if (!bLine) return false;
@@ -556,7 +551,6 @@ export default function FinanceDashboard({
             return;
         }
 
-        // Vérification rigoureuse des splits et des codes budgétaires
         for (let i = 0; i < editedArticles.length; i++) {
             const art = editedArticles[i];
             if (art.splits && art.splits.length > 0) {
@@ -595,7 +589,7 @@ export default function FinanceDashboard({
 
         const articlesPayload = editedArticles.map((art) => ({
             id: art.id,
-            activite: art.activite, // Le financier a le droit de reformuler l'activité
+            activite: art.activite,
             quantiteOuDuree: art.quantiteOuDuree,
             prixUnitaire: art.prixUnitaire,
             code_allocation: art.codeAllocation || art.codeBudget || '',
@@ -1134,9 +1128,18 @@ export default function FinanceDashboard({
                                     </tr>
                                 ) : (
                                     filteredRequisitions.map((item) => (
-                                        <tr key={item.id} className="hover:bg-[#F9F9FF] transition">
-                                            <td className="px-4 py-3.5 font-mono font-bold text-[#04326D] whitespace-nowrap">
-                                                {item.numero}
+                                        <tr key={item.id} className={`transition ${item.is_delayed ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-[#F9F9FF]'}`}>
+                                            <td className="px-4 py-3.5 whitespace-nowrap">
+                                                <div className="flex items-center gap-1.5">
+                                                    {item.is_delayed && (
+                                                        <span title="Délai de traitement dépassé (> 48h)">
+                                                            <AlertTriangle className="w-4 h-4 text-red-600 animate-pulse" aria-hidden="true" />
+                                                        </span>
+                                                    )}
+                                                    <span className={`font-mono font-bold ${item.is_delayed ? 'text-red-700' : 'text-[#04326D]'}`}>
+                                                        {item.numero}
+                                                    </span>
+                                                </div>
                                             </td>
                                             <td className="px-4 py-3.5 whitespace-nowrap">
                                                 <p className="font-bold text-gray-800">{item.initiateurNom}</p>

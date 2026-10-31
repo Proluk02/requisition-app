@@ -25,7 +25,8 @@ import {
     Wallet,
     FolderKanban,
     Building2,
-    TrendingUp
+    TrendingUp,
+    AlertTriangle
 } from 'lucide-react';
 
 interface Justificatif {
@@ -63,6 +64,7 @@ interface RequisitionAdmin {
     observation: string | null;
     derniere_observation?: string | null;
     is_urgent?: boolean;
+    is_delayed?: boolean; // NOUVEAU: Pour la gestion des 48h
     statusCode: string;
     statusLabel: string;
     canDecide: boolean;
@@ -626,9 +628,16 @@ export default function AdminManagerDashboard({
                                     </tr>
                                 ) : (
                                     filteredRequisitions.map((item) => (
-                                        <tr key={item.id} className="hover:bg-[#F9F9FF] transition">
-                                            <td className="px-4 py-3.5 font-mono font-bold text-[#04326D] whitespace-nowrap">
-                                                {item.numero}
+                                        <tr key={item.id} className={`transition ${item.is_delayed ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-[#F9F9FF]'}`}>
+                                            <td className="px-4 py-3.5 whitespace-nowrap">
+                                                <div className="flex items-center gap-1.5">
+                                                    {item.is_delayed && (
+                                                        <AlertTriangle className="w-4 h-4 text-red-600 animate-pulse" aria-label="Délai de traitement dépassé (> 48h)" />
+                                                    )}
+                                                    <span className={`font-mono font-bold ${item.is_delayed ? 'text-red-700' : 'text-[#04326D]'}`}>
+                                                        {item.numero}
+                                                    </span>
+                                                </div>
                                             </td>
                                             <td className="px-4 py-3.5 whitespace-nowrap">
                                                 <p className="font-bold text-[#0B192C]">{item.initiateurNom}</p>

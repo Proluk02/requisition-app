@@ -65,6 +65,7 @@ interface RequisitionMP {
     derniere_observation?: string | null;
     motifRejet?: string | null;
     is_urgent: boolean;
+    is_delayed?: boolean; // NOUVEAU: Pour la gestion des 48h
     statut: string;
     statusCode: string;
     statusLabel: string;
@@ -616,9 +617,16 @@ export default function ProjectManagerDashboard({
                                     const isDecidable = req.canDecide || req.statut === 'en_attente_mp';
 
                                     return (
-                                        <tr key={req.id} className="hover:bg-[#F9F9FF] transition">
-                                            <td className="py-3.5 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
-                                                {req.numero}
+                                        <tr key={req.id} className={`transition ${req.is_delayed ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-[#F9F9FF]'}`}>
+                                            <td className="py-3.5 px-4 whitespace-nowrap">
+                                                <div className="flex items-center gap-1.5">
+                                                    {req.is_delayed && (
+                                                        <AlertTriangle className="w-4 h-4 text-red-600 animate-pulse" aria-label="Délai de traitement dépassé (> 48h)" />
+                                                    )}
+                                                    <span className={`font-mono font-bold ${req.is_delayed ? 'text-red-700' : 'text-[#04326D]'}`}>
+                                                        {req.numero}
+                                                    </span>
+                                                </div>
                                             </td>
                                             <td className="py-3.5 px-4 whitespace-nowrap text-gray-600">
                                                 {req.dateSoumission}

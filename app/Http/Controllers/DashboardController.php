@@ -203,6 +203,7 @@ class DashboardController extends Controller
                 'derniere_observation' => $r->derniere_observation,
                 'is_urgent' => (bool) $r->is_urgent,
                 'is_decaissee' => $r->status === 'decaisse',
+                'is_delayed' => $this->isDelayed($r),
                 'statusCode' => $r->status,
                 'workflowLevel' => $this->mapWorkflowLevel($r->status),
                 'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
@@ -314,6 +315,7 @@ class DashboardController extends Controller
                 'montantTotal' => (float) $r->montant_total,
                 'devise' => $r->devise,
                 'status' => $r->status,
+                'is_delayed' => $this->isDelayed($r),
                 'dateSoumission' => $r->created_at?->format('d/m/Y H:i') ?? '',
                 'observation' => $r->observation,
                 'derniere_observation' => $r->derniere_observation,
@@ -419,6 +421,7 @@ class DashboardController extends Controller
                     'observation' => $r->observation,
                     'derniere_observation' => $r->derniere_observation,
                     'is_urgent' => (bool) $r->is_urgent,
+                    'is_delayed' => $this->isDelayed($r),
                     'statusCode' => $r->status,
                     'statusLabel' => match ($r->status) {
                         'draft' => 'En attente Visa MP',
@@ -575,6 +578,7 @@ class DashboardController extends Controller
                 'statusCode' => $r->status,
                 'statusLabel' => $this->mapWorkflowLevel($r->status)['label'],
                 'is_urgent' => (bool) $r->is_urgent,
+                'is_delayed' => $this->isDelayed($r),
                 'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
                 'signatures' => $this->formatSignatures($r->signatures),
             ])->values()->all(),
@@ -593,6 +597,7 @@ class DashboardController extends Controller
                 'observation' => $r->observation,
                 'derniere_observation' => $r->derniere_observation,
                 'is_urgent' => (bool) $r->is_urgent,
+                'is_delayed' => $this->isDelayed($r),
                 'statusCode' => $r->status,
                 'statusLabel' => match ($r->status) {
                     'returned_to_urgent_initiator' => 'Urgence à corriger par son initiateur',
@@ -694,6 +699,7 @@ class DashboardController extends Controller
                 'projet' => $r->projet,
                 'project_id' => $r->project_id,
                 'is_urgent' => (bool) $r->is_urgent,
+                'is_delayed' => $this->isDelayed($r),
                 'dateSoumission' => $r->created_at?->format('d M Y') ?? '',
                 'montant' => number_format($r->montant_total, 2, '.', ' ').' '.$r->devise,
                 'devise' => $r->devise,
@@ -749,6 +755,7 @@ class DashboardController extends Controller
                 'derniere_observation' => $r->derniere_observation,
                 'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
                 'is_urgent' => (bool) $r->is_urgent,
+                'is_delayed' => $this->isDelayed($r),
                 'statut' => $statut,
                 'statusCode' => $r->status,
                 'statusLabel' => match ($r->status) {
@@ -853,5 +860,18 @@ class DashboardController extends Controller
             'code' => $s->signature_code,
             'hash' => $s->signature_hash,
         ])->values()->all();
+    }
+
+    private function isDelayed(Requisition $requisition): bool
+    {
+        if (in_array($requisition->status, ['decaisse', 'cloture', 'rejetee'])) {
+            return false;
+        }
+
+        if ($requisition->updated_at) {
+            return $requisition->updated_at->diffInHours(now()) >= 48;
+        }
+
+        return false;
     }
 }

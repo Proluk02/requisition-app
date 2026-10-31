@@ -12,7 +12,7 @@ import RequisitionDetailModal from '@/Components/Director/RequisitionDetailModal
 import type { RequisitionSuivi } from '@/types/requisitionsList';
 import { numberToWordsFR } from '@/lib/numberToWords';
 import { openPrintPreview } from '@/lib/printPreview';
-import { Calendar, Eye, Printer, Download, ShieldCheck, PieChart, BarChart3, Activity } from 'lucide-react';
+import { Calendar, Eye, Printer, Download, ShieldCheck, PieChart, BarChart3, Activity, AlertTriangle } from 'lucide-react';
 
 interface WorkflowLevel {
     step: number;
@@ -51,6 +51,7 @@ interface RequisitionDirectrice {
     derniere_observation?: string | null;
     is_urgent: boolean;
     is_decaissee: boolean;
+    is_delayed?: boolean; // NOUVEAU: Pour la gestion des 48h
     statusCode: string;
     workflowLevel: WorkflowLevel;
     dateSoumission: string;
@@ -218,7 +219,6 @@ export default function DirectorDashboard({
         );
     };
 
-    // REJET DIRECTRICE : RETOUR SYSTEMATIQUE AU CHEF DE PROJET
     const handleReject = (event: React.FormEvent) => {
         event.preventDefault();
         if (!rejectReq || !rejectionReason.trim()) return;
@@ -757,13 +757,20 @@ export default function DirectorDashboard({
                                     {filteredList.map((req) => (
                                         <tr
                                             key={req.id}
-                                            className="hover:bg-[#F9F9FF] cursor-pointer"
+                                            className={`cursor-pointer transition ${req.is_delayed ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-[#F9F9FF]'}`}
                                             onClick={() => setDetailReq(req)}
                                         >
                                             <td className="py-3 px-4 whitespace-nowrap">
-                                                <span className="font-mono font-bold text-[#04326D]">{req.numero}</span>
+                                                <div className="flex items-center gap-1.5">
+                                                    {req.is_delayed && (
+                                                        <AlertTriangle className="w-4 h-4 text-red-600 animate-pulse" aria-label="En attente de traitement depuis plus de 48h" />
+                                                    )}
+                                                    <span className={`font-mono font-bold ${req.is_delayed ? 'text-red-700' : 'text-[#04326D]'}`}>
+                                                        {req.numero}
+                                                    </span>
+                                                </div>
                                                 {req.is_urgent && (
-                                                    <span className="ml-2 text-[9px] font-bold text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                                                    <span className="mt-1 inline-block text-[9px] font-bold text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded uppercase tracking-wider">
                                                         Urgent
                                                     </span>
                                                 )}
