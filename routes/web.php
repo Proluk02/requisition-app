@@ -81,19 +81,14 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::prefix('finance')->name('finance.')->middleware('role:finance')->group(function () {
         Route::get('/requisitions', [DashboardController::class, 'finance'])->name('dashboard');
 
-
-    Route::get('/exchange-rates', [DailyExchangeRateController::class, 'index'])
-        ->name('exchange-rates.index');
-
-    Route::post('/exchange-rates', [DailyExchangeRateController::class, 'store'])
-        ->name('exchange-rates.store');
-
-    Route::put('/exchange-rates/{exchangeRate}', [DailyExchangeRateController::class, 'update'])
-        ->name('exchange-rates.update');
-
-    Route::delete('/exchange-rates/{exchangeRate}', [DailyExchangeRateController::class, 'destroy'])
-        ->name('exchange-rates.destroy');
-
+        Route::get('/exchange-rates', [DailyExchangeRateController::class, 'index'])
+            ->name('exchange-rates.index');
+        Route::post('/exchange-rates', [DailyExchangeRateController::class, 'store'])
+            ->name('exchange-rates.store');
+        Route::put('/exchange-rates/{exchangeRate}', [DailyExchangeRateController::class, 'update'])
+            ->name('exchange-rates.update');
+        Route::delete('/exchange-rates/{exchangeRate}', [DailyExchangeRateController::class, 'destroy'])
+            ->name('exchange-rates.destroy');
 
         Route::get('/budgets', [BudgetController::class, 'index'])->name('budgets.index');
         Route::get('/budgets/import', [BudgetController::class, 'importForm'])->name('budgets.import-form');
@@ -143,15 +138,28 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::patch('/profile/pin', [ProfileController::class, 'updatePin'])->name('profile.pin.update');
 
     Route::get('/requisitions', [RequisitionController::class, 'index'])->name('requisitions.index');
-    Route::get('/requisitions/create', function () {
+    Route::get('/requisitions/create', function (Request $request) {
         $caisses = CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name', 'devise']);
-        $projectsList = Project::orderBy('name')->get(['id', 'name', 'full_name']);
+        $user = $request->user();
+
+        // LOGIQUE DE FILTRAGE STRICTE SELON LE RÔLE
+        if ($user->hasRole('coordinator') && $user->site_id) {
+            // Le coordinateur ne voit QUE les projets autorisés sur son site
+            $projectsList = $user->site->projects()->orderBy('name')->get(['projects.id', 'name', 'full_name']);
+        } elseif ($user->hasRole('project_manager') && $user->project_id) {
+            // Le MP ne voit QUE son propre projet
+            $projectsList = Project::where('id', $user->project_id)->get(['id', 'name', 'full_name']);
+        } else {
+            // Un Staff normal ou Administrateur peut voir tous les projets
+            $projectsList = Project::orderBy('name')->get(['id', 'name', 'full_name']);
+        }
 
         return Inertia::render('Staff/Requisitions/Create', [
             'caisses' => $caisses,
             'projectsList' => $projectsList,
         ]);
     })->name('requisitions.create');
+
     Route::post('/requisitions', [RequisitionController::class, 'store'])->name('requisitions.store');
     Route::get('/requisitions/justificatifs/{justificatif}', [RequisitionController::class, 'showJustificatif'])->name('requisitions.justificatif.show');
     Route::patch('/requisitions/{requisition}', [RequisitionController::class, 'update'])->name('requisitions.update');

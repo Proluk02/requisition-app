@@ -56,7 +56,54 @@ class DashboardController extends Controller
             return redirect()->route('cashier.dashboard');
         }
 
-        if ($user->hasRole('coordinator') || $user->hasRole('beneficiary')) {
+        // --- NOUVEAU : DASHBOARD SPÉCIFIQUE AU COORDINATEUR ---
+        if ($user->hasRole('coordinator')) {
+            $user->load('site.projects');
+            $site = $user->site;
+
+            if ($site) {
+                $stats = [
+                    'projetsActifs' => $site->projects->count(),
+                    'demandesEnCours' => Requisition::where('user_id', $user->id)
+                        ->whereNotIn('status', ['decaisse', 'cloture', 'returned_to_beneficiary', 'returned_to_urgent_initiator'])
+                        ->count(),
+                    'demandesRejetees' => Requisition::where('user_id', $user->id)
+                        ->whereIn('status', ['returned_to_beneficiary', 'returned_to_urgent_initiator'])
+                        ->count(),
+                ];
+
+                $requisitions = Requisition::with(['project'])
+                    ->where('user_id', $user->id)
+                    ->latest()
+                    ->take(10)
+                    ->get()
+                    ->map(fn($r) => [
+                        'id' => (string) $r->id,
+                        'code' => $r->numero_requisition,
+                        'motif' => $r->observation ?? $r->nature_requisition,
+                        'projet' => $r->project?->name ?? $r->projet ?? 'N/A',
+                        'montant' => (float) $r->montant_total,
+                        'devise' => $r->devise,
+                        'status' => $r->status,
+                        'is_urgent' => (bool)$r->is_urgent,
+                        'date' => $r->created_at->format('d/m/Y'),
+                    ]);
+
+                return Inertia::render('Coordinator/Dashboard', [
+                    'site' => [
+                        'name' => $site->name,
+                        'location' => $site->location,
+                        'projects' => $site->projects->map(fn($p) => ['name' => $p->name, 'full_name' => $p->full_name])
+                    ],
+                    'stats' => $stats,
+                    'requisitions' => $requisitions,
+                ]);
+            }
+        }
+        // ------------------------------------------------------
+
+        // Fallback Staff/Bénéficiaire (ou Coordinateur sans site configuré)
+        if ($user->hasRole('beneficiary') || ($user->hasRole('coordinator') && !$user->site_id)) {
             $requisitions = Requisition::with(['demandes.justificatifs', 'demandes.splits', 'signatures.user'])
                 ->where('user_id', $user->id)
                 ->orderByDesc('created_at')

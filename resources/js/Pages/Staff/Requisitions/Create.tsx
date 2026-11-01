@@ -14,7 +14,8 @@ import {
     Wrench,
     FileText,
     Trash2,
-    Lock
+    Lock,
+    ShieldAlert
 } from 'lucide-react';
 
 type DeviseType = 'EUR' | 'USD' | 'FC';
@@ -63,15 +64,18 @@ export default function CreateRequisition({
 }: Props) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
+    
+    // Détermination du rôle pour affichage d'informations de contexte
     const isCoordinator = user.role === 'coordinator' || auth.user.roles?.some((r) => r.name === 'coordinator');
 
     const [natureRequisition, setNatureRequisition] = useState<'Achat' | 'Service'>('Achat');
     const [isUrgent, setIsUrgent] = useState<boolean>(false);
 
-    const userProjectName = user.project?.name || (projectsList[0]?.name ?? 'USIMAMIZI BORA');
-    const [selectedProject, setSelectedProject] = useState<string>(userProjectName);
+    // Initialise avec le premier projet de la liste autorisé
+    const [selectedProject, setSelectedProject] = useState<string>(projectsList[0]?.name ?? '');
 
     const projectCode = useMemo(() => {
+        if (!selectedProject) return 'XX';
         const words = selectedProject.trim().split(/\s+/);
         return (
             words.length >= 2
@@ -85,7 +89,6 @@ export default function CreateRequisition({
         return `${projectCode}/${mois}/001`;
     }, [projectCode]);
 
-    // SYNCHRONISATION INITIALE STRICTE CAISSE <-> DEVISE TYPÉE POUR SUPPRIMER TS(2345)
     const initialCaisse = caisses.length > 0 ? caisses[0] : null;
     const [caisseDecaissement, setCaisseDecaissement] = useState<string>(initialCaisse ? initialCaisse.name : '');
     const [devise, setDevise] = useState<DeviseType>(
@@ -127,7 +130,6 @@ export default function CreateRequisition({
         return numberToWordsFR(montantTotal, devise);
     }, [montantTotal, devise]);
 
-    // RÈGLE STRICTE : Changer de caisse adapte automatiquement et fige la devise de la réquisition
     const handleCaisseChange = (caisseNom: string) => {
         setCaisseDecaissement(caisseNom);
         const caisseObj = caisses.find((c) => c.name === caisseNom);
@@ -261,6 +263,11 @@ export default function CreateRequisition({
             return;
         }
 
+        if (!selectedProject) {
+            alert('Aucun projet n\'est sélectionné. Si la liste est vide, contactez un administrateur pour lier un projet à votre site.');
+            return;
+        }
+
         setIsSubmitting(true);
         const formData = new FormData();
 
@@ -323,7 +330,7 @@ export default function CreateRequisition({
 
     return (
         <AppLayout>
-            <Head title={`Créer Réquisition — ${numeroRequisition}`} />
+            <Head title="Nouvelle Demande de Fonds" />
 
             <div className="space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-outline-soft pb-5">
@@ -347,7 +354,7 @@ export default function CreateRequisition({
                                     : 'Réquisition de Services'}
                             </h1>
                             <span className="bg-sidebar text-tertiary px-3 py-0.5 rounded-md font-mono font-bold text-xs">
-                                N° {numeroRequisition}
+                                {selectedProject ? `N° ${numeroRequisition}` : 'N° EN-ATTENTE'}
                             </span>
                             {isUrgent && (
                                 <span className="bg-error text-white px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider animate-pulse">
@@ -367,7 +374,7 @@ export default function CreateRequisition({
                         <button
                             type="button"
                             onClick={handleSubmit}
-                            disabled={isSubmitting}
+                            disabled={isSubmitting || !selectedProject}
                             className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary-light disabled:opacity-50 text-white rounded-md text-xs font-semibold shadow-sm hover:shadow-md transition-all active:scale-[0.98]"
                         >
                             <Send className="w-3.5 h-3.5" />
@@ -375,6 +382,29 @@ export default function CreateRequisition({
                         </button>
                     </div>
                 </div>
+                
+                {/* ALERTE BLOQUANTE SI AUCUN PROJET N'EST DISPONIBLE POUR LE CORDONNATEUR */}
+                {projectsList.length === 0 && (
+                    <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded shadow-sm">
+                        <div className="flex">
+                            <div className="flex-shrink-0">
+                                <ShieldAlert className="h-5 w-5 text-red-500" aria-hidden="true" />
+                            </div>
+                            <div className="ml-3">
+                                <h3 className="text-sm font-bold text-red-800">
+                                    {isCoordinator ? "Aucun projet autorisé sur votre site" : "Aucun projet n'est accessible"}
+                                </h3>
+                                <div className="mt-2 text-xs text-red-700">
+                                    <p>
+                                        {isCoordinator 
+                                            ? "Pour des raisons de sécurité budgétaire, vous ne pouvez initier de demande de fonds. Veuillez contacter l'Administration pour affecter des projets à votre site opérationnel." 
+                                            : "Vous n'êtes actuellement rattaché à aucun projet. Impossible de créer une réquisition."}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 <form onSubmit={handleSubmit} className="space-y-5">
                     <div className="bg-white border border-outline-soft rounded-lg p-5 shadow-card space-y-4">
@@ -419,28 +449,26 @@ export default function CreateRequisition({
 
                             <div>
                                 <label className="block font-semibold text-gray-700 mb-1.5">
-                                    Projet
+                                    {isCoordinator ? "Projet affecté à votre site" : "Projet"} *
                                 </label>
-                                {isCoordinator && projectsList.length > 0 ? (
-                                    <select
-                                        value={selectedProject}
-                                        onChange={(e) => setSelectedProject(e.target.value)}
-                                        className="w-full border border-outline-variant rounded-md p-2 text-xs font-semibold focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
-                                    >
-                                        {projectsList.map((p) => (
+                                <select
+                                    value={selectedProject}
+                                    onChange={(e) => setSelectedProject(e.target.value)}
+                                    disabled={projectsList.length <= 1}
+                                    className={`w-full border rounded-md p-2 text-xs font-semibold focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition ${
+                                        projectsList.length === 0 ? 'border-red-300 bg-red-50 text-red-500' : 'border-outline-variant bg-white'
+                                    }`}
+                                >
+                                    {projectsList.length === 0 ? (
+                                        <option value="">(Aucun projet disponible)</option>
+                                    ) : (
+                                        projectsList.map((p) => (
                                             <option key={p.id} value={p.name}>
-                                                {p.name} ({p.full_name})
+                                                {p.name}
                                             </option>
-                                        ))}
-                                    </select>
-                                ) : (
-                                    <input
-                                        type="text"
-                                        value={selectedProject}
-                                        disabled
-                                        className="w-full bg-surface-muted border border-outline-variant rounded-md p-2 text-xs text-gray-700 font-bold cursor-not-allowed"
-                                    />
-                                )}
+                                        ))
+                                    )}
+                                </select>
                             </div>
 
                             <div>
@@ -467,7 +495,6 @@ export default function CreateRequisition({
                                 )}
                             </div>
 
-                            {/* DEVISE LIÉE STRICTEMENT À LA CAISSE (SANS ERREUR TS2345) */}
                             <div>
                                 <label className="block font-semibold text-gray-700 mb-1.5 flex items-center justify-between">
                                     <span>Devise de paiement</span>
@@ -778,7 +805,7 @@ export default function CreateRequisition({
 
                         <button
                             type="submit"
-                            disabled={isSubmitting}
+                            disabled={isSubmitting || !selectedProject}
                             className="inline-flex items-center gap-2 bg-tertiary hover:bg-tertiary-dark disabled:opacity-50 text-white py-3 px-6 rounded-md font-bold text-xs uppercase tracking-wider shadow-md hover:shadow-lg transition-all active:scale-[0.98] self-end md:self-auto"
                         >
                             <Send className="w-4 h-4" />
@@ -806,7 +833,7 @@ export default function CreateRequisition({
 
                             <div className="space-y-2.5 text-xs">
                                 <div>
-                                    <label className="block font-semibold text-gray-700 mb-1">
+                                    <label className="block font-bold text-gray-700 mb-1">
                                         Description
                                     </label>
                                     <input
@@ -820,7 +847,7 @@ export default function CreateRequisition({
                                 </div>
                                 <div className="grid grid-cols-2 gap-2">
                                     <div>
-                                        <label className="block font-semibold text-gray-700 mb-1">
+                                        <label className="block font-bold text-gray-700 mb-1">
                                             Date
                                         </label>
                                         <input
@@ -831,7 +858,7 @@ export default function CreateRequisition({
                                         />
                                     </div>
                                     <div>
-                                        <label className="block font-semibold text-gray-700 mb-1">
+                                        <label className="block font-bold text-gray-700 mb-1">
                                             Montant estimé
                                         </label>
                                         <input
@@ -844,7 +871,7 @@ export default function CreateRequisition({
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block font-semibold text-gray-700 mb-1">
+                                    <label className="block font-bold text-gray-700 mb-1">
                                         Fichier (PDF, Image)
                                     </label>
                                     <input

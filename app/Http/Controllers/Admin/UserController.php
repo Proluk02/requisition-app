@@ -70,12 +70,22 @@ class UserController extends Controller
             'pin' => ['required', 'string', 'digits_between:4,6'],
             'role' => ['required', 'string', 'exists:roles,name'],
             'status' => ['required', 'in:active,inactive'],
-            'project_id' => ['nullable', 'exists:projects,id'],
-            'site_id' => ['nullable', 'exists:sites,id'],
+            'project_id' => ['nullable', 'required_if:role,project_manager', 'exists:projects,id'],
+            'site_id' => ['nullable', 'required_if:role,coordinator', 'exists:sites,id'],
             'is_director_interim' => ['sometimes', 'boolean'],
             'cash_register_ids' => ['nullable', 'array'],
             'cash_register_ids.*' => ['exists:cash_registers,id'],
+        ], [
+            'site_id.required_if' => 'Veuillez obligatoirement affecter un site opérationnel au coordinateur.',
+            'project_id.required_if' => 'Veuillez obligatoirement affecter un projet au Manager de Projet.',
         ]);
+
+        // Nettoyage strict selon le rôle
+        if ($data['role'] === 'coordinator') {
+            $data['project_id'] = null;
+        } elseif ($data['role'] === 'project_manager') {
+            $data['site_id'] = null;
+        }
 
         $isInterim = $data['role'] === 'admin_manager' && $request->boolean('is_director_interim');
 
@@ -141,12 +151,22 @@ class UserController extends Controller
             'password' => ['nullable', 'string', 'min:8'],
             'role' => ['required', 'string', 'exists:roles,name'],
             'status' => ['required', 'in:active,inactive'],
-            'project_id' => ['nullable', 'exists:projects,id'],
-            'site_id' => ['nullable', 'exists:sites,id'],
+            'project_id' => ['nullable', 'required_if:role,project_manager', 'exists:projects,id'],
+            'site_id' => ['nullable', 'required_if:role,coordinator', 'exists:sites,id'],
             'is_director_interim' => ['sometimes', 'boolean'],
             'cash_register_ids' => ['nullable', 'array'],
             'cash_register_ids.*' => ['exists:cash_registers,id'],
+        ], [
+            'site_id.required_if' => 'Veuillez obligatoirement affecter un site opérationnel au coordinateur.',
+            'project_id.required_if' => 'Veuillez obligatoirement affecter un projet au Manager de Projet.',
         ]);
+
+        // Nettoyage strict selon le rôle
+        if ($data['role'] === 'coordinator') {
+            $data['project_id'] = null;
+        } elseif ($data['role'] === 'project_manager') {
+            $data['site_id'] = null;
+        }
 
         $isInterim = $data['role'] === 'admin_manager' && $request->boolean('is_director_interim');
 

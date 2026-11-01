@@ -1,4 +1,4 @@
-import { Link, useForm } from '@inertiajs/react';
+import { Head, Link, useForm } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
 import {
@@ -7,6 +7,8 @@ import {
     Building2,
     Lock,
     Save,
+    MapPin,
+    FolderKanban,
 } from 'lucide-react';
 
 interface OptionItem {
@@ -70,8 +72,8 @@ export default function UsersEdit({
         password: '',
         role: currentUser?.role ?? 'beneficiary',
         status: currentUser?.status ?? 'active',
-        project_id: currentUser?.project_id ?? '',
-        site_id: currentUser?.site_id ?? '',
+        project_id: currentUser?.role === 'coordinator' ? '' : (currentUser?.project_id ?? ''),
+        site_id: currentUser?.role === 'project_manager' ? '' : (currentUser?.site_id ?? ''),
         is_director_interim: Boolean(currentUser?.is_director_interim),
         cash_register_ids: currentUser?.cash_register_ids ?? [],
     });
@@ -85,6 +87,20 @@ export default function UsersEdit({
             </AppLayout>
         );
     }
+
+    const isCoordinator = form.data.role === 'coordinator';
+    const isProjectManager = form.data.role === 'project_manager';
+
+    const handleRoleChange = (newRole: string) => {
+        form.setData({
+            ...form.data,
+            role: newRole,
+            project_id: newRole === 'coordinator' ? '' : form.data.project_id,
+            site_id: newRole === 'project_manager' ? '' : form.data.site_id,
+            is_director_interim: newRole === 'admin_manager' ? form.data.is_director_interim : false,
+            cash_register_ids: newRole === 'cashier' ? form.data.cash_register_ids : [],
+        });
+    };
 
     const toggleCaisse = (id: string) => {
         const current = [...form.data.cash_register_ids];
@@ -108,6 +124,8 @@ export default function UsersEdit({
 
     return (
         <AppLayout>
+            <Head title={`Modifier ${currentUser.name}`} />
+
             <div className="max-w-3xl mx-auto space-y-6">
                 <header className="flex items-center justify-between border-b pb-4">
                     <div>
@@ -178,7 +196,7 @@ export default function UsersEdit({
                             <label className="block font-bold text-gray-700 mb-1">Rôle Système *</label>
                             <select
                                 value={form.data.role}
-                                onChange={(e) => form.setData('role', e.target.value)}
+                                onChange={(e) => handleRoleChange(e.target.value)}
                                 className="w-full border border-[#B2BED6] rounded p-2 text-xs font-bold text-[#0B192C] bg-white focus:outline-none focus:border-[#04326D]"
                                 required
                             >
@@ -186,11 +204,12 @@ export default function UsersEdit({
                                     const rName = getRoleName(r);
                                     return (
                                         <option key={i} value={rName}>
-                                            {rName.replace('_', ' ').toUpperCase()}
+                                            {rName.replace(/_/g, ' ').toUpperCase()}
                                         </option>
                                     );
                                 })}
                             </select>
+                            {form.errors.role && <p className="text-[10px] text-red-600 mt-1">{form.errors.role}</p>}
                         </div>
 
                         <div>
@@ -206,38 +225,127 @@ export default function UsersEdit({
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t">
-                        <div>
-                            <label className="block font-bold text-gray-700 mb-1">Projet de Rattachement</label>
-                            <select
-                                value={form.data.project_id}
-                                onChange={(e) => form.setData('project_id', e.target.value)}
-                                className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
-                            >
-                                <option value="">Aucun projet spécifique</option>
-                                {projects.map((p) => (
-                                    <option key={p.id} value={p.id}>
-                                        {p.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                    {/* BLOC D'AFFECTATION DYNAMIQUE SELON LE RÔLE */}
+                    <div className="pt-3 border-t space-y-3">
+                        {isCoordinator ? (
+                            <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-md space-y-3">
+                                <div className="flex items-start gap-2">
+                                    <MapPin className="w-4 h-4 text-[#F58F20] shrink-0 mt-0.5" />
+                                    <div>
+                                        <h3 className="font-bold text-[#0B192C] text-xs">
+                                            Affectation exclusive à un Site Opérationnel
+                                        </h3>
+                                        <p className="text-[11px] text-gray-600 leading-relaxed mt-0.5">
+                                            Un coordinateur est rattaché uniquement à un <strong>site</strong>. Il aura automatiquement accès aux projets qui œuvrent sur ce site lors de la création de ses réquisitions.
+                                        </p>
+                                    </div>
+                                </div>
 
-                        <div>
-                            <label className="block font-bold text-gray-700 mb-1">Site Opérationnel</label>
-                            <select
-                                value={form.data.site_id}
-                                onChange={(e) => form.setData('site_id', e.target.value)}
-                                className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
-                            >
-                                <option value="">Aucun site spécifique</option>
-                                {sites.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                        {s.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                                <div>
+                                    <label className="block font-bold text-gray-800 mb-1">
+                                        Site Opérationnel géré par le Coordinateur *
+                                    </label>
+                                    {sites.length === 0 ? (
+                                        <div className="p-2.5 bg-red-50 border border-red-200 rounded text-[11px] text-red-700 font-semibold">
+                                            Aucun site opérationnel n'est enregistré. Veuillez d'abord créer un site dans « Sites Opérationnels ».
+                                        </div>
+                                    ) : (
+                                        <select
+                                            value={form.data.site_id}
+                                            onChange={(e) => form.setData('site_id', e.target.value)}
+                                            className="w-full border border-amber-300 bg-white rounded p-2 text-xs font-semibold text-[#0B192C] focus:outline-none focus:border-[#04326D]"
+                                            required
+                                        >
+                                            <option value="">— Sélectionner obligatoirement un site —</option>
+                                            {sites.map((s) => (
+                                                <option key={s.id} value={s.id}>
+                                                    {s.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    )}
+                                    {form.errors.site_id && (
+                                        <p className="text-[10px] text-red-600 font-semibold mt-1">{form.errors.site_id}</p>
+                                    )}
+                                </div>
+                            </div>
+                        ) : isProjectManager ? (
+                            <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-md space-y-3">
+                                <div className="flex items-start gap-2">
+                                    <FolderKanban className="w-4 h-4 text-[#04326D] shrink-0 mt-0.5" />
+                                    <div>
+                                        <h3 className="font-bold text-[#0B192C] text-xs">
+                                            Affectation à un Projet Institutionnel
+                                        </h3>
+                                        <p className="text-[11px] text-gray-600 leading-relaxed mt-0.5">
+                                            Le Manager de Projet supervise l'ensemble des réquisitions imputées sur son projet, quel que soit le site d'origine.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block font-bold text-gray-800 mb-1">
+                                        Projet de Rattachement *
+                                    </label>
+                                    <select
+                                        value={form.data.project_id}
+                                        onChange={(e) => form.setData('project_id', e.target.value)}
+                                        className="w-full border border-blue-300 bg-white rounded p-2 text-xs font-semibold text-[#0B192C] focus:outline-none focus:border-[#04326D]"
+                                        required
+                                    >
+                                        <option value="">— Sélectionner obligatoirement un projet —</option>
+                                        {projects.map((p) => (
+                                            <option key={p.id} value={p.id}>
+                                                {p.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {form.errors.project_id && (
+                                        <p className="text-[10px] text-red-600 font-semibold mt-1">{form.errors.project_id}</p>
+                                    )}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block font-bold text-gray-700 mb-1">Projet de Rattachement</label>
+                                    <select
+                                        value={form.data.project_id}
+                                        onChange={(e) => form.setData('project_id', e.target.value)}
+                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
+                                    >
+                                        <option value="">Aucun projet spécifique</option>
+                                        {projects.map((p) => (
+                                            <option key={p.id} value={p.id}>
+                                                {p.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {form.errors.project_id && (
+                                        <p className="text-[10px] text-red-600 mt-1">{form.errors.project_id}</p>
+                                    )}
+                                </div>
+
+                                <div>
+                                    <label className="block font-bold text-gray-700 mb-1">Site Opérationnel</label>
+                                    <select
+                                        value={form.data.site_id}
+                                        onChange={(e) => form.setData('site_id', e.target.value)}
+                                        className="w-full border border-[#B2BED6] rounded p-2 text-xs focus:outline-none focus:border-[#04326D]"
+                                    >
+                                        <option value="">Aucun site spécifique</option>
+                                        {sites.map((s) => (
+                                            <option key={s.id} value={s.id}>
+                                                {s.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {form.errors.site_id && (
+                                        <p className="text-[10px] text-red-600 mt-1">{form.errors.site_id}</p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {form.data.role === 'admin_manager' && (

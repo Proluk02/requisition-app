@@ -378,6 +378,19 @@ class RequisitionController extends Controller
             abort_unless($user->project_id !== null && $user->project_id === $project->id, 403, 'Vous ne pouvez créer une réquisition que pour votre projet.');
         }
 
+        // ---> CONTRÔLE DE SÉCURITÉ COORDINATEUR (S'assurer que le projet du POST est bien lié au site du Cordo)
+        if ($user->hasRole('coordinator')) {
+            abort_unless($user->site_id !== null, 403, 'Vous n\'êtes affecté à aucun site opérationnel.');
+            
+            $isProjectInSite = $user->site->projects()->where('projects.id', $project->id)->exists();
+            abort_unless(
+                $isProjectInSite, 
+                403, 
+                "Sécurité : Le projet {$project->name} n'est pas rattaché au site que vous coordonnez."
+            );
+        }
+        // -----------------------------------------------------------------------------------------------------
+
         $initialesProjet = strtoupper(substr($project->name, 0, 2));
         $moisCourant = now()->format('m');
         $anneeCourante = now()->year;
@@ -1318,7 +1331,6 @@ class RequisitionController extends Controller
                 ));
             }
         } catch (\Throwable $e) {
-            // Empêche l'application de crasher (Erreur 500) si le serveur SMTP (mail) échoue.
             \Illuminate\Support\Facades\Log::error("Erreur lors de l'envoi de l'email 'Prêt pour décaissement' : " . $e->getMessage());
         }
     }

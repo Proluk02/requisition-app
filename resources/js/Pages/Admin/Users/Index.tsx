@@ -4,7 +4,6 @@ import AppLayout from '@/Layouts/AppLayout';
 import { PageProps, User } from '@/types';
 import {
     Search,
-    Filter,
     X,
     UserPlus,
     Pencil,
@@ -16,7 +15,8 @@ import {
     ChevronLeft,
     ChevronRight,
     AlertTriangle,
-    CheckCircle
+    CheckCircle,
+    MapPin,
 } from 'lucide-react';
 
 interface Role {
@@ -48,7 +48,6 @@ interface Filters {
     site_id?: string;
 }
 
-// Extension des PageProps pour inclure les messages flash
 interface CustomPageProps extends PageProps {
     flash: {
         success?: string | null;
@@ -72,7 +71,6 @@ export default function Index({ users, filters, roles, projects, sites }: Props)
     const [projectId, setProjectId] = useState(filters.project_id || '');
     const [siteId, setSiteId] = useState(filters.site_id || '');
 
-    // États pour la modale de suppression
     const [userToDelete, setUserToDelete] = useState<User | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
 
@@ -144,8 +142,6 @@ export default function Index({ users, filters, roles, projects, sites }: Props)
             <Head title="Gestion des Utilisateurs" />
 
             <div className="flex flex-col gap-6 relative">
-                
-                {/* --- AFFICHAGE DES MESSAGES D'ERREUR OU DE SUCCÈS --- */}
                 {flash?.error && (
                     <div className="p-4 bg-error-soft text-error-dark rounded-lg border border-error/20 flex items-center gap-3 text-sm font-medium shadow-sm animate-in fade-in slide-in-from-top-4">
                         <AlertTriangle className="w-5 h-5 text-error flex-shrink-0" />
@@ -159,7 +155,6 @@ export default function Index({ users, filters, roles, projects, sites }: Props)
                         <p>{flash.success}</p>
                     </div>
                 )}
-                {/* -------------------------------------------------- */}
 
                 {/* En-tête */}
                 <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center border-b border-outline-soft pb-5">
@@ -186,7 +181,7 @@ export default function Index({ users, filters, roles, projects, sites }: Props)
                         <div className="rounded-lg border border-outline-soft bg-white shadow-card overflow-hidden">
                             {/* Filtres */}
                             <div className="flex flex-wrap items-center gap-2.5 border-b border-outline-soft p-4 bg-white">
-                                <div className="relative min-w-[200px] flex-1">
+                                <div className="relative min-w-[180px] flex-1">
                                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
                                     <input
                                         type="text"
@@ -229,6 +224,19 @@ export default function Index({ users, filters, roles, projects, sites }: Props)
                                     {projects.map((p) => (
                                         <option key={p.id} value={p.id}>
                                             {p.name}
+                                        </option>
+                                    ))}
+                                </select>
+
+                                <select
+                                    className="rounded-md border-outline-variant py-2 pl-2.5 pr-7 text-xs text-gray-700 bg-white focus:border-primary focus:ring-1 focus:ring-primary/20 focus:outline-none transition"
+                                    value={siteId}
+                                    onChange={(e) => setSiteId(e.target.value)}
+                                >
+                                    <option value="">Tous les sites</option>
+                                    {sites.map((s) => (
+                                        <option key={s.id} value={s.id}>
+                                            {s.name}
                                         </option>
                                     ))}
                                 </select>
@@ -300,9 +308,27 @@ export default function Index({ users, filters, roles, projects, sites }: Props)
                                                             {formatRole(u.role)}
                                                         </span>
                                                     </td>
-                                                    <td className="px-4 py-3.5 text-xs text-gray-600">
-                                                        {u.project?.name ||
-                                                            (u.site ? `Site ${u.site.name}` : '—')}
+                                                    <td className="px-4 py-3.5 text-xs text-gray-600 whitespace-nowrap">
+                                                        {u.role === 'coordinator' ? (
+                                                            u.site ? (
+                                                                <span className="inline-flex items-center gap-1 rounded bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                                                                    <MapPin className="w-3 h-3 text-[#F58F20]" />
+                                                                    Site {u.site.name}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-[10px] text-error font-semibold italic">
+                                                                    Sans site
+                                                                </span>
+                                                            )
+                                                        ) : u.project?.name ? (
+                                                            <span className="font-medium text-on-surface">
+                                                                {u.project.name}
+                                                            </span>
+                                                        ) : u.site ? (
+                                                            <span>Site {u.site.name}</span>
+                                                        ) : (
+                                                            '—'
+                                                        )}
                                                     </td>
                                                     <td className="px-4 py-3.5 whitespace-nowrap">
                                                         <span

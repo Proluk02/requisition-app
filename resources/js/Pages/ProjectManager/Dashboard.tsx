@@ -5,7 +5,7 @@ import RequisitionCorrectionForm, { type RequisitionCorrectionData } from '@/Com
 import { PageProps } from '@/types';
 import {
     ShieldCheck, Plus, Eye, X, AlertCircle, CheckCircle2,
-    Paperclip, Filter, PieChart, BarChart3, Search, Check, UserCheck, LayoutTemplate, AlertTriangle, Layers, Trash2
+    Paperclip, Filter, PieChart, BarChart3, Search, Check, UserCheck, LayoutTemplate, AlertTriangle, Layers, Trash2, MapPin
 } from 'lucide-react';
 
 interface Signature {
@@ -56,6 +56,7 @@ interface RequisitionMP {
     project_id?: string;
     initiateurNom: string;
     initiateurRole: string;
+    initiateurSite?: string; // NOUVEAU: Le site d'où provient la demande
     nature: 'Achat' | 'Service';
     devise: 'USD' | 'FC' | 'EUR';
     montantTotal: number;
@@ -65,7 +66,7 @@ interface RequisitionMP {
     derniere_observation?: string | null;
     motifRejet?: string | null;
     is_urgent: boolean;
-    is_delayed?: boolean; // NOUVEAU: Pour la gestion des 48h
+    is_delayed?: boolean; 
     statut: string;
     statusCode: string;
     statusLabel: string;
@@ -137,6 +138,7 @@ export default function ProjectManagerDashboard({
     const [demandes, setDemandes] = useState<RequisitionMP[]>(requisitions);
     const [filterStatut, setFilterStatut] = useState<string>('all');
     const [filterUserId, setFilterUserId] = useState<string>('all');
+    const [filterSite, setFilterSite] = useState<string>('all');
 
     const [selectedReq, setSelectedReq] = useState<RequisitionMP | null>(null);
     const [directorPreviewReq, setDirectorPreviewReq] = useState<RequisitionMP | null>(null);
@@ -180,6 +182,21 @@ export default function ProjectManagerDashboard({
         ) || null;
     };
 
+    // EXTRAIRE LES SITES UNIQUES ET CALCULER LES STATS PAR SITE
+    const siteStats = useMemo(() => {
+        const map = new Map<string, { count: number; pending: number }>();
+        demandes.forEach(d => {
+            const site = d.initiateurSite || 'Général';
+            if (!map.has(site)) {
+                map.set(site, { count: 0, pending: 0 });
+            }
+            const st = map.get(site)!;
+            st.count++;
+            if (d.statut === 'en_attente_mp') st.pending++;
+        });
+        return Array.from(map.entries()).map(([name, data]) => ({ name, ...data })).sort((a, b) => b.pending - a.pending);
+    }, [demandes]);
+
     const demandesFiltrees = useMemo(() => {
         return demandes.filter((d) => {
             const matchStatut =
@@ -189,9 +206,10 @@ export default function ProjectManagerDashboard({
                     ? d.statut === 'a_corriger'
                     : d.statut === filterStatut;
             const matchUser = filterUserId === 'all' ? true : d.user_id === filterUserId;
-            return matchStatut && matchUser;
+            const matchSite = filterSite === 'all' ? true : (d.initiateurSite || 'Général') === filterSite;
+            return matchStatut && matchUser && matchSite;
         });
-    }, [demandes, filterStatut, filterUserId]);
+    }, [demandes, filterStatut, filterUserId, filterSite]);
 
     const donutData = useMemo(() => {
         const total = pmStats.req_en_attente + pmStats.req_validees + pmStats.req_a_corriger || 1;
@@ -222,7 +240,6 @@ export default function ProjectManagerDashboard({
         setMotifRejet('');
         setObservationPM('');
 
-        // Initialisation de la copie de travail modifiable pour le PM
         setEditedArticles(
             req.lignes.map((l) => ({
                 ...l,
@@ -286,11 +303,7 @@ export default function ProjectManagerDashboard({
     const hasDepassement = useMemo(() => {
         if (!selectedReq) return false;
         return editedArticles.some((ligne) => {
-            if (ligne.splits && ligne.splits.length > 0) {
-                // Ignore au front-end pour les splits (géré en backend pour la conversion) 
-                // mais on peut faire une vérif basique
-                return false; 
-            }
+            if (ligne.splits && ligne.splits.length > 0) return false; 
             const code = ligne.codeAllBudget || '';
             const bLine = getBudgetLineObject(code, selectedReq.project_id);
             const solde = bLine ? bLine.solde : ligne.budget_solde_actuel;
@@ -472,8 +485,9 @@ export default function ProjectManagerDashboard({
                 </Link>
             </div>
 
-            {/* SECTIONS GRAPHIQUES */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+            {/* SECTIONS GRAPHIQUES : MAINTENANT SUR 3 COLONNES */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
+                
                 <div className="bg-white border border-[#B2BED6] rounded p-5 shadow-sm space-y-3 flex items-center gap-6">
                     <div className="flex-1">
                         <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5 border-b pb-2 mb-3">
@@ -496,7 +510,7 @@ export default function ProjectManagerDashboard({
                         </div>
                     </div>
                     
-                    <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
+                    <div className="relative w-24 h-24 shrink-0 flex items-center justify-center">
                         <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
                             <path className={donutData.isEmpty ? "text-gray-200" : "text-amber-500"} strokeWidth="4" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
                             {!donutData.isEmpty && (
@@ -505,7 +519,7 @@ export default function ProjectManagerDashboard({
                         </svg>
                         <div className="absolute text-center">
                             <span className="text-xs font-black font-mono text-[#0B192C] block">{donutData.isEmpty ? '-' : `${donutData.pctValidees}%`}</span>
-                            <span className="text-[7.5px] font-bold uppercase text-gray-400 block -mt-0.5">Validées</span>
+                            <span className="text-[7px] font-bold uppercase text-gray-400 block -mt-0.5">Validées</span>
                         </div>
                     </div>
                 </div>
@@ -514,7 +528,7 @@ export default function ProjectManagerDashboard({
                     <div className="flex items-center justify-between border-b pb-2.5">
                         <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
                             <BarChart3 className="w-4 h-4 text-emerald-700" />
-                            <span>Exécution Budgétaire du Projet (USD)</span>
+                            <span>Exécution Budgétaire (USD)</span>
                         </h3>
                         <span className="text-[10px] font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded">
                             {pmStats.budget_total_fc.toLocaleString()} FC
@@ -531,7 +545,7 @@ export default function ProjectManagerDashboard({
                             <div className={`${gaugeData.isEmpty ? 'bg-gray-200' : 'bg-[#04326D]'} transition-all duration-700`} style={{ width: `${gaugeData.pctRestant}%` }} title={`Reste: ${gaugeData.pctRestant}%`} />
                         </div>
 
-                        <div className="flex items-center gap-4 text-[11px]">
+                        <div className="flex items-center gap-3 text-[10px]">
                             <div className="flex-1 p-2 bg-gray-50 border border-gray-100 rounded text-center">
                                 <span className="block text-gray-500 mb-0.5">Budget Initial</span>
                                 <strong className="font-mono text-[#04326D]">${pmStats.budget_total_usd.toLocaleString()}</strong>
@@ -547,6 +561,36 @@ export default function ProjectManagerDashboard({
                         </div>
                     </div>
                 </div>
+
+                {/* NOUVEAU: RÉPARTITION ET DYNAMIQUE PAR SITES */}
+                <div className="bg-white border border-[#B2BED6] rounded p-5 shadow-sm space-y-3 flex flex-col">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5 border-b pb-2 mb-1 shrink-0">
+                        <MapPin className="w-4 h-4 text-[#F58F20]" />
+                        <span>Dynamique des Sites</span>
+                    </h3>
+                    <div className="flex-1 overflow-y-auto pr-1 space-y-2 max-h-[110px]">
+                        {siteStats.length === 0 ? (
+                            <p className="text-[11px] text-gray-400 italic text-center py-4">Aucune donnée par site.</p>
+                        ) : (
+                            siteStats.map((st, i) => (
+                                <div key={i} className="flex items-center justify-between p-2 rounded border border-gray-100 bg-gray-50 text-[11px]">
+                                    <span className="font-bold text-[#04326D] truncate max-w-[120px]" title={st.name}>
+                                        {st.name}
+                                    </span>
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-gray-500 font-mono">{st.count} req.</span>
+                                        {st.pending > 0 && (
+                                            <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold font-mono">
+                                                {st.pending} à viser
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+
             </div>
 
             <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
@@ -567,6 +611,23 @@ export default function ProjectManagerDashboard({
                                 <option value="en_attente_mp">À arbitrer (Visa MP)</option>
                                 <option value="valide_mp">Validées (Transmises)</option>
                                 <option value="a_corriger">À arbitrer / corriger</option>
+                            </select>
+                        </div>
+
+                        {/* NOUVEAU: FILTRE PAR SITE */}
+                        <div className="flex items-center gap-1.5">
+                            <MapPin className="w-3.5 h-3.5 text-gray-400" />
+                            <select
+                                value={filterSite}
+                                onChange={(e) => setFilterSite(e.target.value)}
+                                className="border border-[#B2BED6] rounded px-2.5 py-1 text-xs bg-white text-[#0B192C] font-semibold focus:outline-none"
+                            >
+                                <option value="all">Tous les sites</option>
+                                {siteStats.map((st, i) => (
+                                    <option key={i} value={st.name}>
+                                        {st.name}
+                                    </option>
+                                ))}
                             </select>
                         </div>
 
@@ -596,7 +657,7 @@ export default function ProjectManagerDashboard({
                             <tr className="bg-[#0B192C] text-white uppercase text-[10px] font-bold tracking-wider">
                                 <th className="py-3 px-4">Numéro</th>
                                 <th className="py-3 px-4">Date</th>
-                                <th className="py-3 px-4">Initiateur</th>
+                                <th className="py-3 px-4">Initiateur & Site</th>
                                 <th className="py-3 px-4">Nature</th>
                                 <th className="py-3 px-4">Observation</th>
                                 <th className="py-3 px-4 text-right">Montant Total</th>
@@ -633,7 +694,10 @@ export default function ProjectManagerDashboard({
                                             </td>
                                             <td className="py-3.5 px-4 whitespace-nowrap">
                                                 <p className="font-bold text-[#0B192C]">{req.initiateurNom}</p>
-                                                <p className="text-[10px] text-gray-400">{req.initiateurRole}</p>
+                                                <div className="flex items-center gap-1 text-[10px] text-gray-500 mt-0.5">
+                                                    <MapPin className="w-2.5 h-2.5 shrink-0" />
+                                                    <span className="truncate">{req.initiateurSite || 'Général'}</span>
+                                                </div>
                                             </td>
                                             <td className="py-3.5 px-4 whitespace-nowrap font-semibold">
                                                 {req.nature}
@@ -736,7 +800,7 @@ export default function ProjectManagerDashboard({
                                     )}
                                 </h2>
                                 <p className="text-xs text-gray-500">
-                                    Projet : <strong>{directorPreviewReq.projet}</strong> • Caisse : <strong>{directorPreviewReq.caisseAttribuee || directorPreviewReq.caisseSouhaitee}</strong>
+                                    Projet : <strong>{directorPreviewReq.projet}</strong> • Site : <strong>{directorPreviewReq.initiateurSite || 'Général'}</strong> • Caisse : <strong>{directorPreviewReq.caisseAttribuee || directorPreviewReq.caisseSouhaitee}</strong>
                                 </p>
                             </div>
                             <button onClick={() => setDirectorPreviewReq(null)} className="text-gray-400 hover:text-gray-600">
@@ -825,11 +889,11 @@ export default function ProjectManagerDashboard({
             {/* MODALE D'ARBITRAGE DU PM AVEC DÉTECTION DE BLOCAGE DÉPASSEMENT ET VENTILATION */}
             {selectedReq && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in"
-                    onClick={() => setActiveInputId(null)} // Pour fermer les dropdowns en cliquant en dehors
+                    onClick={() => setActiveInputId(null)}
                 >
                     <div
                         className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-6xl w-full p-6 space-y-4 max-h-[95vh] flex flex-col animate-slide-down"
-                        onClick={(e) => e.stopPropagation()} // Empêche la fermeture de la modale elle-même
+                        onClick={(e) => e.stopPropagation()} 
                     >
                         <header className="flex items-start justify-between border-b pb-3 shrink-0">
                             <div>
@@ -840,7 +904,7 @@ export default function ProjectManagerDashboard({
                                     Réquisition N° {selectedReq.numero} ({selectedReq.nature})
                                 </h2>
                                 <p className="text-xs text-gray-500 mt-0.5">
-                                    Initiateur : <strong>{selectedReq.initiateurNom}</strong> • Date : {selectedReq.dateSoumission}
+                                    Initiateur : <strong>{selectedReq.initiateurNom}</strong> ({selectedReq.initiateurSite || 'Général'}) • Date : {selectedReq.dateSoumission}
                                     {' '}• Statut : <strong>{selectedReq.statusLabel}</strong>
                                 </p>
                             </div>
