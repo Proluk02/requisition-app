@@ -1308,12 +1308,19 @@ class RequisitionController extends Controller
 
     private function notifierInitiateurRequisitionPrete(Requisition $requisition): void
     {
-        $requisition->user()->firstOrFail()->notify(new RequisitionReadyForDisbursement(
-            numero: $requisition->numero_requisition,
-            montant: (float) $requisition->montant_total,
-            devise: $requisition->devise,
-            caisse: $requisition->caisse_decaissement,
-        ));
+        try {
+            if ($requisition->user) {
+                $requisition->user->notify(new RequisitionReadyForDisbursement(
+                    numero: $requisition->numero_requisition,
+                    montant: (float) $requisition->montant_total,
+                    devise: $requisition->devise,
+                    caisse: $requisition->caisse_decaissement,
+                ));
+            }
+        } catch (\Throwable $e) {
+            // Empêche l'application de crasher (Erreur 500) si le serveur SMTP (mail) échoue.
+            \Illuminate\Support\Facades\Log::error("Erreur lors de l'envoi de l'email 'Prêt pour décaissement' : " . $e->getMessage());
+        }
     }
 
     protected function verifierSecretSignature(User $user, ?string $secret): bool

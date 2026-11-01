@@ -165,62 +165,48 @@ export default function RequisitionsIndex({
         });
     };
 
-    const renderEtapeBadge = (etape: string, isUrgent: boolean, statusCode?: string) => {
-        if (statusCode === 'returned_to_beneficiary' || statusCode === 'returned_to_urgent_initiator') {
-            return (
-                <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-red-100 text-red-800 border border-red-200 shadow-sm">
-                    À Corriger (Par vous)
-                </span>
-            );
+    const renderEtapeBadge = (req: RequisitionSuivi) => {
+        let colorClasses = 'bg-gray-100 text-gray-700 border-gray-200';
+
+        switch (req.statusCode) {
+            case 'returned_to_beneficiary':
+            case 'returned_to_urgent_initiator':
+                colorClasses = 'bg-red-100 text-red-800 border-red-200';
+                break;
+            case 'returned_to_project_manager':
+            case 'returned_to_finance':
+            case 'returned_to_admin_manager':
+            case 'rejetee':
+                colorClasses = 'bg-amber-50 text-amber-800 border-amber-300';
+                break;
+            case 'draft':
+                colorClasses = 'bg-gray-100 text-gray-700 border-gray-200';
+                break;
+            case 'visa_mp':
+                colorClasses = 'bg-amber-50 text-[#F58F20] border-amber-200';
+                break;
+            case 'visa_pam':
+            case 'controle_finance':
+                colorClasses = 'bg-purple-50 text-purple-700 border-purple-200';
+                break;
+            case 'visa_admin':
+            case 'urgent_direction':
+                colorClasses = 'bg-blue-50 text-[#04326D] border-blue-200';
+                break;
+            case 'decaissement_caisse':
+                colorClasses = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                break;
+            case 'decaisse':
+                colorClasses = 'bg-green-100 text-green-900 border-green-300';
+                break;
+            case 'cloture':
+                colorClasses = 'bg-gray-800 text-white border-gray-900';
+                break;
         }
 
-        if (statusCode === 'returned_to_project_manager') {
-            return (
-                <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
-                    En arbitrage (Chef de Projet)
-                </span>
-            );
-        }
-
-        if (statusCode === 'returned_to_finance' || statusCode === 'returned_to_admin_manager') {
-            return (
-                <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
-                    En révision (Chef de Projet)
-                </span>
-            );
-        }
-
-        if (statusCode === 'rejetee') {
-            return (
-                <span className="inline-block rounded px-2.5 py-1 text-[10px] font-bold bg-red-50 text-red-700 border border-red-200">
-                    Rejetée définitivement
-                </span>
-            );
-        }
-
-        const badges: Record<string, string> = {
-            brouillon: 'bg-gray-100 text-gray-700 border-gray-200',
-            visa_mp: 'bg-amber-50 text-[#F58F20] border-amber-200',
-            visa_pam: 'bg-blue-50 text-[#04326D] border-blue-200',
-            controle_finance: 'bg-purple-50 text-purple-700 border-purple-200',
-            visa_admin: 'bg-amber-50 text-amber-600 border-amber-200',
-            approbation_direction: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-            decaissement_caisse: 'bg-emerald-50 text-emerald-800 border border-emerald-200',
-            cloture: 'bg-gray-800 text-white border border-gray-800',
-        };
-        const labels: Record<string, string> = {
-            brouillon: 'En attente Chef Projet',
-            visa_mp: 'En attente du PAM',
-            visa_pam: 'En attente des Finances',
-            controle_finance: 'En attente des Finances',
-            visa_admin: 'En attente Direction',
-            approbation_direction: 'En attente Direction',
-            decaissement_caisse: 'Prêt pour Caisse',
-            cloture: 'Clôturé',
-        };
         return (
-            <span className={`inline-block border px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${badges[etape] || 'bg-gray-100 text-gray-700'}`}>
-                {labels[etape] || etape}
+            <span className={`inline-block border px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider shadow-sm ${colorClasses}`}>
+                {req.statusLabel || req.statusCode}
             </span>
         );
     };
@@ -418,7 +404,7 @@ export default function RequisitionsIndex({
                                                     {req.montantTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} {req.devise}
                                                 </td>
                                                 <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                                                    {renderEtapeBadge(req.etapeActuelle, req.is_urgent ?? false, req.statusCode)}
+                                                    {renderEtapeBadge(req)}
                                                 </td>
                                                 <td className="py-3.5 px-4 text-right whitespace-nowrap">
                                                     <div className="inline-flex items-center gap-1 justify-end">

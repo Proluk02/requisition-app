@@ -281,8 +281,9 @@ class CashierController extends Controller
             return Redirect::back()->withErrors(['pin' => 'Code PIN caissier incorrect ou non configuré.']);
         }
 
-        DB::transaction(function () use ($validated, $requisition, $user, $cashRegister, $session, $montantDecaisse) {
-            // Eager load des demandes ET de leurs splits pour avoir toutes les informations.
+        // TRANSACTION BASE DE DONNÉES
+        $disbursedRequisition = DB::transaction(function () use ($validated, $requisition, $user, $cashRegister, $session, $montantDecaisse) {
+            // Eager load des demandes ET de leurs splits
             $lockedRequisition = Requisition::with('demandes.splits')->whereKey($requisition->id)->lockForUpdate()->firstOrFail();
 
             $now = now();
@@ -294,7 +295,6 @@ class CashierController extends Controller
             $conversionTotal = DailyExchangeRate::convertToEur($montantDecaisse, $lockedRequisition->devise, $activeRate);
             $totalRequisitionEur = $conversionTotal['montant_eur'];
 
-            // 1. AGRÉGATION DES DÉDUCTIONS BUDGÉTAIRES PAR CODE (Prévient les écrasements si le même code est ventilé plusieurs fois)
             $deductionsParCode = [];
             $originalCodes = [];
 
@@ -327,7 +327,6 @@ class CashierController extends Controller
                 }
             }
 
-            // Générer l'étiquette d'imputation globale (pour le BSC PDF)
             $originalCodes = array_values(array_unique(array_filter($originalCodes)));
             $primaryImputation = count($originalCodes) > 1 
                 ? 'MULTI-CODES (' . implode(', ', array_slice($originalCodes, 0, 3)) . (count($originalCodes) > 3 ? '...' : '') . ')' 
@@ -339,7 +338,7 @@ class CashierController extends Controller
                 $lockedRequisition->observation ?? ''
             );
 
-            // 2. Création du Mouvement de Caisse (BSC)
+            // Création du Mouvement de Caisse (BSC)
             CashMovement::create([
                 'cash_register_id' => $cashRegister->id,
                 'session_id' => $session->id,
@@ -362,7 +361,7 @@ class CashierController extends Controller
                 'signature_caissier' => $user->name,
             ]);
 
-            // 3. Application propre et sécurisée des déductions sur le solde de chaque Ligne Budgétaire
+            // Application des déductions budgétaires
             foreach ($deductionsParCode as $codeNorm => $montantADeduire) {
                 $budgetLine = BudgetLine::where('project_id', $lockedRequisition->project_id)
                     ->whereRaw('LOWER(TRIM(code)) = ?', [$codeNorm])
@@ -380,7 +379,7 @@ class CashierController extends Controller
                 }
             }
 
-            // 4. Clôture de la réquisition
+            // Clôture de la réquisition
             $lockedRequisition->update([
                 'status' => 'decaisse',
                 'cashier_id' => $user->id,
@@ -400,7 +399,7 @@ class CashierController extends Controller
                 user: $user,
                 roleSignataire: 'cashier',
                 action: 'disbursed',
-                commentaire: "Bon de Sortie Caisse {$numeroBSC} émis. Paiement en {$validated['mode_paiement']}. Déduit du budget au taux journalier (Équivalent total : {$totalRequisitionEur} EUR)."
+                commentaire: "Bon de Sortie Caisse {$numeroBSC} émis. Paiement en {$validated['mode_paiement']}."
             );
 
             $this->notifierUtilisateur(
@@ -408,9 +407,24 @@ class CashierController extends Controller
                 titre: 'Bon de Sortie Caisse émis',
                 message: "Les fonds pour votre réquisition {$lockedRequisition->numero_requisition} ont été décaissés sous le N° {$numeroBSC}."
             );
+
+            // On retourne la réquisition pour pouvoir envoyer l'email hors de la transaction
+            return clone $lockedRequisition;
         });
 
-        return Redirect::back()->with('success', 'Bon de Sortie Caisse émis. Caisse débitée et consommation budgétaire imputée avec succès sur l\'ensemble des lignes et ventilations.');
+        // ---------------------------------------------------------------------
+        // ENVOI DE L'EMAIL (HORS DE LA TRANSACTION POUR ÉVITER LES TIMEOUTS DB)
+        // ---------------------------------------------------------------------
+        try {
+            $initiator = $disbursedRequisition->user()->first();
+            if ($initiator) {
+                $initiator->notify(new \App\Notifications\RequisitionDisbursed($disbursedRequisition));
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("Erreur lors de l'envoi du PDF payé par mail (Caissier) : " . $e->getMessage());
+        }
+
+        return Redirect::back()->with('success', 'Bon de Sortie Caisse émis. Le dossier a été décaissé et le PDF "PAYÉ" a été envoyé au demandeur.');
     }
 
     /**

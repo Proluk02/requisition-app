@@ -84,7 +84,6 @@ class DashboardController extends Controller
 
     private function renderProjectManagerDashboard(User $user)
     {
-        // AJOUT de 'demandes.splits'
         $requisitionsQuery = clone Requisition::with(['user', 'demandes.justificatifs', 'demandes.splits', 'signatures.user', 'project'])
             ->where('project_id', $user->project_id)
             ->orderByDesc('created_at');
@@ -153,7 +152,6 @@ class DashboardController extends Controller
         $selectedPeriod = $request->input('period', now()->format('Y-m'));
         [$year, $month] = explode('-', $selectedPeriod);
 
-        // AJOUT de 'demandes.splits'
         $query = Requisition::with(['user', 'demandes.justificatifs', 'demandes.splits', 'signatures.user', 'project'])
             ->whereYear('created_at', (int) $year)
             ->whereMonth('created_at', (int) $month)
@@ -220,7 +218,6 @@ class DashboardController extends Controller
                     'prixUnitaire' => (float) $d->frais_unitaire,
                     'frais' => (float) $d->frais_unitaire,
                     'total' => (float) $d->total_ligne,
-                    // AJOUT des SPLITS
                     'splits' => $d->splits->map(fn ($s) => [
                         'id' => (string) $s->id,
                         'code_allocation' => $s->code_allocation,
@@ -321,7 +318,7 @@ class DashboardController extends Controller
                 'derniere_observation' => $r->derniere_observation,
                 'needsWaiver' => $r->status === 'urgent_direction',
                 'canApprove' => $r->status === 'visa_admin',
-                'statusLabel' => $this->mapWorkflowLevel($r->status)['label'],
+                'statusLabel' => $this->getUnifiedStatusLabel($r->status),
             ]);
 
         return Inertia::render('Director/UrgentRequisitions', [
@@ -338,7 +335,6 @@ class DashboardController extends Controller
 
     private function renderFinanceDashboard(User $user)
     {
-        // AJOUT de 'demandes.splits'
         $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'demandes.splits', 'signatures.user', 'project'])
             ->orderByDesc('created_at')
             ->get();
@@ -403,7 +399,6 @@ class DashboardController extends Controller
             'allBudgetLines' => $allBudgetLines,
             'pendingSessions' => $pendingSessions,
             'requisitions' => $requisitions->map(function (Requisition $r) use ($budgetLinesByKey) {
-                // SÉCURITÉ : La Finance ne peut décider QUE si le statut est STRICTEMENT 'visa_pam' !
                 $canDecideFinance = $r->status === 'visa_pam';
 
                 return [
@@ -423,17 +418,7 @@ class DashboardController extends Controller
                     'is_urgent' => (bool) $r->is_urgent,
                     'is_delayed' => $this->isDelayed($r),
                     'statusCode' => $r->status,
-                    'statusLabel' => match ($r->status) {
-                        'draft' => 'En attente Visa MP',
-                        'visa_mp' => 'En attente du visa PAM (Étape 2)',
-                        'visa_pam' => 'À viser par les Finances',
-                        'controle_finance' => 'Validée par les Finances',
-                        'returned_to_project_manager' => 'Renvoyée au Chef de Projet',
-                        'visa_admin' => 'Transmise à la Direction',
-                        'decaissement_caisse' => 'Prête pour la Caisse',
-                        'decaisse' => 'Décaissée',
-                        default => ucfirst(str_replace('_', ' ', $r->status)),
-                    },
+                    'statusLabel' => $this->getUnifiedStatusLabel($r->status),
                     'canDecide' => $canDecideFinance,
                     'canCorrect' => false,
                     'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
@@ -456,7 +441,6 @@ class DashboardController extends Controller
                             'prixUnitaire' => (float) $d->frais_unitaire,
                             'frais' => (float) $d->frais_unitaire,
                             'total' => (float) $d->total_ligne,
-                            // AJOUT des SPLITS
                             'splits' => $d->splits->map(fn ($s) => [
                                 'id' => (string) $s->id,
                                 'code_allocation' => $s->code_allocation,
@@ -490,7 +474,6 @@ class DashboardController extends Controller
             ->orderByDesc('created_at')
             ->get();
 
-        // Le PAM examine STRICTEMENT les réquisitions au statut 'visa_mp'
         $requisitions = Requisition::with(['user', 'demandes.justificatifs', 'demandes.splits', 'signatures.user', 'project'])
             ->where(function ($query) use ($user) {
                 $query->where('status', 'visa_mp')
@@ -576,7 +559,7 @@ class DashboardController extends Controller
                 'montantTotal' => (float) $r->montant_total,
                 'caisseAttribuee' => $r->caisse_decaissement ?? 'Caisse principale',
                 'statusCode' => $r->status,
-                'statusLabel' => $this->mapWorkflowLevel($r->status)['label'],
+                'statusLabel' => $this->getUnifiedStatusLabel($r->status),
                 'is_urgent' => (bool) $r->is_urgent,
                 'is_delayed' => $this->isDelayed($r),
                 'dateSoumission' => $r->created_at?->format('d/m/Y') ?? '',
@@ -599,11 +582,7 @@ class DashboardController extends Controller
                 'is_urgent' => (bool) $r->is_urgent,
                 'is_delayed' => $this->isDelayed($r),
                 'statusCode' => $r->status,
-                'statusLabel' => match ($r->status) {
-                    'returned_to_urgent_initiator' => 'Urgence à corriger par son initiateur',
-                    'visa_mp' => 'Examen administratif en attente (PAM)',
-                    default => 'Contrôle Administratif en attente',
-                },
+                'statusLabel' => $this->getUnifiedStatusLabel($r->status),
                 'canDecide' => $r->status === 'visa_mp',
                 'canCorrect' => ($r->status === 'returned_to_urgent_initiator' && (string) $r->user_id === (string) $user->id),
                 'motifRejet' => $r->signatures->where('action', 'rejected')->last()?->commentaire,
@@ -620,7 +599,6 @@ class DashboardController extends Controller
                     'prixUnitaire' => (float) $d->frais_unitaire,
                     'frais' => (float) $d->frais_unitaire,
                     'total' => (float) $d->total_ligne,
-                    // AJOUT des SPLITS
                     'splits' => $d->splits->map(fn ($s) => [
                         'id' => (string) $s->id,
                         'code_allocation' => $s->code_allocation,
@@ -637,24 +615,84 @@ class DashboardController extends Controller
         ]);
     }
 
-    private function mapWorkflowLevel(string $status): array
+    private function getUnifiedStatusLabel(string $status): string
     {
         return match ($status) {
-            'draft' => ['step' => 1, 'label' => 'En attente du Manager de Projet', 'color' => 'gray'],
-            'returned_to_beneficiary', 'returned_to_urgent_initiator' => ['step' => 1, 'label' => 'À corriger par l’initiateur', 'color' => 'red'],
-            'returned_to_project_manager' => ['step' => 2, 'label' => 'À arbitrer par le Manager de Projet', 'color' => 'red'],
-            'urgent_direction' => ['step' => 1, 'label' => 'Dérogation Urgente', 'color' => 'red'],
-            'visa_mp' => ['step' => 2, 'label' => 'En attente du PAM', 'color' => 'blue'],
-            'visa_pam' => ['step' => 3, 'label' => 'En attente des Finances', 'color' => 'purple'],
-            'controle_finance' => ['step' => 3, 'label' => 'Contrôle Finances validé', 'color' => 'purple'],
-            'returned_to_finance', 'returned_to_admin_manager' => ['step' => 3, 'label' => 'À arbitrer par le Manager de Projet', 'color' => 'red'],
-            'visa_admin' => ['step' => 4, 'label' => 'En attente Bon à Payer (Direction)', 'color' => 'amber'],
-            'decaissement_caisse' => ['step' => 5, 'label' => 'Approuvé (À décaisser)', 'color' => 'emerald'],
-            'decaisse' => ['step' => 6, 'label' => 'Décaissé', 'color' => 'green'],
-            'cloture' => ['step' => 7, 'label' => 'Clôturé', 'color' => 'black'],
-            'rejetee' => ['step' => 0, 'label' => 'Rejeté', 'color' => 'red'],
-            default => ['step' => 1, 'label' => ucfirst(str_replace('_', ' ', $status)), 'color' => 'gray'],
+            'draft' => 'En attente du Manager de Projet',
+            'visa_mp' => 'En attente du PAM',
+            'visa_pam' => 'En attente des Finances',
+            'controle_finance' => 'En attente de la Directrice',
+            'visa_admin' => 'En attente de la Directrice',
+            'urgent_direction' => 'En attente de la Directrice (Urgence)',
+            'decaissement_caisse' => 'En attente de la Caisse',
+            'decaisse' => 'Décaissée',
+            'cloture' => 'Clôturée',
+            'returned_to_beneficiary' => 'À corriger par l’initiateur',
+            'returned_to_urgent_initiator' => 'Urgence à corriger par l’initiateur',
+            'returned_to_project_manager' => 'À arbitrer par le Chef de Projet',
+            'returned_to_finance' => 'À arbitrer par le Chef de Projet',
+            'returned_to_admin_manager' => 'À arbitrer par le Chef de Projet',
+            'rejetee' => 'Rejetée',
+            default => ucfirst(str_replace('_', ' ', $status)),
         };
+    }
+
+    private function mapWorkflowLevel(string $status): array
+    {
+        $label = $this->getUnifiedStatusLabel($status);
+        
+        $step = match($status) {
+            'draft', 'returned_to_beneficiary', 'returned_to_urgent_initiator', 'urgent_direction' => 1,
+            'returned_to_project_manager', 'visa_mp' => 2,
+            'visa_pam', 'controle_finance', 'returned_to_finance', 'returned_to_admin_manager' => 3,
+            'visa_admin' => 4,
+            'decaissement_caisse' => 5,
+            'decaisse' => 6,
+            'cloture' => 7,
+            'rejetee' => 0,
+            default => 1,
+        };
+
+        $color = match($status) {
+            'draft' => 'gray',
+            'returned_to_beneficiary', 'returned_to_urgent_initiator', 'returned_to_project_manager', 'returned_to_finance', 'returned_to_admin_manager', 'urgent_direction', 'rejetee' => 'red',
+            'visa_mp' => 'blue',
+            'visa_pam', 'controle_finance' => 'purple',
+            'visa_admin' => 'amber',
+            'decaissement_caisse' => 'emerald',
+            'decaisse' => 'green',
+            'cloture' => 'black',
+            default => 'gray',
+        };
+        
+        return ['step' => $step, 'label' => $label, 'color' => $color];
+    }
+
+    private function mapWorkflowStatus(string $status): array
+    {
+        $label = $this->getUnifiedStatusLabel($status);
+        
+        $key = match($status) {
+            'draft', 'returned_to_project_manager', 'returned_to_finance', 'returned_to_admin_manager' => 'visa_mp',
+            'returned_to_beneficiary', 'returned_to_urgent_initiator' => 'brouillon',
+            'urgent_direction', 'visa_admin', 'approbation_direction' => 'approbation_direction',
+            'visa_mp' => 'visa_pam',
+            'visa_pam', 'controle_finance' => 'controle_finance',
+            'decaissement_caisse', 'decaisse', 'cloture' => 'caisse_pret',
+            default => 'chef_projet',
+        };
+
+        $validator = match($status) {
+            'draft', 'returned_to_project_manager', 'returned_to_finance', 'returned_to_admin_manager' => 'Manager Projet',
+            'returned_to_beneficiary', 'returned_to_urgent_initiator' => 'Initiateur',
+            'urgent_direction', 'visa_admin', 'approbation_direction' => 'Directrice Générale',
+            'visa_mp' => 'Manager Admin (PAM)',
+            'visa_pam', 'controle_finance' => 'Manager Finances',
+            'decaissement_caisse', 'decaisse', 'cloture' => 'Caisse',
+            default => 'Initiateur',
+        };
+
+        return ['key' => $key, 'label' => $label, 'validator' => $validator];
     }
 
     private function buildStats($requisitions): array
@@ -758,24 +796,7 @@ class DashboardController extends Controller
                 'is_delayed' => $this->isDelayed($r),
                 'statut' => $statut,
                 'statusCode' => $r->status,
-                'statusLabel' => match ($r->status) {
-                    'draft' => 'En attente Visa MP',
-                    'returned_to_beneficiary' => 'À corriger par le bénéficiaire',
-                    'returned_to_project_manager' => 'À arbitrer par le Chef de Projet',
-                    'returned_to_finance' => 'À arbitrer par le Chef de Projet',
-                    'returned_to_admin_manager' => 'À arbitrer par le Chef de Projet',
-                    'returned_to_urgent_initiator' => 'Urgence à corriger par l’initiateur',
-                    'visa_mp' => 'Transmis au PAM',
-                    'visa_pam' => 'Transmis aux Finances',
-                    'controle_finance' => 'Validée Finances',
-                    'visa_admin' => 'Transmis à la Direction',
-                    'urgent_direction' => 'Urgence en attente de la Direction',
-                    'decaissement_caisse' => 'En attente de la Caisse',
-                    'decaisse' => 'Décaissée',
-                    'cloture' => 'Clôturée',
-                    'rejetee' => 'Rejetée',
-                    default => 'Validé MP',
-                },
+                'statusLabel' => $this->getUnifiedStatusLabel($r->status),
                 'canDecide' => in_array($r->status, ['draft', 'returned_to_project_manager', 'returned_to_finance'], true),
                 'canCorrect' => $isReturnedToPm,
                 'financeReturned' => $isReturnedToPm,
@@ -802,7 +823,6 @@ class DashboardController extends Controller
                         'prixUnitaire' => (float) $d->frais_unitaire,
                         'devise' => $r->devise,
                         'total' => (float) $d->total_ligne,
-                        // AJOUT des SPLITS
                         'splits' => $d->splits->map(fn ($s) => [
                             'id' => (string) $s->id,
                             'code_allocation' => $s->code_allocation,
@@ -828,25 +848,6 @@ class DashboardController extends Controller
                 })->values()->all(),
             ];
         })->values()->all();
-    }
-
-    private function mapWorkflowStatus(string $status): array
-    {
-        return match ($status) {
-            'draft' => ['key' => 'visa_mp', 'label' => 'En attente du Manager de Projet', 'validator' => 'Manager Projet'],
-            'returned_to_beneficiary', 'returned_to_urgent_initiator' => ['key' => 'brouillon', 'label' => 'À corriger par l’initiateur', 'validator' => 'Initiateur'],
-            'returned_to_project_manager', 'returned_to_finance', 'returned_to_admin_manager' => ['key' => 'visa_mp', 'label' => 'À arbitrer par le Manager de Projet', 'validator' => 'Manager Projet'],
-            'urgent_direction' => ['key' => 'approbation_direction', 'label' => 'Dérogation urgente', 'validator' => 'Directrice'],
-            'visa_mp' => ['key' => 'visa_pam', 'label' => 'En attente du PAM', 'validator' => 'Manager Admin (PAM)'],
-            'visa_pam' => ['key' => 'controle_finance', 'label' => 'En attente des Finances', 'validator' => 'Manager Finances'],
-            'controle_finance' => ['key' => 'visa_admin', 'label' => 'Contrôle Finances validé', 'validator' => 'Manager Finances'],
-            'visa_admin' => ['key' => 'approbation_direction', 'label' => 'En attente de la Directrice', 'validator' => 'Directrice Générale'],
-            'approbation_direction' => ['key' => 'approbation_direction', 'label' => 'Approbation Direction', 'validator' => 'Directrice Générale'],
-            'decaissement_caisse' => ['key' => 'caisse_pret', 'label' => 'Caisse (Prêt)', 'validator' => 'Caisse'],
-            'decaisse' => ['key' => 'caisse_pret', 'label' => 'Décaissé', 'validator' => 'Caisse'],
-            'cloture' => ['key' => 'caisse_pret', 'label' => 'Clôturé', 'validator' => 'Clôture'],
-            default => ['key' => 'chef_projet', 'label' => 'Brouillon', 'validator' => 'Initiateur'],
-        };
     }
 
     private function formatSignatures($signatures): array

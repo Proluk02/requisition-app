@@ -15,6 +15,8 @@ import {
     Lock,
     ChevronLeft,
     ChevronRight,
+    AlertTriangle,
+    CheckCircle
 } from 'lucide-react';
 
 interface Role {
@@ -46,7 +48,15 @@ interface Filters {
     site_id?: string;
 }
 
-interface Props extends PageProps {
+// Extension des PageProps pour inclure les messages flash
+interface CustomPageProps extends PageProps {
+    flash: {
+        success?: string | null;
+        error?: string | null;
+    };
+}
+
+interface Props extends CustomPageProps {
     users: PaginatedUsers;
     filters: Filters;
     roles: Role[];
@@ -55,12 +65,16 @@ interface Props extends PageProps {
 }
 
 export default function Index({ users, filters, roles, projects, sites }: Props) {
-    const { auth } = usePage<PageProps>().props;
+    const { auth, flash } = usePage<CustomPageProps>().props;
     const [search, setSearch] = useState(filters.search || '');
     const [role, setRole] = useState(filters.role || '');
     const [status, setStatus] = useState(filters.status || '');
     const [projectId, setProjectId] = useState(filters.project_id || '');
     const [siteId, setSiteId] = useState(filters.site_id || '');
+
+    // États pour la modale de suppression
+    const [userToDelete, setUserToDelete] = useState<User | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     const isFirstRender = useRef(true);
     const debounceRef = useRef<ReturnType<typeof setTimeout>>();
@@ -101,10 +115,23 @@ export default function Index({ users, filters, roles, projects, sites }: Props)
         router.patch(route('admin.users.toggle-status', user.id), {}, { preserveScroll: true });
     };
 
-    const handleDelete = (user: User) => {
-        if (confirm(`Confirmez-vous la suppression définitive du compte de ${user.name} ?`)) {
-            router.delete(route('admin.users.destroy', user.id), { preserveScroll: true });
-        }
+    const confirmDelete = () => {
+        if (!userToDelete) return;
+        setIsDeleting(true);
+
+        router.delete(route('admin.users.destroy', userToDelete.id), {
+            preserveScroll: true,
+            onSuccess: () => {
+                setUserToDelete(null);
+                setIsDeleting(false);
+            },
+            onError: () => {
+                setIsDeleting(false);
+            },
+            onFinish: () => {
+                setIsDeleting(false);
+            },
+        });
     };
 
     const hasActiveFilters = search || role || status || projectId || siteId;
@@ -116,7 +143,24 @@ export default function Index({ users, filters, roles, projects, sites }: Props)
         <AppLayout>
             <Head title="Gestion des Utilisateurs" />
 
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-6 relative">
+                
+                {/* --- AFFICHAGE DES MESSAGES D'ERREUR OU DE SUCCÈS --- */}
+                {flash?.error && (
+                    <div className="p-4 bg-error-soft text-error-dark rounded-lg border border-error/20 flex items-center gap-3 text-sm font-medium shadow-sm animate-in fade-in slide-in-from-top-4">
+                        <AlertTriangle className="w-5 h-5 text-error flex-shrink-0" />
+                        <p>{flash.error}</p>
+                    </div>
+                )}
+
+                {flash?.success && (
+                    <div className="p-4 bg-success-soft text-success-dark rounded-lg border border-success/20 flex items-center gap-3 text-sm font-medium shadow-sm animate-in fade-in slide-in-from-top-4">
+                        <CheckCircle className="w-5 h-5 text-success flex-shrink-0" />
+                        <p>{flash.success}</p>
+                    </div>
+                )}
+                {/* -------------------------------------------------- */}
+
                 {/* En-tête */}
                 <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center border-b border-outline-soft pb-5">
                     <div>
@@ -303,7 +347,7 @@ export default function Index({ users, filters, roles, projects, sites }: Props)
                                                                     </button>
                                                                     <button
                                                                         type="button"
-                                                                        onClick={() => handleDelete(u)}
+                                                                        onClick={() => setUserToDelete(u)}
                                                                         className="p-1.5 text-error hover:bg-error-soft rounded-md transition"
                                                                         title="Supprimer"
                                                                     >
@@ -417,6 +461,52 @@ export default function Index({ users, filters, roles, projects, sites }: Props)
                     </div>
                 </div>
             </div>
+
+            {/* Modale de confirmation de suppression */}
+            {userToDelete && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 transition-opacity">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+                        <div className="p-6 text-center space-y-4">
+                            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-error-soft">
+                                <AlertTriangle className="h-7 w-7 text-error" />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-bold text-gray-900">
+                                    Supprimer l'utilisateur
+                                </h3>
+                                <p className="text-sm text-gray-500 mt-2">
+                                    Êtes-vous sûr de vouloir supprimer définitivement le compte de <strong className="text-gray-800">{userToDelete.name}</strong> ? Cette action est irréversible.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="bg-gray-50 px-6 py-4 flex items-center justify-end gap-3 border-t border-gray-100">
+                            <button
+                                type="button"
+                                onClick={() => setUserToDelete(null)}
+                                disabled={isDeleting}
+                                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors focus:outline-none"
+                            >
+                                Annuler
+                            </button>
+                            <button
+                                type="button"
+                                onClick={confirmDelete}
+                                disabled={isDeleting}
+                                className="px-4 py-2 text-sm font-medium text-white bg-error border border-transparent rounded-md hover:bg-error-dark transition-colors focus:outline-none flex items-center gap-2"
+                            >
+                                {isDeleting ? (
+                                    <>
+                                        <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
+                                        Suppression...
+                                    </>
+                                ) : (
+                                    'Supprimer le compte'
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </AppLayout>
     );
 }

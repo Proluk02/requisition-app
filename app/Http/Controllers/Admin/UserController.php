@@ -203,7 +203,6 @@ class UserController extends Controller
         $user->cashRegisters()->detach();
         $user->delete();
 
-        return redirect()->route('admin.users.index')
-            ->with('success', 'Utilisateur supprimé avec succès.');
+        return back()->with('success', 'Utilisateur supprimé avec succès.');
     }
 }
