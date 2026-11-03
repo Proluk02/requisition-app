@@ -717,6 +717,10 @@ class RequisitionController extends Controller
             ]);
         }
 
+        $action = $validated['decision'] === 'approve' ? 'approuvée' : 'rejetée';
+        $commentaire = $validated['decision'] === 'approve' ? ($validated['observation'] ?? null) : ($validated['motif_rejet'] ?? null);
+        $this->envoyerMailStatut($requisition, $action, 'Manager de Projet', $commentaire);
+
         return Redirect::back()->with(
             $validated['decision'] === 'approve' ? 'success' : 'error',
             $validated['decision'] === 'approve'
@@ -832,6 +836,10 @@ class RequisitionController extends Controller
                 message: "La réquisition {$lockedRequisition->numero_requisition} a été retournée par le PAM : {$validated['motif_rejet']}"
             );
         });
+
+        $action = $validated['decision'] === 'approve' ? 'approuvée' : 'rejetée';
+        $commentaire = $validated['decision'] === 'approve' ? ($validated['observation'] ?? null) : ($validated['motif_rejet'] ?? null);
+        $this->envoyerMailStatut($requisition, $action, 'Manager Administratif (PAM)', $commentaire);
 
         return Redirect::back()->with(
             $validated['decision'] === 'approve' ? 'success' : 'error',
@@ -1085,6 +1093,12 @@ class RequisitionController extends Controller
             ]);
         }
 
+        if (!isset($resultat['success']) || $resultat['success'] === true) {
+            $action = $validated['decision'] === 'approve' ? 'approuvée' : 'rejetée';
+            $commentaire = $validated['decision'] === 'approve' ? ($validated['observation'] ?? null) : ($validated['motif_rejet'] ?? null);
+            $this->envoyerMailStatut($requisition, $action, 'Département des Finances', $commentaire);
+        }
+
         return Redirect::back()->with(
             $validated['decision'] === 'approve' ? 'success' : 'error',
             $validated['decision'] === 'approve'
@@ -1211,6 +1225,10 @@ class RequisitionController extends Controller
             );
         }
 
+        $action = $validated['decision'] === 'approve' ? 'approuvée' : 'rejetée';
+        $commentaire = $validated['decision'] === 'approve' ? ($validated['observation'] ?? null) : ($validated['motif_rejet'] ?? null);
+        $this->envoyerMailStatut($requisition, $action, 'Direction Générale', $commentaire);
+
         $isInterim = ! $user->hasRole('director') && (bool) $user->is_director_interim;
 
         return Redirect::back()->with(
@@ -1311,6 +1329,10 @@ class RequisitionController extends Controller
             );
         }
 
+        $action = $decision === 'approve' ? 'approuvée' : 'rejetée';
+        $commentaire = $decision === 'approve' ? ($validated['observation'] ?? null) : ($validated['motif_rejet'] ?? null);
+        $this->envoyerMailStatut($requisition, $action, 'Direction Générale (Urgence)', $commentaire);
+
         return Redirect::back()->with(
             $decision === 'approve' ? 'success' : 'error',
             $decision === 'approve'
@@ -1322,16 +1344,23 @@ class RequisitionController extends Controller
     private function notifierInitiateurRequisitionPrete(Requisition $requisition): void
     {
         try {
-            if ($requisition->user) {
-                $requisition->user->notify(new RequisitionReadyForDisbursement(
-                    numero: $requisition->numero_requisition,
-                    montant: (float) $requisition->montant_total,
-                    devise: $requisition->devise,
-                    caisse: $requisition->caisse_decaissement,
-                ));
-            }
+
+            dispatch(function () use ($requisition) {
+                try {
+                    if ($requisition->user) {
+                        $requisition->user->notify(new RequisitionReadyForDisbursement(
+                            numero: $requisition->numero_requisition,
+                            montant: (float) $requisition->montant_total,
+                            devise: $requisition->devise,
+                            caisse: $requisition->caisse_decaissement,
+                        ));
+                    }
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::error("Erreur asynchrone de l'email 'Prêt pour décaissement' : " . $e->getMessage());
+                }
+            })->afterResponse();
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error("Erreur lors de l'envoi de l'email 'Prêt pour décaissement' : " . $e->getMessage());
+            \Illuminate\Support\Facades\Log::error("Erreur lors de la préparation de l'email 'Prêt pour décaissement' : " . $e->getMessage());
         }
     }
 
@@ -1480,5 +1509,54 @@ class RequisitionController extends Controller
         $nomFichier = 'Requisition_'.str_replace('/', '-', $requisition->numero_requisition).'.pdf';
 
         return $pdf->download($nomFichier);
+    }
+
+    protected function envoyerMailStatut(Requisition $requisition, string $action, string $etape, ?string $commentaire = null): void
+    {
+        try {
+
+            dispatch(function () use ($requisition, $action, $etape, $commentaire) {
+                try {
+                    $requisition->loadMissing('user');
+                    $usersToNotify = collect();
+
+
+                    $pm = User::role('project_manager')->where('project_id', $requisition->project_id)->first();
+                    if ($pm) {
+                        $usersToNotify->push($pm);
+                    }
+
+                    $nextRole = match ($requisition->status) {
+                        'visa_mp' => 'admin_manager',
+                        'visa_pam', 'controle_finance' => 'finance',
+                        'visa_admin', 'urgent_direction' => 'director',
+                        'decaissement_caisse' => 'cashier',
+                        default => null,
+                    };
+
+                    if ($nextRole) {
+                        $nextApprovers = User::role($nextRole)->get();
+                        $usersToNotify = $usersToNotify->merge($nextApprovers);
+                    }
+
+                    $usersToNotify = $usersToNotify->unique('id');
+
+                    if ($usersToNotify->isNotEmpty()) {
+                        foreach ($usersToNotify as $userToNotify) {
+                            $userToNotify->notify(new \App\Notifications\RequisitionStatusUpdated($requisition, $action, $etape, $commentaire));
+                        }
+                    } elseif ($requisition->user) {
+
+                        $requisition->user->notify(new \App\Notifications\RequisitionStatusUpdated($requisition, $action, $etape, $commentaire));
+                    }
+
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::error("Erreur asynchrone (envoyerMailStatut) : " . $e->getMessage());
+                }
+            })->afterResponse();
+
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("Erreur de préparation d'email de statut : " . $e->getMessage());
+        }
     }
 }
