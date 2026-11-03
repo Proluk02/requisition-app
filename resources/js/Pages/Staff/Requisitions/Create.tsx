@@ -71,8 +71,12 @@ export default function CreateRequisition({
     const [natureRequisition, setNatureRequisition] = useState<'Achat' | 'Service'>('Achat');
     const [isUrgent, setIsUrgent] = useState<boolean>(false);
 
-    // Initialise avec le premier projet de la liste autorisé
-    const [selectedProject, setSelectedProject] = useState<string>(projectsList[0]?.name ?? '');
+    // Initialise avec le projet du user s'il n'est pas cordo (si dispo dans auth.user), sinon le premier de la liste
+    const defaultProject = (!isCoordinator && user.project?.name) 
+        ? user.project.name 
+        : (projectsList[0]?.name ?? '');
+
+    const [selectedProject, setSelectedProject] = useState<string>(defaultProject);
 
     const projectCode = useMemo(() => {
         if (!selectedProject) return 'XX';
@@ -264,7 +268,7 @@ export default function CreateRequisition({
         }
 
         if (!selectedProject) {
-            alert('Aucun projet n\'est sélectionné. Si la liste est vide, contactez un administrateur pour lier un projet à votre site.');
+            alert('Aucun projet n\'est sélectionné. Si la liste est vide, contactez un administrateur pour lier un projet à votre profil.');
             return;
         }
 
@@ -383,7 +387,7 @@ export default function CreateRequisition({
                     </div>
                 </div>
                 
-                {/* ALERTE BLOQUANTE SI AUCUN PROJET N'EST DISPONIBLE POUR LE CORDONNATEUR */}
+                {/* ALERTE BLOQUANTE SI AUCUN PROJET N'EST DISPONIBLE */}
                 {projectsList.length === 0 && (
                     <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded shadow-sm">
                         <div className="flex">
@@ -448,15 +452,24 @@ export default function CreateRequisition({
                             </div>
 
                             <div>
-                                <label className="block font-semibold text-gray-700 mb-1.5">
-                                    {isCoordinator ? "Projet affecté à votre site" : "Projet"} *
+                                <label className="block font-semibold text-gray-700 mb-1.5 flex items-center justify-between">
+                                    <span>{isCoordinator ? "Projet affecté à votre site" : "Mon Projet affecté"} *</span>
+                                    {!isCoordinator && (
+                                        <span className="text-[10px] text-gray-400 font-normal flex items-center gap-1">
+                                            <Lock className="w-3 h-3 text-emerald-600" /> Lié au profil
+                                        </span>
+                                    )}
                                 </label>
                                 <select
                                     value={selectedProject}
                                     onChange={(e) => setSelectedProject(e.target.value)}
-                                    disabled={projectsList.length <= 1}
-                                    className={`w-full border rounded-md p-2 text-xs font-semibold focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition ${
-                                        projectsList.length === 0 ? 'border-red-300 bg-red-50 text-red-500' : 'border-outline-variant bg-white'
+                                    disabled={!isCoordinator || projectsList.length <= 1}
+                                    className={`w-full border rounded-md p-2 text-xs font-semibold focus:outline-none transition ${
+                                        projectsList.length === 0 
+                                            ? 'border-red-300 bg-red-50 text-red-500' 
+                                            : !isCoordinator || projectsList.length <= 1
+                                                ? 'border-emerald-300 bg-emerald-50/60 text-emerald-900 cursor-not-allowed shadow-inner'
+                                                : 'border-outline-variant bg-white focus:border-primary focus:ring-1 focus:ring-primary/20'
                                     }`}
                                 >
                                     {projectsList.length === 0 ? (
