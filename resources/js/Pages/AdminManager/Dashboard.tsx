@@ -107,8 +107,8 @@ interface AdminStats {
     renvoyees_finance_count: number;
     total_usd: number;
     total_fc: number;
-    decaisse_usd: number;
-    decaisse_fc: number;
+    payment_request_usd: number;
+    payment_request_fc: number;
 }
 
 interface ProjectStat {
@@ -131,7 +131,7 @@ interface CaisseStat {
     total_dossiers: number;
     total_usd: number;
     total_fc: number;
-    decaisse_usd: number;
+    payment_request_usd: number;
 }
 
 interface Props extends PageProps {
@@ -241,8 +241,8 @@ export default function AdminManagerDashboard({
             
             let matchesStatus = true;
             if (historyStatusFilter === 'Rejeté') matchesStatus = item.statusCode.startsWith('returned_') || item.statusCode === 'rejetee';
-            else if (historyStatusFilter === 'Décaissé') matchesStatus = item.statusCode === 'decaisse';
-            else if (historyStatusFilter === 'En cours') matchesStatus = !item.statusCode.startsWith('returned_') && item.statusCode !== 'decaisse';
+            else if (historyStatusFilter === 'Payment Request') matchesStatus = item.statusCode === 'payment_request';
+            else if (historyStatusFilter === 'En cours') matchesStatus = !item.statusCode.startsWith('returned_') && item.statusCode !== 'payment_request';
 
             return matchesSearch && matchesStatus;
         });
@@ -278,7 +278,7 @@ export default function AdminManagerDashboard({
 
                 setToast({
                     type: 'success',
-                    message: `Visa PAM accordé avec succès sur ${selected.numero}. Transmis au service Finance.`
+                    message: `Visa PAM accordé avec succès sur ${selected.numero}. Transmis à la Direction.`
                 });
                 setTimeout(() => setToast(null), 5000);
             },
@@ -489,9 +489,9 @@ export default function AdminManagerDashboard({
                             </div>
                         </div>
                         <div className="mt-3 text-[11px] text-gray-500 flex items-center justify-between">
-                            <span>Décaissements effectués :</span>
+                            <span>Payment Requests prêts :</span>
                             <span className="font-bold text-emerald-700">
-                                {money(adminStats?.decaisse_usd ?? 0, 'USD')}
+                                {money(adminStats?.payment_request_usd ?? 0, 'USD')}
                             </span>
                         </div>
                     </div>
@@ -835,7 +835,7 @@ export default function AdminManagerDashboard({
                                 >
                                     <option value="All">Tous les statuts</option>
                                     <option value="En cours">En cours de traitement</option>
-                                    <option value="Décaissé">Décaissés</option>
+                                    <option value="Payment Request">Payment Request prêt</option>
                                     <option value="Rejeté">Renvoyés / Rejetés</option>
                                 </select>
                             </div>
@@ -874,7 +874,7 @@ export default function AdminManagerDashboard({
                                             <span className={`rounded px-2.5 py-1 text-[10px] font-bold border ${
                                                 item.statusCode.startsWith('returned_')
                                                     ? 'bg-red-50 text-red-800 border-red-200'
-                                                    : item.statusCode === 'decaisse'
+                                                    : item.statusCode === 'payment_request'
                                                     ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                                                     : 'bg-blue-50 text-[#04326D] border-blue-200'
                                             }`}>

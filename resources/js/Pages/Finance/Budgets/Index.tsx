@@ -204,7 +204,7 @@ export default function BudgetIndex({
         const q = search.trim().toLowerCase();
         return donorsSummary.filter((d) => {
             if (donorFilter !== 'all' && d.id !== donorFilter) return false;
-            if (q) return d.name.toLowerCase().includes(q) || d.code.toLowerCase().includes(q);
+            if (q) return d.name.toLowerCase().includes(q) || d.code.toLowerCase().includes(q) || d.id.toLowerCase().includes(q);
             return true;
         });
     }, [donorsSummary, donorFilter, search]);
@@ -447,7 +447,7 @@ export default function BudgetIndex({
 
                             <div className="relative">
                                 <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                                <input type="text" placeholder="Code ou libellé..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 pr-7 py-1 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D] w-52" />
+                                <input type="text" placeholder="ID, code ou nom..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 pr-7 py-1 border border-[#B2BED6] rounded text-xs focus:outline-none focus:border-[#04326D] w-52" />
                                 {search && <button type="button" onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"><X className="w-3 h-3" /></button>}
                             </div>
 
@@ -543,6 +543,7 @@ export default function BudgetIndex({
                                             <div>
                                                 <span className="text-[10px] font-mono font-bold uppercase text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded">{donor.code}</span>
                                                 <h3 className="text-sm font-bold text-[#0B192C] mt-1">{donor.name}</h3>
+                                                <p className="text-[9px] text-gray-400 font-mono break-all">ID : {donor.id}</p>
                                                 {donor.description && <p className="text-[11px] text-gray-500 italic mt-0.5 line-clamp-1">{donor.description}</p>}
                                                 <p className="text-[10.5px] text-gray-500 mt-1">{donor.lines_count} ligne(s) financée(s)</p>
                                             </div>

@@ -10,8 +10,8 @@ interface CaisseData {
     total_dossiers: number;
     total_usd: number;
     total_fc: number;
-    decaisse_usd: number;
-    en_attente_usd: number;
+    payment_request_usd: number;
+    pending_payment_request_usd: number;
 }
 
 const fmt = (n: number, currency: string) => `${n.toLocaleString('fr-FR')} ${currency}`;
@@ -21,14 +21,14 @@ export default function CaissesSummary({ caisses = [] }: { caisses: CaisseData[]
         (acc, c) => ({
             dossiers: acc.dossiers + c.total_dossiers,
             engage: acc.engage + c.total_usd,
-            decaisse: acc.decaisse + c.decaisse_usd,
-            attente: acc.attente + c.en_attente_usd,
+            paymentRequest: acc.paymentRequest + c.payment_request_usd,
+            attente: acc.attente + c.pending_payment_request_usd,
         }),
-        { dossiers: 0, engage: 0, decaisse: 0, attente: 0 }
+        { dossiers: 0, engage: 0, paymentRequest: 0, attente: 0 }
     ), [caisses]);
 
     // Graphiques
-    const pctDecaisse = totals.engage > 0 ? Math.round((totals.decaisse / totals.engage) * 100) : 0;
+    const pctDecaisse = totals.engage > 0 ? Math.round((totals.paymentRequest / totals.engage) * 100) : 0;
     const maxCaisseVol = caisses.length > 0 ? Math.max(...caisses.map(c => c.total_usd)) : 1;
     const isEmpty = totals.engage === 0;
 
@@ -63,8 +63,8 @@ export default function CaissesSummary({ caisses = [] }: { caisses: CaisseData[]
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     <KpiCard label="Dossiers actifs" value={totals.dossiers} />
                     <KpiCard label="Total engagé" value={fmt(totals.engage, 'USD')} />
-                    <KpiCard label="Décaissé" value={fmt(totals.decaisse, 'USD')} tone="emerald" />
-                    <KpiCard label="En attente" value={fmt(totals.attente, 'USD')} tone="amber" />
+                    <KpiCard label="Payment Request prêt" value={fmt(totals.paymentRequest, 'USD')} tone="emerald" />
+                    <KpiCard label="Payment Request en attente" value={fmt(totals.attente, 'USD')} tone="amber" />
                 </div>
 
                 {/* --- GRAPHIQUES --- */}
@@ -74,7 +74,7 @@ export default function CaissesSummary({ caisses = [] }: { caisses: CaisseData[]
                         <div className="flex items-center justify-between border-b pb-2.5">
                             <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
                                 <PieChart className="w-4 h-4 text-[#04326D]" />
-                                <span>Flux de Trésorerie Globale</span>
+                                <span>Payment Requests par caisse</span>
                             </h3>
                             <span className="text-[10px] font-mono text-gray-500 font-bold">USD</span>
                         </div>
@@ -99,21 +99,21 @@ export default function CaissesSummary({ caisses = [] }: { caisses: CaisseData[]
                                     <span className="text-xs font-black font-mono text-[#0B192C] block">
                                         {isEmpty ? '-' : `${pctDecaisse}%`}
                                     </span>
-                                    <span className="text-[8px] font-bold uppercase text-gray-400 block -mt-0.5">Décaissé</span>
+                                    <span className="text-[8px] font-bold uppercase text-gray-400 block -mt-0.5">Payment Request</span>
                                 </div>
                             </div>
                             <div className="space-y-1.5 text-[11px] flex-1">
                                 <div className="flex items-center justify-between">
                                     <span className="flex items-center gap-1.5 text-gray-600">
                                         <span className={`w-2.5 h-2.5 rounded-full ${isEmpty ? 'bg-gray-300' : 'bg-emerald-500'}`} />
-                                        Décaissé :
+                                        Payment Request prêt :
                                     </span>
-                                    <strong className="font-mono text-emerald-800">{fmt(totals.decaisse, '')}</strong>
+                                    <strong className="font-mono text-emerald-800">{fmt(totals.paymentRequest, '')}</strong>
                                 </div>
                                 <div className="flex items-center justify-between pt-1 border-t border-gray-100">
                                     <span className="flex items-center gap-1.5 text-gray-600">
                                         <span className={`w-2.5 h-2.5 rounded-full ${isEmpty ? 'bg-gray-300' : 'bg-[#F58F20]'}`} />
-                                        En Caisse (Prêt) :
+                                        Payment Request en attente :
                                     </span>
                                     <strong className="font-mono text-[#F58F20]">{fmt(totals.attente, '')}</strong>
                                 </div>
@@ -186,7 +186,7 @@ export default function CaissesSummary({ caisses = [] }: { caisses: CaisseData[]
 }
 
 function CaisseCard({ caisse }: { caisse: CaisseData }) {
-    const taux = caisse.total_usd > 0 ? Math.round((caisse.decaisse_usd / caisse.total_usd) * 100) : 0;
+    const taux = caisse.total_usd > 0 ? Math.round((caisse.payment_request_usd / caisse.total_usd) * 100) : 0;
 
     return (
         <article className="bg-white border border-[#B2BED6] rounded overflow-hidden hover:border-[#04326D]">
@@ -214,14 +214,14 @@ function CaisseCard({ caisse }: { caisse: CaisseData }) {
                 <div className="h-px bg-[#E2E8F0]" />
 
                 <dl className="space-y-2">
-                    <Row label="Décaissé" value={fmt(caisse.decaisse_usd, 'USD')} valueClass="text-emerald-700 font-bold" />
-                    <Row label="En attente" value={fmt(caisse.en_attente_usd, 'USD')} valueClass="text-[#F58F20] font-bold" />
+                    <Row label="Payment Request prêt" value={fmt(caisse.payment_request_usd, 'USD')} valueClass="text-emerald-700 font-bold" />
+                    <Row label="Payment Request en attente" value={fmt(caisse.pending_payment_request_usd, 'USD')} valueClass="text-[#F58F20] font-bold" />
                 </dl>
 
                 {caisse.total_usd > 0 && (
                     <div className="pt-1">
                         <div className="flex items-center justify-between text-[10.5px] text-gray-500 mb-1">
-                            <span className="font-bold uppercase tracking-widest">Taux de décaissement</span>
+                            <span className="font-bold uppercase tracking-widest">Taux de Payment Request</span>
                             <span className="font-bold tabular-nums">{taux}%</span>
                         </div>
                         <div className="h-1.5 bg-[#E2E8F0] rounded-full overflow-hidden flex">

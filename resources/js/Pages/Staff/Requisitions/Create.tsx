@@ -20,6 +20,12 @@ import {
 
 type DeviseType = 'EUR' | 'USD' | 'FC';
 
+const getNextMonthDate = () => {
+    const now = new Date();
+    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-01`;
+};
+
 interface JustificatifItem {
     id: string;
     description: string;
@@ -31,6 +37,8 @@ interface JustificatifItem {
 interface LigneArticle {
     id: string;
     activite: string;
+    entreprise: string;
+    donneur: string;
     code_all_budget: string;
     nature: string;
     quantite: number;
@@ -53,14 +61,22 @@ interface ProjectOption {
     full_name: string;
 }
 
+interface DonorOption {
+    id: string;
+    name: string;
+    code: string;
+}
+
 interface Props extends PageProps {
     caisses?: CaisseOption[];
     projectsList?: ProjectOption[];
+    donors?: DonorOption[];
 }
 
 export default function CreateRequisition({
     caisses = [],
     projectsList = [],
+    donors = [],
 }: Props) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
@@ -70,6 +86,8 @@ export default function CreateRequisition({
 
     const [natureRequisition, setNatureRequisition] = useState<'Achat' | 'Service'>('Achat');
     const [isUrgent, setIsUrgent] = useState<boolean>(false);
+    const submissionDay = new Date().getDate();
+    const requiresFinancePrecheck = submissionDay < 20 || submissionDay > 25;
 
     // Initialise avec le projet du user s'il n'est pas cordo (si dispo dans auth.user), sinon le premier de la liste
     const defaultProject = (!isCoordinator && user.project?.name) 
@@ -100,15 +118,24 @@ export default function CreateRequisition({
     );
 
     const [observation, setObservation] = useState<string>('');
-    const [datePaiement, setDatePaiement] = useState<string>('');
+    const [datePaiement, setDatePaiement] = useState<string>(getNextMonthDate);
     const [dateLivraison, setDateLivraison] = useState<string>('');
+    const [modePaiement, setModePaiement] = useState('Virement bancaire');
+    const [beneficiaireNom, setBeneficiaireNom] = useState(user.name);
+    const [beneficiaireAdresse, setBeneficiaireAdresse] = useState('');
+    const [beneficiaireTelephone, setBeneficiaireTelephone] = useState('');
+    const [beneficiaireEmail, setBeneficiaireEmail] = useState(user.email);
+    const [numeroFacture, setNumeroFacture] = useState('');
+    const [dateFacture, setDateFacture] = useState<string>(() => new Date().toISOString().slice(0, 10));
 
     const [lignes, setLignes] = useState<LigneArticle[]>([
         {
             id: '1',
             activite: '',
+            entreprise: 'BON PASTEUR',
+            donneur: '',
             code_all_budget: '',
-            nature: '',
+            nature: 'Achat',
             quantite: 1,
             duree: 1,
             unite: 'Pce',
@@ -134,6 +161,13 @@ export default function CreateRequisition({
         return numberToWordsFR(montantTotal, devise);
     }, [montantTotal, devise]);
 
+    const dateEcheance = useMemo(() => {
+        if (!datePaiement) return '';
+        const dueDate = new Date(`${datePaiement}T00:00:00`);
+        dueDate.setDate(dueDate.getDate() + 7);
+        return dueDate.toLocaleDateString('fr-FR');
+    }, [datePaiement]);
+
     const handleCaisseChange = (caisseNom: string) => {
         setCaisseDecaissement(caisseNom);
         const caisseObj = caisses.find((c) => c.name === caisseNom);
@@ -155,6 +189,7 @@ export default function CreateRequisition({
                     quantite: qte,
                     duree: duree,
                     unite: nature === 'Achat' ? 'Pce' : 'Jours',
+                    nature,
                     total_ligne: qte * duree * l.frais_unitaire,
                 };
             }),
@@ -167,8 +202,10 @@ export default function CreateRequisition({
             {
                 id: Date.now().toString(),
                 activite: '',
+                entreprise: 'BON PASTEUR',
+                donneur: '',
                 code_all_budget: '',
-                nature: '',
+                nature: natureRequisition,
                 quantite: 1,
                 duree: 1,
                 unite: natureRequisition === 'Achat' ? 'Pce' : 'Jours',
@@ -285,20 +322,24 @@ export default function CreateRequisition({
         formData.append('montant_total', String(montantTotal));
         formData.append('is_urgent', isUrgent ? '1' : '0');
 
-        if (natureRequisition === 'Service' && datePaiement) {
-            formData.append('date_paiement', datePaiement);
-        }
+        formData.append('date_paiement', datePaiement);
+        formData.append('mode_paiement', modePaiement);
+        formData.append('beneficiaire_nom', beneficiaireNom);
+        formData.append('beneficiaire_adresse', beneficiaireAdresse);
+        formData.append('beneficiaire_telephone', beneficiaireTelephone);
+        formData.append('beneficiaire_email', beneficiaireEmail);
+        formData.append('numero_facture', numeroFacture);
+        formData.append('date_facture', dateFacture);
         if (natureRequisition === 'Achat' && dateLivraison) {
             formData.append('date_livraison', dateLivraison);
         }
 
         lignes.forEach((ligne, index) => {
             formData.append(`lignes[${index}][activite]`, ligne.activite);
-            formData.append(
-                `lignes[${index}][code_all_budget]`,
-                ligne.code_all_budget || 'A_ATTRIBUER_PAR_MP',
-            );
-            formData.append(`lignes[${index}][nature]`, ligne.nature || natureRequisition);
+            formData.append(`lignes[${index}][entreprise]`, ligne.entreprise);
+            formData.append(`lignes[${index}][donneur]`, ligne.donneur);
+            formData.append(`lignes[${index}][code_all_budget]`, ligne.code_all_budget);
+            formData.append(`lignes[${index}][nature]`, ligne.nature);
             formData.append(`lignes[${index}][quantite]`, String(ligne.quantite));
             formData.append(`lignes[${index}][duree]`, String(ligne.duree));
             formData.append(`lignes[${index}][unite]`, ligne.unite);
@@ -382,7 +423,11 @@ export default function CreateRequisition({
                             className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary-light disabled:opacity-50 text-white rounded-md text-xs font-semibold shadow-sm hover:shadow-md transition-all active:scale-[0.98]"
                         >
                             <Send className="w-3.5 h-3.5" />
-                            {isSubmitting ? 'Transmission…' : 'Soumettre au Manager'}
+                            {isSubmitting
+                                ? 'Transmission…'
+                                : requiresFinancePrecheck
+                                  ? 'Soumettre au Manager des Finances'
+                                  : 'Soumettre au Manager de Projet'}
                         </button>
                     </div>
                 </div>
@@ -526,7 +571,7 @@ export default function CreateRequisition({
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-1">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs pt-1">
                             {natureRequisition === 'Achat' ? (
                                 <div>
                                     <label className="block font-semibold text-gray-700 mb-1.5">
@@ -539,19 +584,23 @@ export default function CreateRequisition({
                                         className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                                     />
                                 </div>
-                            ) : (
-                                <div>
-                                    <label className="block font-semibold text-gray-700 mb-1.5">
-                                        Date de paiement souhaitée
-                                    </label>
-                                    <input
-                                        type="date"
-                                        value={datePaiement}
-                                        onChange={(e) => setDatePaiement(e.target.value)}
-                                        className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
-                                    />
-                                </div>
-                            )}
+                            ) : <div />}
+
+                            <div>
+                                <label className="block font-semibold text-gray-700 mb-1.5">
+                                    Date de paiement souhaitée *
+                                </label>
+                                <input
+                                    type="date"
+                                    value={datePaiement}
+                                    onChange={(e) => setDatePaiement(e.target.value)}
+                                    required
+                                    className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
+                                />
+                                <p className="text-[10px] text-gray-500 mt-1">
+                                    Le mois de paiement proposé est le mois prochain.
+                                </p>
+                            </div>
 
                             <div>
                                 <label className="block font-semibold text-gray-700 mb-1.5">
@@ -564,6 +613,113 @@ export default function CreateRequisition({
                                     placeholder="Précisez le contexte, l'urgence ou la justification…"
                                     className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition"
                                 />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white border border-outline-soft rounded-lg p-5 shadow-card space-y-4">
+                        <div className="border-b border-outline-soft pb-3">
+                            <h2 className="text-xs font-bold text-on-surface uppercase tracking-wider flex items-center gap-2">
+                                <span className="w-5 h-5 rounded-full bg-primary text-white text-[10px] font-bold flex items-center justify-center">
+                                    II
+                                </span>
+                                Informations du Payment Request
+                            </h2>
+                            <p className="text-[11px] text-gray-500 mt-1">
+                                Ces informations seront reprises dans le document après validation de la Direction.
+                            </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                            <div>
+                                <label className="block font-semibold text-gray-700 mb-1.5">Mode de paiement *</label>
+                                <select
+                                    value={modePaiement}
+                                    onChange={(e) => setModePaiement(e.target.value)}
+                                    required
+                                    className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                >
+                                    <option>Virement bancaire</option>
+                                    <option>Espèces</option>
+                                    <option>Chèque</option>
+                                    <option>Mobile Money</option>
+                                    <option>Autre</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block font-semibold text-gray-700 mb-1.5">Nom du bénéficiaire *</label>
+                                <input
+                                    type="text"
+                                    value={beneficiaireNom}
+                                    onChange={(e) => setBeneficiaireNom(e.target.value)}
+                                    maxLength={255}
+                                    required
+                                    className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                />
+                            </div>
+                            <div>
+                                <label className="block font-semibold text-gray-700 mb-1.5">Téléphone *</label>
+                                <input
+                                    type="tel"
+                                    value={beneficiaireTelephone}
+                                    onChange={(e) => setBeneficiaireTelephone(e.target.value)}
+                                    maxLength={50}
+                                    required
+                                    className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                />
+                            </div>
+                            <div>
+                                <label className="block font-semibold text-gray-700 mb-1.5">Email *</label>
+                                <input
+                                    type="email"
+                                    value={beneficiaireEmail}
+                                    onChange={(e) => setBeneficiaireEmail(e.target.value)}
+                                    maxLength={255}
+                                    required
+                                    className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                />
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="block font-semibold text-gray-700 mb-1.5">Adresse complète du bénéficiaire *</label>
+                                <textarea
+                                    value={beneficiaireAdresse}
+                                    onChange={(e) => setBeneficiaireAdresse(e.target.value)}
+                                    maxLength={2000}
+                                    required
+                                    rows={2}
+                                    className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                />
+                            </div>
+                            <div>
+                                <label className="block font-semibold text-gray-700 mb-1.5">Numéro de facture *</label>
+                                <input
+                                    type="text"
+                                    value={numeroFacture}
+                                    onChange={(e) => setNumeroFacture(e.target.value)}
+                                    maxLength={255}
+                                    required
+                                    className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                />
+                            </div>
+                            <div>
+                                <label className="block font-semibold text-gray-700 mb-1.5">Date de facture *</label>
+                                <input
+                                    type="date"
+                                    value={dateFacture}
+                                    onChange={(e) => setDateFacture(e.target.value)}
+                                    required
+                                    className="w-full border border-outline-variant rounded-md p-2 text-xs focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                />
+                            </div>
+                            <div>
+                                <label className="block font-semibold text-gray-700 mb-1.5">Date d’échéance</label>
+                                <input
+                                    type="text"
+                                    value={dateEcheance}
+                                    readOnly
+                                    className="w-full border border-outline-variant rounded-md p-2 text-xs bg-gray-50"
+                                />
+                                <p className="text-[10px] text-gray-500 mt-1">Calculée à 7 jours après la date de paiement.</p>
                             </div>
                         </div>
                     </div>
@@ -594,17 +750,16 @@ export default function CreateRequisition({
                                 <thead>
                                     <tr className="bg-surface-muted text-gray-600 uppercase text-[10px] font-bold border-b border-outline-soft">
                                         <th className="py-2.5 px-3 w-10 text-center">N°</th>
-                                        <th className="py-2.5 px-3 min-w-[240px]">
+                                        <th className="py-2.5 px-3 min-w-[220px]">
                                             {natureRequisition === 'Achat'
                                                 ? "Description de l'article"
                                                 : 'Nature du service'}
                                         </th>
-                                        <th className="py-2.5 px-3 w-36 text-center text-gray-400">
-                                            Code Budget
-                                            <span className="text-[9px] block font-normal normal-case">
-                                                (Attribué par MP)
-                                            </span>
-                                        </th>
+                                        <th className="py-2.5 px-3 min-w-[150px]">Entreprise</th>
+                                        <th className="py-2.5 px-3 min-w-[150px]">Donneur</th>
+                                        <th className="py-2.5 px-3 min-w-[150px]">Projet</th>
+                                        <th className="py-2.5 px-3 min-w-[140px]">Code allocation budget</th>
+                                        <th className="py-2.5 px-3 min-w-[90px]">Type demande</th>
 
                                         {natureRequisition === 'Achat' ? (
                                             <th className="py-2.5 px-2 w-20 text-center bg-primary-soft text-primary">
@@ -653,10 +808,58 @@ export default function CreateRequisition({
                                                 />
                                             </td>
 
-                                            <td className="py-2.5 px-3 text-center">
-                                                <span className="text-[10px] text-gray-400 italic">
-                                                    Assigné au visa MP
-                                                </span>
+                                            <td className="py-2.5 px-3">
+                                                <input
+                                                    type="text"
+                                                    value={ligne.entreprise}
+                                                    onChange={(e) => handleUpdateLigne(ligne.id, 'entreprise', e.target.value)}
+                                                    maxLength={255}
+                                                    className="w-full border border-outline-variant rounded-md px-2 py-1.5 text-xs"
+                                                    required
+                                                />
+                                            </td>
+
+                                            <td className="py-2.5 px-3">
+                                                <input
+                                                    type="text"
+                                                    list="requisition-donors"
+                                                    value={ligne.donneur}
+                                                    onChange={(e) => handleUpdateLigne(ligne.id, 'donneur', e.target.value)}
+                                                    maxLength={255}
+                                                    className="w-full border border-outline-variant rounded-md px-2 py-1.5 text-xs"
+                                                    required
+                                                />
+                                                <datalist id="requisition-donors">
+                                                    {donors.map((donor) => (
+                                                        <option key={donor.id} value={donor.name}>
+                                                            {donor.code}
+                                                        </option>
+                                                    ))}
+                                                </datalist>
+                                            </td>
+
+                                            <td className="py-2.5 px-3">
+                                                <input
+                                                    type="text"
+                                                    value={selectedProject}
+                                                    readOnly
+                                                    className="w-full border border-outline-variant rounded-md px-2 py-1.5 text-xs bg-gray-50"
+                                                />
+                                            </td>
+
+                                            <td className="py-2.5 px-3">
+                                                <input
+                                                    type="text"
+                                                    value={ligne.code_all_budget}
+                                                    onChange={(e) => handleUpdateLigne(ligne.id, 'code_all_budget', e.target.value)}
+                                                    maxLength={255}
+                                                    className="w-full border border-outline-variant rounded-md px-2 py-1.5 text-xs"
+                                                    required
+                                                />
+                                            </td>
+
+                                            <td className="py-2.5 px-3">
+                                                <span>{ligne.nature}</span>
                                             </td>
 
                                             {natureRequisition === 'Achat' ? (

@@ -8,13 +8,13 @@ interface StepDefinition {
 }
 
 const STEPS: StepDefinition[] = [
-    { id: 1, title: 'Brouillon', subtitle: 'Initiateur' },
-    { id: 2, title: 'Visa MP', subtitle: 'Manager Projet' },
-    { id: 3, title: 'Visa PAM', subtitle: 'Manager Admin' },
+    { id: 1, title: 'Soumission', subtitle: 'Initiateur' },
+    { id: 2, title: 'Finance préalable', subtitle: 'Hors période' },
+    { id: 3, title: 'Manager Projet', subtitle: 'Validation projet' },
     { id: 4, title: 'Finances', subtitle: 'Manager Finances' },
-    { id: 5, title: 'Direction', subtitle: 'Directrice Générale' },
-    { id: 6, title: 'Caisse', subtitle: 'Guichet' },
-    { id: 7, title: 'Clôturé', subtitle: 'Retour' },
+    { id: 5, title: 'PAM', subtitle: 'Validation administrative' },
+    { id: 6, title: 'Direction', subtitle: 'Approbation finale' },
+    { id: 7, title: 'Payment Request', subtitle: 'Document prêt' },
 ];
 
 interface WorkflowStepperProps {
@@ -28,27 +28,30 @@ export default function WorkflowStepper({ statusCode, isUrgent = false }: Workfl
     const { currentStep, isRejected, rejectStep } = React.useMemo(() => {
         switch (statusCode) {
             case 'draft':
-                return { currentStep: 2, isRejected: false, rejectStep: null as number | null };
+                return { currentStep: 3, isRejected: false, rejectStep: null as number | null };
+            case 'finance_precheck':
+                return { currentStep: 2, isRejected: false, rejectStep: null };
             case 'returned_to_beneficiary':
             case 'returned_to_urgent_initiator':
                 return { currentStep: 1, isRejected: true, rejectStep: 1 };
             case 'returned_to_project_manager':
-                return { currentStep: 2, isRejected: true, rejectStep: 2 };
-            case 'visa_mp':
-                return { currentStep: 3, isRejected: false, rejectStep: null };
-            case 'visa_pam':
-                return { currentStep: 4, isRejected: false, rejectStep: null };
             case 'returned_to_finance':
-                return { currentStep: 4, isRejected: true, rejectStep: 4 };
-            case 'controle_finance':
-                return { currentStep: 5, isRejected: false, rejectStep: null };
             case 'returned_to_admin_manager':
                 return { currentStep: 3, isRejected: true, rejectStep: 3 };
+            case 'visa_mp':
+                return { currentStep: 3, isRejected: false, rejectStep: null };
+            case 'visa_finance':
+                return { currentStep: 4, isRejected: false, rejectStep: null };
+            case 'visa_pam':
+                return { currentStep: 5, isRejected: false, rejectStep: null };
+            case 'controle_finance':
+                return { currentStep: 4, isRejected: false, rejectStep: null };
             case 'visa_admin':
             case 'urgent_direction':
-                return { currentStep: 5, isRejected: false, rejectStep: null };
-            case 'decaissement_caisse':
                 return { currentStep: 6, isRejected: false, rejectStep: null };
+            case 'payment_request':
+                return { currentStep: 7, isRejected: false, rejectStep: null };
+            case 'decaissement_caisse':
             case 'decaisse':
             case 'cloture':
                 return { currentStep: 7, isRejected: false, rejectStep: null };

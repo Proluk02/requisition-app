@@ -21,6 +21,8 @@ class Demande extends Model
     protected $fillable = [
         'requisition_id',
         'activite',
+        'entreprise',
+        'donneur',
         'code_all_budget',
         'code_allocation',
         'libelle_allocation',

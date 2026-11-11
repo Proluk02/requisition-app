@@ -2,6 +2,7 @@
 
 use App\Models\Demande;
 use App\Models\DemandeJustificatif;
+use App\Models\CashRegister;
 use App\Models\Project;
 use App\Models\Requisition;
 use App\Models\RequisitionSignature;
@@ -51,7 +52,11 @@ it('loads the staff dashboard without crashing when no justificatifs exist', fun
 });
 
 it('stores uploaded justificatifs for a staff requisition', function () {
+    $this->travelTo(\Carbon\Carbon::parse('2026-11-22 12:00:00'));
+
     Role::firstOrCreate(['name' => 'beneficiary', 'guard_name' => 'web']);
+    Role::firstOrCreate(['name' => 'finance', 'guard_name' => 'web']);
+    Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
 
     $user = User::factory()->create([
         'role' => 'beneficiary',
@@ -62,6 +67,13 @@ it('stores uploaded justificatifs for a staff requisition', function () {
     $project = Project::create([
         'name' => 'USIMAMIZI BORA',
         'full_name' => 'Bonne Gouvernance',
+    ]);
+    CashRegister::create([
+        'name' => 'Caisse principale',
+        'code' => 'CP',
+        'devise' => 'USD',
+        'solde_actuel' => 0,
+        'is_active' => true,
     ]);
 
     Storage::fake('public');
@@ -75,10 +87,20 @@ it('stores uploaded justificatifs for a staff requisition', function () {
         'project_code' => 'UB',
         'caisse_decaissement' => 'Caisse principale',
         'devise' => 'USD',
+        'mode_paiement' => 'Virement bancaire',
+        'beneficiaire_nom' => 'Fournisseur Test',
+        'beneficiaire_adresse' => 'Adresse complète',
+        'beneficiaire_telephone' => '+243000000000',
+        'beneficiaire_email' => 'fournisseur@example.test',
+        'numero_facture' => 'FAC-002',
+        'date_facture' => '2026-11-20',
+        'date_paiement' => '2026-12-01',
         'observation' => 'Test upload',
         'montant_total' => 50,
         'lignes' => [[
             'activite' => 'Papier',
+            'entreprise' => 'BON PASTEUR',
+            'donneur' => 'Fonds propres',
             'code_all_budget' => 'BUD-002',
             'nature' => 'Achat',
             'quantite' => 2,
@@ -95,12 +117,18 @@ it('stores uploaded justificatifs for a staff requisition', function () {
         ]],
     ]);
 
-    $response->assertRedirect('/requisitions');
+    $response->assertRedirect(route('dashboard'));
     expect(DemandeJustificatif::count())->toBe(1);
     $this->assertDatabaseHas('requisitions', [
-        'numero_requisition' => 'REQ-002',
+        'user_id' => $user->id,
         'project_id' => $project->id,
         'status' => 'draft',
+    ]);
+    $this->assertDatabaseHas('demandes', [
+        'activite' => 'Papier',
+        'entreprise' => 'BON PASTEUR',
+        'donneur' => 'Fonds propres',
+        'code_all_budget' => 'BUD-002',
     ]);
 });
 

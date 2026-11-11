@@ -5,10 +5,7 @@ import { PageProps } from '@/types';
 import {
     ClipboardList,
     CheckCircle2,
-    Wallet,
-    AlertTriangle,
     Plus,
-    Truck,
     ChevronRight,
     Filter,
     AlertCircle,
@@ -55,11 +52,6 @@ interface StaffStats {
     valideesPretesCount: number;
     valideesPretesMontantUSD: number;
     valideesPretesMontantFC: number;
-    vouchersMoisCount: number;
-    vouchersMoisTotalUSD: number;
-    justificatifsADeposerCount: number;
-    activiteEnSouffrance: string;
-    dechargeRef: string;
 }
 
 interface StaffDashboardProps extends PageProps {
@@ -84,11 +76,6 @@ export default function StaffDashboard({
         valideesPretesCount: 0,
         valideesPretesMontantUSD: 0,
         valideesPretesMontantFC: 0,
-        vouchersMoisCount: 0,
-        vouchersMoisTotalUSD: 0,
-        justificatifsADeposerCount: 0,
-        activiteEnSouffrance: 'Aucune',
-        dechargeRef: '#DCH-000',
     };
 
     const filteredReqs = useMemo(() => {
@@ -114,7 +101,7 @@ export default function StaffDashboard({
                         Espace Collaborateur — Mes Demandes & Activités
                     </h1>
                     <p className="text-xs text-gray-600 mt-1">
-                        Suivi rigoureux des décaissements, engagements d'activités et apurements de fonds sur site.
+                        Suivi des réquisitions et engagements d'activités sur site.
                     </p>
                 </div>
 
@@ -126,18 +113,11 @@ export default function StaffDashboard({
                         <Plus className="w-4 h-4 text-emerald-400" strokeWidth={2.5} />
                         <span>Nouvelle Réquisition</span>
                     </Link>
-                    <Link
-                        href={route('transport.index')}
-                        className="inline-flex items-center justify-center gap-2 bg-white border border-[#B2BED6] text-[#0B192C] hover:bg-gray-50 px-3.5 py-2 rounded-md text-xs font-semibold shadow-sm transition"
-                    >
-                        <Truck className="w-4 h-4 text-[#04326D]" />
-                        <span>Transport & Petits Cash</span>
-                    </Link>
                 </div>
             </div>
 
             {/* KPI */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
                 <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between">
                     <div className="flex items-center justify-between mb-3">
                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
@@ -177,46 +157,6 @@ export default function StaffDashboard({
                     </div>
                 </div>
 
-                <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between">
-                    <div className="flex items-center justify-between mb-3">
-                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-                            Vouchers Petite Caisse
-                        </span>
-                        <div className="w-8 h-8 rounded-md bg-blue-50 flex items-center justify-center">
-                            <Wallet className="w-4 h-4 text-[#04326D]" />
-                        </div>
-                    </div>
-                    <p className="text-2xl font-black text-[#0B192C]">
-                        {stats.vouchersMoisCount}{' '}
-                        <span className="text-base font-bold text-gray-500">ce mois</span>
-                    </p>
-                    <p className="text-[11px] text-gray-500 mt-1">
-                        Plafond : <strong className="text-gray-700">≤ 20$ ou 30 000 FC</strong>
-                    </p>
-                </div>
-
-                <div className="bg-white border-2 border-[#F58F20]/40 rounded-lg p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between">
-                    <div className="flex items-center justify-between mb-3">
-                        <span className="text-[10px] font-bold text-[#0B192C] uppercase tracking-widest">
-                            Justificatifs à déposer
-                        </span>
-                        <div className="w-8 h-8 rounded-md bg-amber-50 flex items-center justify-center">
-                            <AlertTriangle className="w-4 h-4 text-[#F58F20]" />
-                        </div>
-                    </div>
-                    <div className="flex items-baseline gap-2">
-                        <p className="text-2xl font-black text-[#0B192C]">
-                            {stats.justificatifsADeposerCount}{' '}
-                            <span className="text-base font-bold text-gray-500">retour(s)</span>
-                        </p>
-                        <span className="bg-red-50 text-red-800 font-bold text-[10px] px-1.5 py-0.5 rounded">
-                            délai 48h
-                        </span>
-                    </div>
-                    <p className="text-[11px] text-gray-600 truncate mt-1">
-                        Décharge : {stats.dechargeRef}
-                    </p>
-                </div>
             </div>
 
             {/* Tableau */}
@@ -227,7 +167,7 @@ export default function StaffDashboard({
                             Aperçu de mes réquisitions récentes
                         </h2>
                         <p className="text-[11px] text-gray-500 mt-0.5">
-                            Tracez chaque signature hiérarchique avant le déblocage des fonds.
+                            Suivez chaque validation jusqu’à l’émission du Payment Request.
                         </p>
                     </div>
 
@@ -240,11 +180,12 @@ export default function StaffDashboard({
                         >
                             <option value="all">Toutes les étapes</option>
                             <option value="brouillon">Brouillon / À corriger</option>
+                            <option value="finance_precheck">Visa Finance préalable</option>
                             <option value="visa_mp">Visa Manager Projet</option>
                             <option value="visa_pam">Examen PAM</option>
                             <option value="controle_finance">Contrôle Finances</option>
                             <option value="approbation_direction">Direction Générale</option>
-                            <option value="caisse_pret">Caisse (Prêt)</option>
+                            <option value="payment_request">Payment Request prêt</option>
                         </select>
                     </div>
                 </div>

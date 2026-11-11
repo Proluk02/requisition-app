@@ -426,18 +426,18 @@
                 {!! renderSignature($sigMP, "Manager de Projet", "En attente visa MP") !!}
             </td>
 
-            <!-- VISA PAM -->
-            <td class="sig-cell">
-                <div class="sig-header">2. Administration (PAM)</div>
-                {!! renderSignature($sigAdmin, "Manager d'Administration (PAM)", "En attente visa PAM") !!}
-            </td>
-
             <!-- VISA FINANCE -->
             <td class="sig-cell">
-                <div class="sig-header">3. Manager Finances</div>
+                <div class="sig-header">2. Manager Finances</div>
                 {!! renderSignature($sigFinance, "Manager des Finances", "En attente visa financier") !!}
             </td>
 
+
+            <!-- VISA PAM -->
+            <td class="sig-cell">
+                <div class="sig-header">3. Administration (PAM)</div>
+                {!! renderSignature($sigAdmin, "Manager d'Administration (PAM)", "En attente visa PAM") !!}
+            </td>
             <!-- VISA DIRECTRICE -->
             <td class="sig-cell">
                 <div class="sig-header">4. Directrice</div>

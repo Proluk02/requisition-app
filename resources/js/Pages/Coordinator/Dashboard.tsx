@@ -6,7 +6,6 @@ import {
     FolderKanban,
     ClipboardList,
     Plus,
-    Truck,
     ChevronRight,
     AlertTriangle,
     Eye,
@@ -51,8 +50,9 @@ export default function CoordinatorDashboard({ site, stats, requisitions }: Coor
             return <span className="px-2 py-0.5 bg-red-100 text-red-800 rounded text-[10px] font-bold uppercase">À Corriger</span>;
         }
         if (status === 'draft') return <span className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-[10px] font-bold uppercase">Attente MP</span>;
-        if (status === 'decaisse') return <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-[10px] font-bold uppercase">Décaissé</span>;
-        if (status === 'decaissement_caisse') return <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-bold uppercase">Prêt Caisse</span>;
+        if (status === 'payment_request') {
+            return <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-bold uppercase">Payment Request prêt</span>;
+        }
         
         return <span className="px-2 py-0.5 bg-blue-50 text-[#04326D] border border-blue-200 rounded text-[10px] font-bold uppercase">En Circuit</span>;
     };
@@ -87,13 +87,6 @@ export default function CoordinatorDashboard({ site, stats, requisitions }: Coor
                     >
                         <Plus className="w-4 h-4 text-emerald-400" strokeWidth={2.5} />
                         <span>Demande de Fonds (Site)</span>
-                    </Link>
-                    <Link
-                        href={route('transport.index')}
-                        className="inline-flex items-center justify-center gap-2 bg-white border border-[#B2BED6] text-[#0B192C] hover:bg-gray-50 px-3.5 py-2 rounded-md text-xs font-semibold shadow-sm transition"
-                    >
-                        <Truck className="w-4 h-4 text-[#04326D]" />
-                        <span>Transport</span>
                     </Link>
                 </div>
             </div>

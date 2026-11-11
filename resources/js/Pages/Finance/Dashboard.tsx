@@ -18,7 +18,6 @@ import {
     Search,
     Check,
     Coins,
-    BarChart3,
     Activity,
     LayoutTemplate,
     Layers,
@@ -112,8 +111,6 @@ interface CaisseSummaryItem {
     code: string;
     devise: string;
     solde_actuel: number;
-    is_ouverte: boolean;
-    cashiers_names: string;
 }
 
 interface CashRegisterOption {
@@ -133,16 +130,6 @@ interface BudgetLineClientItem {
     budget_initial: number;
 }
 
-interface PendingSessionItem {
-    id: string;
-    caisse_name: string;
-    caisse_devise: string;
-    cashier_name: string;
-    solde_ouverture: number;
-    date_session: string;
-    observation?: string;
-}
-
 interface Props extends PageProps {
     scopeLabel?: string;
     requisitions?: FinanceRequisition[];
@@ -151,7 +138,6 @@ interface Props extends PageProps {
     caisses?: CaisseSummaryItem[];
     cashRegisters?: CashRegisterOption[];
     allBudgetLines?: BudgetLineClientItem[];
-    pendingSessions?: PendingSessionItem[];
 }
 
 const money = (amount: number, currency: string) =>
@@ -327,7 +313,6 @@ export default function FinanceDashboard({
     caisses = [],
     cashRegisters = [],
     allBudgetLines = [],
-    pendingSessions = [],
 }: Props) {
     const { auth } = usePage<PageProps>().props;
     const user = auth.user;
@@ -360,11 +345,6 @@ export default function FinanceDashboard({
     const [pinError, setPinError] = useState<string | null>(null);
     const [processing, setProcessing] = useState(false);
 
-    const [sessionToAuthorize, setSessionToAuthorize] = useState<PendingSessionItem | null>(null);
-    const [sessionPin, setSessionPin] = useState('');
-    const [sessionPinError, setSessionPinError] = useState<string | null>(null);
-    const [authorizingSession, setAuthorizingSession] = useState(false);
-
     const [toast, setToast] = useState<{
         type: 'success' | 'error';
         message: string;
@@ -388,8 +368,8 @@ export default function FinanceDashboard({
     };
 
     const pendingCount = requisitions.filter((item) => item.canDecide).length;
-    const decaissementPretCount = requisitions.filter((item) => item.statusCode === 'decaissement_caisse').length;
-    const decaisseCount = requisitions.filter((item) => item.statusCode === 'decaisse').length;
+    const financePrecheckCount = requisitions.filter((item) => item.statusCode === 'finance_precheck').length;
+    const isFinancePrecheck = selected?.statusCode === 'finance_precheck';
 
     const chartData = useMemo(() => {
         const total = requisitions.length || 1;
@@ -401,17 +381,6 @@ export default function FinanceDashboard({
         const isEmpty = requisitions.length === 0;
 
         return { total, pending, processed, pctProcessed, pctPending, isEmpty };
-    }, [requisitions]);
-
-    const gaugeData = useMemo(() => {
-        const total = requisitions.length || 1;
-        const paid = requisitions.filter(r => r.statusCode === 'decaisse').length;
-        const ready = requisitions.filter(r => r.statusCode === 'decaissement_caisse').length;
-        
-        const pctPaid = requisitions.length > 0 ? Math.round((paid / total) * 100) : 0;
-        const pctReady = requisitions.length > 0 ? Math.round((ready / total) * 100) : 0;
-        
-        return { paid, ready, pctPaid, pctReady, isEmpty: requisitions.length === 0 };
     }, [requisitions]);
 
     const recentReqs = useMemo(() => {
@@ -426,9 +395,8 @@ export default function FinanceDashboard({
     const filteredRequisitions = useMemo(() => {
         return requisitions.filter((item) => {
             if (statusFilter === 'pending' && !item.canDecide) return false;
-            if (statusFilter === 'controle_finance' && item.statusCode !== 'controle_finance' && item.statusCode !== 'visa_admin') return false;
-            if (statusFilter === 'decaissement_caisse' && item.statusCode !== 'decaissement_caisse') return false;
-            if (statusFilter === 'decaisse' && item.statusCode !== 'decaisse') return false;
+            if (statusFilter === 'controle_finance' && !['visa_pam', 'visa_admin', 'payment_request'].includes(item.statusCode)) return false;
+            if (statusFilter === 'payment_request' && item.statusCode !== 'payment_request') return false;
             if (statusFilter === 'returned' && item.statusCode !== 'returned_to_project_manager') return false;
 
             if (selectedProject !== 'all' && item.project_id !== selectedProject && item.projet !== selectedProject) {
@@ -546,12 +514,12 @@ export default function FinanceDashboard({
     const handleTriggerApprove = () => {
         if (!selected) return;
 
-        if (!financeCaisse) {
+        if (!isFinancePrecheck && !financeCaisse) {
             showToast('error', `Veuillez sélectionner une caisse physique valide en ${selected.devise}.`);
             return;
         }
 
-        for (let i = 0; i < editedArticles.length; i++) {
+        for (let i = 0; !isFinancePrecheck && i < editedArticles.length; i++) {
             const art = editedArticles[i];
             if (art.splits && art.splits.length > 0) {
                 const sum = round(art.splits.reduce((acc, s) => acc + s.montant, 0), 2);
@@ -569,7 +537,7 @@ export default function FinanceDashboard({
             }
         }
 
-        if (hasDepassement) {
+        if (!isFinancePrecheck && hasDepassement) {
             showToast('error', 'Blocage strict : Une ou plusieurs lignes dépassent le solde budgétaire disponible. Veuillez ajuster les imputations ou rejeter le dossier.');
             return;
         }
@@ -582,7 +550,7 @@ export default function FinanceDashboard({
     const handleConfirmSignature = (e: React.FormEvent) => {
         e.preventDefault();
         if (!selected || !pinSaisi) return;
-        if (hasDepassement) return;
+        if (!isFinancePrecheck && hasDepassement) return;
 
         setProcessing(true);
         setPinError(null);
@@ -664,33 +632,6 @@ export default function FinanceDashboard({
         );
     };
 
-    const handleAuthorizeSession = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!sessionToAuthorize || !sessionPin) return;
-
-        setAuthorizingSession(true);
-        setSessionPinError(null);
-        const caisseName = sessionToAuthorize.caisse_name;
-
-        router.patch(
-            route('cashier.session.authorize-opening', sessionToAuthorize.id),
-            { pin: sessionPin.trim() },
-            {
-                preserveScroll: true,
-                onFinish: () => setAuthorizingSession(false),
-                onSuccess: () => {
-                    setSessionToAuthorize(null);
-                    setSessionPin('');
-                    router.reload();
-                    showToast('success', `Guichet ${caisseName} ouvert avec succès.`);
-                },
-                onError: (errs) => {
-                    setSessionPinError(errs.pin || 'Code PIN financier incorrect.');
-                },
-            }
-        );
-    };
-
     return (
         <AppLayout>
             <Head title="Direction Financière — Centre Financier" />
@@ -702,13 +643,13 @@ export default function FinanceDashboard({
                             <Wallet className="w-3.5 h-3.5 text-[#04326D]" />
                             <span>Direction Financière</span>
                             <span className="mx-1">/</span>
-                            <span className="text-[#04326D]">Étape 3 : Contrôle Budgétaire & Visa Financier</span>
+                            <span className="text-[#04326D]">Visas et contrôle financier</span>
                         </nav>
                         <h1 className="text-xl font-bold text-[#0B192C]">
-                            Contrôle Budgétaire, Caisses & Visas
+                            Contrôle Budgétaire et Visas
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
-                            Financier : <strong className="text-[#0B192C]">{user.name}</strong> • Examen des dossiers après le visa du PAM.
+                            Financier : <strong className="text-[#0B192C]">{user.name}</strong> • Visa préalable hors période et contrôle financier après le Manager de Projet.
                         </p>
                     </div>
 
@@ -722,49 +663,6 @@ export default function FinanceDashboard({
                         </Link>
                     </div>
                 </header>
-
-                {pendingSessions.length > 0 && (
-                    <div className="p-4 bg-amber-50 border-2 border-amber-400 rounded shadow-sm space-y-3">
-                        <div className="flex items-center gap-2.5">
-                            <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0" />
-                            <div>
-                                <h3 className="text-xs font-bold uppercase tracking-wider text-amber-950">
-                                    Demande d'Ouverture de Guichet en Attente ({pendingSessions.length})
-                                </h3>
-                                <p className="text-[11px] text-amber-900 mt-0.5">
-                                    Un caissier a demandé l'ouverture de sa caisse pour la journée. Votre autorisation par PIN est requise pour démarrer les opérations.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-1">
-                            {pendingSessions.map((session) => (
-                                <div key={session.id} className="p-3 bg-white border border-amber-300 rounded flex justify-between items-center text-xs">
-                                    <div>
-                                        <strong className="text-[#0B192C] block">{session.caisse_name}</strong>
-                                        <span className="text-[11px] text-gray-500 block">
-                                            Caissier : {session.cashier_name}
-                                        </span>
-                                        <span className="text-[11px] font-mono font-bold text-amber-800">
-                                            Fond initial : {money(session.solde_ouverture, session.caisse_devise)}
-                                        </span>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setSessionToAuthorize(session);
-                                            setSessionPin('');
-                                            setSessionPinError(null);
-                                        }}
-                                        className="px-3 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded font-bold text-xs shadow transition shrink-0"
-                                    >
-                                        Autoriser
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
 
                 {toast && (
                     <div
@@ -789,36 +687,27 @@ export default function FinanceDashboard({
                 )}
 
                 {/* KPI Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between border-l-4 border-l-[#F58F20]">
                         <span className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">
-                            En attente de Visa Finance (après PAM)
+                            En attente d’un visa Finance
                         </span>
                         <p className="text-2xl font-black text-[#F58F20] mt-2">
                             {pendingCount} <span className="text-xs font-normal text-gray-500">dossier(s)</span>
                         </p>
                     </div>
 
-                    <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between border-l-4 border-l-[#04326D]">
-                        <span className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">
-                            Prêtes pour Caisse (Bon à Payer)
-                        </span>
-                        <p className="text-2xl font-black text-[#04326D] mt-2">
-                            {decaissementPretCount} <span className="text-xs font-normal text-gray-500">dossier(s)</span>
-                        </p>
-                    </div>
-
                     <div className="bg-white p-4 rounded border border-[#B2BED6] shadow-sm flex flex-col justify-between border-l-4 border-l-emerald-600">
                         <span className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">
-                            Dossiers Décaissés au Guichet
+                            Visas Finance préalables
                         </span>
                         <p className="text-2xl font-black text-emerald-700 mt-2">
-                            {decaisseCount} <span className="text-xs font-normal text-gray-500">dossier(s)</span>
+                            {financePrecheckCount} <span className="text-xs font-normal text-gray-500">dossier(s)</span>
                         </p>
                     </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     {/* Donut Graphique */}
                     <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
                         <div className="flex items-center justify-between border-b pb-2.5">
@@ -886,52 +775,6 @@ export default function FinanceDashboard({
                         </div>
                     </div>
 
-                    {/* Jauge Progression */}
-                    <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
-                        <div className="flex items-center justify-between border-b pb-2.5">
-                            <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B192C] flex items-center gap-1.5">
-                                <BarChart3 className="w-4 h-4 text-emerald-700" />
-                                <span>Progression des Paiements</span>
-                            </h3>
-                            <span className="text-[10px] font-mono text-gray-500 font-bold">
-                                Global
-                            </span>
-                        </div>
-
-                        <div className="space-y-2 pt-1 text-xs">
-                            <div className="flex justify-between items-center text-[11px]">
-                                <span className="text-gray-600">Taux de décaissement (Payés) :</span>
-                                <strong className="font-mono text-sm text-[#04326D]">
-                                    {gaugeData.pctPaid}%
-                                </strong>
-                            </div>
-
-                            <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden flex relative">
-                                <div
-                                    className={`${gaugeData.isEmpty ? 'bg-gray-300' : 'bg-emerald-500'} transition-all duration-700`}
-                                    style={{ width: `${gaugeData.pctPaid}%` }}
-                                    title={`Décaissés: ${gaugeData.pctPaid}%`}
-                                />
-                                <div
-                                    className={`${gaugeData.isEmpty ? 'bg-gray-200' : 'bg-[#04326D]'} transition-all duration-700`}
-                                    style={{ width: `${gaugeData.pctReady}%` }}
-                                    title={`Prêts pour Caisse: ${gaugeData.pctReady}%`}
-                                />
-                            </div>
-
-                            <div className="p-2.5 bg-gray-50 rounded border border-gray-100 space-y-1 text-[11px]">
-                                <div className="flex justify-between">
-                                    <span className="text-gray-500">Prêts pour la caisse (Bon à Payer) :</span>
-                                    <strong className="font-mono text-[#04326D]">{gaugeData.ready}</strong>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span className="text-gray-500">Déjà décaissés physiquement :</span>
-                                    <strong className="font-mono text-emerald-700">{gaugeData.paid}</strong>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                     {/* Diagramme à barres */}
                     <div className="bg-white border border-[#B2BED6] rounded-lg p-5 shadow-sm space-y-3">
                         <div className="flex items-center justify-between border-b pb-2.5">
@@ -958,8 +801,7 @@ export default function FinanceDashboard({
                                     const heightPct = Math.max((req.montantTotal / maxReqAmount) * 100, 2);
                                     
                                     let barColor = 'bg-gray-400';
-                                    if (req.statusCode === 'decaisse') barColor = 'bg-emerald-500';
-                                    else if (req.statusCode === 'decaissement_caisse') barColor = 'bg-[#04326D]';
+                                    if (req.statusCode === 'payment_request') barColor = 'bg-emerald-500';
                                     else if (req.canDecide) barColor = 'bg-[#F58F20]'; 
                                     else if (req.statusCode === 'returned_to_project_manager') barColor = 'bg-red-500';
 
@@ -1006,15 +848,6 @@ export default function FinanceDashboard({
                             <div key={c.id} className="p-3 bg-gray-50 border border-gray-200 rounded flex flex-col justify-between space-y-2">
                                 <div className="flex items-start justify-between">
                                     <strong className="text-[#0B192C]">{c.name}</strong>
-                                    {c.is_ouverte ? (
-                                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                            Ouverte
-                                        </span>
-                                    ) : (
-                                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 border border-gray-200">
-                                            Fermée
-                                        </span>
-                                    )}
                                 </div>
                                 <div>
                                     <span className="text-[10px] text-gray-500 block">Solde en caisse :</span>
@@ -1022,9 +855,6 @@ export default function FinanceDashboard({
                                         {money(c.solde_actuel, c.devise)}
                                     </span>
                                 </div>
-                                <span className="text-[10px] text-gray-500 truncate" title={c.cashiers_names}>
-                                    Caissier : {c.cashiers_names || 'Non assigné'}
-                                </span>
                             </div>
                         ))}
                     </div>
@@ -1093,9 +923,8 @@ export default function FinanceDashboard({
                             >
                                 <option value="all">Tous les statuts</option>
                                 <option value="pending">En attente Visa Finance</option>
-                                <option value="controle_finance">Validées Finance</option>
-                                <option value="decaissement_caisse">Bon à Payer Accordé</option>
-                                <option value="decaisse">Décaissées au Guichet</option>
+                                <option value="controle_finance">Visa Finance accordé</option>
+                                <option value="payment_request">Payment Request prêt</option>
                                 <option value="returned">Renvoyées au PM</option>
                             </select>
                         </div>
@@ -1169,10 +998,8 @@ export default function FinanceDashboard({
                                                     className={`px-2.5 py-0.5 border rounded text-[10px] font-bold ${
                                                         item.canDecide
                                                             ? 'bg-amber-50 text-[#F58F20] border-amber-200'
-                                                            : item.statusCode === 'decaisse'
+                                                            : item.statusCode === 'payment_request'
                                                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                                            : item.statusCode === 'decaissement_caisse'
-                                                            ? 'bg-blue-50 text-[#04326D] border-blue-200'
                                                             : 'bg-amber-50 text-[#F58F20] border-amber-200'
                                                     }`}
                                                 >
@@ -1341,7 +1168,9 @@ export default function FinanceDashboard({
                         <header className="flex items-start justify-between border-b pb-3 shrink-0">
                             <div>
                                 <span className="text-[10px] uppercase font-bold text-[#F58F20] bg-amber-50 border border-amber-200 px-2 py-0.5 rounded tracking-wider">
-                                    Étape 3 : Contrôle Budgétaire & Visa Financier (Après PAM)
+                                    {isFinancePrecheck
+                                        ? 'Visa Finance préalable (hors période)'
+                                        : 'Étape 2 : Contrôle financier après le Manager de Projet'}
                                 </span>
                                 <h2 className="text-base font-bold text-[#0B192C] mt-1.5">
                                     Réquisition N° {selected.numero} ({selected.nature})
@@ -1363,7 +1192,7 @@ export default function FinanceDashboard({
                         </header>
 
                         {/* BANNIÈRE DE BLOCAGE SI DÉPASSEMENT DÉTECTÉ */}
-                        {hasDepassement && (
+                        {!isFinancePrecheck && hasDepassement && (
                             <div className="p-3 bg-red-100 border-2 border-red-500 rounded text-xs text-red-900 font-bold flex items-center gap-2 shadow-sm animate-pulse shrink-0">
                                 <AlertTriangle className="w-5 h-5 text-red-700 shrink-0" />
                                 <span>
@@ -1372,12 +1201,12 @@ export default function FinanceDashboard({
                             </div>
                         )}
 
-                        {selected.canDecide && (
+                        {selected.canDecide && !isFinancePrecheck && (
                             <div className="p-3 bg-amber-50 border border-amber-200 rounded flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shrink-0">
                                 <div>
-                                    <strong className="text-[#F58F20] block">Caisse d'imputation et de décaissement</strong>
+                                    <strong className="text-[#F58F20] block">Caisse du Payment Request</strong>
                                     <span className="text-amber-900 text-[11px]">
-                                        Vous devez sélectionner une caisse physique dont la devise correspond ({selected.devise}).
+                                        Confirmez la caisse dont la devise correspond ({selected.devise}).
                                     </span>
                                 </div>
                                 <select
@@ -1405,7 +1234,7 @@ export default function FinanceDashboard({
 
                         {selected.derniere_observation && (
                             <div className="p-3 bg-blue-50 border-l-4 border-[#04326D] text-xs text-gray-800 rounded-r shrink-0">
-                                <strong>Observation formulée par le PAM :</strong> {selected.derniere_observation}
+                                <strong>Dernière observation :</strong> {selected.derniere_observation}
                             </div>
                         )}
 
@@ -1415,7 +1244,7 @@ export default function FinanceDashboard({
                                 <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider">
                                     Contrôle et Ajustement des Imputations Budgétaires
                                 </h3>
-                                {selected.canDecide && (
+                                {selected.canDecide && !isFinancePrecheck && (
                                     <span className="text-[10px] text-[#04326D] font-bold flex items-center gap-1 bg-blue-50 px-2 py-1 rounded">
                                         <Coins className="w-3.5 h-3.5 text-[#04326D]" />
                                         Vous pouvez modifier la désignation, les imputations et la ventilation (les montants globaux sont bloqués).
@@ -1452,7 +1281,7 @@ export default function FinanceDashboard({
                                             return (
                                                 <tr key={line.id} className={depassement && !hasSplits ? 'bg-red-50/60 font-semibold' : ''}>
                                                     <td className="p-2.5 align-top min-w-[150px]">
-                                                        {selected.canDecide ? (
+                                                        {selected.canDecide && !isFinancePrecheck ? (
                                                             <textarea
                                                                 rows={2}
                                                                 value={line.activite}
@@ -1472,7 +1301,7 @@ export default function FinanceDashboard({
                                                     <td className="p-2.5 align-top relative">
                                                         {!hasSplits ? (
                                                             <div className="space-y-1.5">
-                                                                {selected.canDecide ? (
+                                                                {selected.canDecide && !isFinancePrecheck ? (
                                                                     <div className="flex gap-2 items-start">
                                                                         <div className="flex-1 relative">
                                                                             <BudgetLineSearchPicker
@@ -1522,7 +1351,7 @@ export default function FinanceDashboard({
                                                                 {line.splits!.map((split, spIdx) => {
                                                                     return (
                                                                         <div key={spIdx} className="flex gap-2 items-start">
-                                                                            {selected.canDecide ? (
+                                                                            {selected.canDecide && !isFinancePrecheck ? (
                                                                                 <div className="flex-1 relative min-w-[200px]">
                                                                                     <BudgetLineSearchPicker
                                                                                         currentCode={split.code_allocation}
@@ -1547,11 +1376,11 @@ export default function FinanceDashboard({
                                                                                     value={split.montant}
                                                                                     onChange={(e) => updateSplitField(artIdx, spIdx, 'montant', e.target.value)}
                                                                                     className="w-24 border border-purple-300 rounded p-1.5 text-xs font-mono font-bold text-right bg-white focus:outline-none focus:border-purple-500"
-                                                                                    disabled={!selected.canDecide}
+                                                                                    disabled={!selected.canDecide || isFinancePrecheck}
                                                                                 />
                                                                                 <span className="text-[11px] font-bold text-gray-500 w-6 pt-1">{selected.devise}</span>
 
-                                                                                {selected.canDecide && (
+                                                                                {selected.canDecide && !isFinancePrecheck && (
                                                                                     <button
                                                                                         type="button"
                                                                                         onClick={() => removeSplitFromArticle(artIdx, spIdx)}
@@ -1566,7 +1395,7 @@ export default function FinanceDashboard({
                                                                     );
                                                                 })}
 
-                                                                {selected.canDecide && (
+                                                                {selected.canDecide && !isFinancePrecheck && (
                                                                     <div className="flex justify-between items-center pt-1.5 mt-1 border-t border-purple-200">
                                                                         <button
                                                                             type="button"
@@ -1693,13 +1522,19 @@ export default function FinanceDashboard({
                                                 <button
                                                     type="button"
                                                     onClick={handleTriggerApprove}
-                                                    disabled={!financeCaisse || hasDepassement}
+                                                    disabled={(!isFinancePrecheck && !financeCaisse) || (!isFinancePrecheck && hasDepassement)}
                                                     className={`px-4 py-2 text-white rounded text-xs font-bold shadow transition ${
-                                                        !financeCaisse || hasDepassement ? 'bg-gray-400 cursor-not-allowed opacity-60' : 'bg-[#04326D] hover:bg-[#06428f]'
+                                                        (!isFinancePrecheck && !financeCaisse) || (!isFinancePrecheck && hasDepassement) ? 'bg-gray-400 cursor-not-allowed opacity-60' : 'bg-[#04326D] hover:bg-[#06428f]'
                                                     }`}
-                                                    title={hasDepassement ? "Validation bloquée : dépassement budgétaire" : !financeCaisse ? "Veuillez sélectionner une caisse" : "Valider"}
+                                                    title={!isFinancePrecheck && hasDepassement ? "Validation bloquée : dépassement budgétaire" : !isFinancePrecheck && !financeCaisse ? "Veuillez sélectionner une caisse" : "Valider"}
                                                 >
-                                                    {!financeCaisse ? 'Caisse manquante' : hasDepassement ? 'Validation Bloquée' : 'Enregistrer & Viser aux Finances (PIN)'}
+                                                    {isFinancePrecheck
+                                                        ? 'Accorder le visa préalable (PIN)'
+                                                        : !financeCaisse
+                                                            ? 'Caisse manquante'
+                                                            : hasDepassement
+                                                                ? 'Validation bloquée'
+                                                                : 'Enregistrer & Viser aux Finances (PIN)'}
                                                 </button>
                                             </div>
                                         </div>
@@ -1803,7 +1638,7 @@ export default function FinanceDashboard({
                                     <span className="font-bold text-[#0B192C]">{financeCaisse}</span>
                                 </div>
                                 <div className="flex justify-between items-center font-bold text-[#0B192C]">
-                                    <span>Total à décaisser :</span>
+                                    <span>Montant du Payment Request :</span>
                                     <span className="text-[#04326D] font-mono text-sm">{money(selected.montantTotal, selected.devise)}</span>
                                 </div>
                             </div>
@@ -1837,7 +1672,7 @@ export default function FinanceDashboard({
                             </div>
 
                             <p className="text-[10px] text-gray-400 leading-tight text-center">
-                                En signant, vous validez définitivement ces imputations (et leurs ventilations) pour le décaissement et l'examen final par la DG.
+                                En signant, vous validez définitivement ces imputations (et leurs ventilations) pour la suite du circuit de validation.
                             </p>
 
                             <div className="flex justify-end gap-2 pt-2 border-t">
@@ -1854,69 +1689,6 @@ export default function FinanceDashboard({
                                     className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow transition disabled:opacity-50"
                                 >
                                     {processing ? 'Signature...' : 'Signer & Valider'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {sessionToAuthorize && (
-                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 animate-fade-in">
-                    <div className="bg-white rounded border border-[#B2BED6] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
-                        <header className="border-b pb-2">
-                            <h3 className="text-sm font-bold text-[#0B192C] uppercase tracking-wide">
-                                Autoriser l'Ouverture de Caisse
-                            </h3>
-                            <p className="text-[11px] text-gray-500">
-                                Guichet : <strong>{sessionToAuthorize.caisse_name}</strong> • Caissier : <strong>{sessionToAuthorize.cashier_name}</strong>
-                            </p>
-                        </header>
-
-                        <div className="p-3 bg-amber-50 border border-amber-300 rounded text-xs">
-                            <span className="text-[10px] font-bold text-gray-500 uppercase block">Fond de caisse déclaré :</span>
-                            <span className="text-base font-black font-mono text-[#0B192C]">
-                                {money(sessionToAuthorize.solde_ouverture, sessionToAuthorize.caisse_devise)}
-                            </span>
-                        </div>
-
-                        {sessionPinError && (
-                            <div className="p-2.5 bg-red-50 border border-red-300 text-red-800 rounded text-xs">
-                                {sessionPinError}
-                            </div>
-                        )}
-
-                        <form onSubmit={handleAuthorizeSession} className="space-y-3 text-xs">
-                            <div>
-                                <label className="block font-bold text-gray-700 mb-1">
-                                    Confirmez avec votre Code PIN financier *
-                                </label>
-                                <input
-                                    type="password"
-                                    maxLength={6}
-                                    placeholder="Code PIN"
-                                    value={sessionPin}
-                                    onChange={(e) => setSessionPin(e.target.value)}
-                                    className="w-full border border-[#B2BED6] rounded p-2 text-xs font-mono tracking-widest text-[#0B192C] focus:outline-none focus:border-[#04326D]"
-                                    autoFocus
-                                    required
-                                />
-                            </div>
-
-                            <div className="flex justify-end gap-2 pt-2 border-t">
-                                <button
-                                    type="button"
-                                    onClick={() => setSessionToAuthorize(null)}
-                                    className="px-3 py-1.5 border rounded text-xs text-gray-600 hover:bg-gray-50"
-                                >
-                                    Annuler
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={authorizingSession}
-                                    className="px-4 py-1.5 bg-[#04326D] hover:bg-[#06428f] text-white rounded text-xs font-bold shadow"
-                                >
-                                    {authorizingSession ? 'Autorisation...' : 'Autoriser l’Ouverture'}
                                 </button>
                             </div>
                         </form>

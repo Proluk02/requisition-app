@@ -384,7 +384,7 @@ export default function ProjectManagerDashboard({
                 onFinish: () => setSigningLoading(false),
                 onSuccess: () => {
                     setPasswordModalOpen(false);
-                    showToast('success', `Visa MP apposé avec succès sur ${selectedReq.numero}. Transmis au PAM.`);
+                    showToast('success', `Visa Manager de Projet apposé sur ${selectedReq.numero}. Transmis aux Finances.`);
                     setSelectedReq(null);
                     setPasswordSaisi('');
                     setObservationPM('');
@@ -417,7 +417,7 @@ export default function ProjectManagerDashboard({
             {
                 preserveScroll: true,
                 onSuccess: () => {
-                    showToast('error', `Réquisition ${selectedReq.numero} retournée à l'initiateur pour correction.`);
+                    showToast('error', `Réquisition ${selectedReq.numero} renvoyée au Manager de Projet après rejet.`);
                     setSelectedReq(null);
                     setModeRejet(false);
                     setMotifRejet('');
@@ -723,7 +723,7 @@ export default function ProjectManagerDashboard({
                                                         ? 'bg-red-100 text-red-800'
                                                         : req.statut === 'en_attente_mp'
                                                           ? 'bg-amber-100 text-amber-800'
-                                                          : ['decaisse', 'cloture'].includes(req.statusCode)
+                                                          : ['payment_request', 'decaisse', 'cloture'].includes(req.statusCode)
                                                             ? 'bg-emerald-100 text-emerald-800'
                                                             : 'bg-blue-100 text-[#04326D]'
                                                 }`}>
@@ -1242,7 +1242,7 @@ export default function ProjectManagerDashboard({
                                     <>
                                         <div className="p-3 bg-blue-50 border border-blue-200 rounded text-xs space-y-1">
                                             <label className="block font-bold text-[#04326D] uppercase text-[11px]">
-                                                Caisse de Décaissement Ciblée *
+                                                Caisse du Payment Request *
                                             </label>
                                             <select
                                                 value={caisseChoisie}

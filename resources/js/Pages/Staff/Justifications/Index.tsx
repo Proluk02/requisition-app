@@ -77,7 +77,7 @@ interface CreateJustificationFormData {
 }
 
 interface PinModalAction {
-    type: 'pm' | 'cashier';
+    type: 'pm';
     justification: JustificationItem;
 }
 
@@ -101,12 +101,10 @@ export default function JustificationsIndex({
     const user = auth.user;
 
     const isPM = user.role === 'project_manager' || auth.user.roles?.some((r) => r.name === 'project_manager');
-    const isCashier = user.role === 'cashier' || auth.user.roles?.some((r) => r.name === 'cashier');
-    const isAdmin = user.role === 'admin' || auth.user.roles?.some((r) => r.name === 'admin');
 
     const [createModalOpen, setCreateModalOpen] = useState(false);
     const [pinModalAction, setPinModalAction] = useState<{
-        type: 'pm' | 'cashier';
+        type: 'pm';
         justification: JustificationItem;
     } | null>(null);
     const [pin, setPin] = useState('');
@@ -220,12 +218,8 @@ export default function JustificationsIndex({
         setPinSubmitting(true);
         setPinError(null);
 
-        const targetUrl = pinModalAction.type === 'pm'
-            ? route('justifications.visa-mp', pinModalAction.justification.id)
-            : route('justifications.apurer', pinModalAction.justification.id);
-
         router.patch(
-            targetUrl,
+            route('justifications.visa-mp', pinModalAction.justification.id),
             { pin: pin.trim() },
             {
                 preserveScroll: true,
@@ -434,15 +428,6 @@ export default function JustificationsIndex({
                                                             className="px-2.5 py-1 bg-[#04326D] text-white rounded text-[11px] font-bold hover:bg-[#06428f]"
                                                         >
                                                             Viser (PIN)
-                                                        </button>
-                                                    )}
-                                                    {(isCashier || isAdmin) && j.status === 'valide_mp' && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setPinModalAction({ type: 'cashier', justification: j })}
-                                                            className="px-2.5 py-1 bg-[#10B981] text-white rounded text-[11px] font-bold hover:bg-[#059669]"
-                                                        >
-                                                            Apurer (Caisse)
                                                         </button>
                                                     )}
                                                     <button
@@ -673,7 +658,7 @@ export default function JustificationsIndex({
                 </div>
             )}
 
-            {/* MODALE : Visa PM ou Apurement Caissier par Code PIN */}
+            {/* MODALE : Visa PM par Code PIN */}
             {pinModalAction && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white rounded border-2 border-[#04326D] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-slide-down">
@@ -682,19 +667,12 @@ export default function JustificationsIndex({
                                 <Lock className="w-5 h-5 text-[#04326D]" />
                             </div>
                             <h3 className="text-sm font-bold text-[#0B192C] uppercase tracking-wide">
-                                {pinModalAction.type === 'pm' ? 'Visa Chef de Projet (Décharge)' : 'Apurement Caissier (Clôture)'}
+                                Visa Chef de Projet (Décharge)
                             </h3>
                             <p className="text-[11px] text-gray-500">
                                 Réf : <strong>{pinModalAction.justification.numero_return_form}</strong>
                             </p>
                         </header>
-
-                        {pinModalAction.type === 'cashier' && pinModalAction.justification.solde > 0 && (
-                            <div className="p-2.5 bg-amber-50 border border-amber-300 rounded text-[11px] text-amber-900 leading-snug">
-                                <strong>Retour de fonds détecté :</strong> Le solde non utilisé de{' '}
-                                <strong>{money(pinModalAction.justification.solde, pinModalAction.justification.devise)}</strong> sera automatiquement réintégré en caisse sous un <strong>Bon d'Entrée Caisse (BEC)</strong>.
-                            </div>
-                        )}
 
                         {pinError && (
                             <div className="p-2 bg-red-50 border border-red-300 text-red-800 rounded text-xs">
@@ -705,7 +683,7 @@ export default function JustificationsIndex({
                         <form onSubmit={handleConfirmPinAction} className="space-y-3 text-xs">
                             <div>
                                 <label className="block font-bold text-gray-700 mb-1">
-                                    Code PIN personnel ({pinModalAction.type === 'pm' ? 'MP' : 'Caissier'}) *
+                                    Code PIN personnel (MP) *
                                 </label>
                                 <div className="relative">
                                     <KeyRound className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />

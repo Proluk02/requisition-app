@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\CashRegister;
 use App\Models\Project;
 use App\Models\Site;
 use App\Models\User;
@@ -20,7 +19,7 @@ class UserController extends Controller
         $this->authorize('viewAny', User::class);
 
         $users = User::query()
-            ->with(['project:id,name', 'site:id,name', 'cashRegisters:id,name', 'roles:id,name'])
+            ->with(['project:id,name', 'site:id,name', 'roles:id,name'])
             ->when($request->search, function ($query, $search) {
                 $query->where(function ($q) use ($search) {
                     $q->where('name', 'like', "%{$search}%")
@@ -38,10 +37,9 @@ class UserController extends Controller
         return Inertia::render('Admin/Users/Index', [
             'users' => $users,
             'filters' => $request->only(['search', 'role', 'status', 'project_id', 'site_id']),
-            'roles' => Role::orderBy('name')->get(['id', 'name']),
+            'roles' => Role::where('name', '!=', 'cashier')->orderBy('name')->get(['id', 'name']),
             'projects' => Project::orderBy('name')->get(['id', 'name']),
             'sites' => Site::orderBy('name')->get(['id', 'name']),
-            'cashRegisters' => CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name']),
         ]);
     }
 
@@ -52,8 +50,7 @@ class UserController extends Controller
         return Inertia::render('Admin/Users/Create', [
             'projects' => Project::orderBy('name')->get(['id', 'name']),
             'sites' => Site::orderBy('name')->get(['id', 'name']),
-            'cashRegisters' => CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name', 'code', 'devise']),
-            'roles' => Role::orderBy('name')->get(['id', 'name']),
+            'roles' => Role::where('name', '!=', 'cashier')->orderBy('name')->get(['id', 'name']),
         ]);
     }
 
@@ -68,13 +65,11 @@ class UserController extends Controller
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'string', 'min:8'],
             'pin' => ['required', 'string', 'digits_between:4,6'],
-            'role' => ['required', 'string', 'exists:roles,name'],
+            'role' => ['required', 'string', 'exists:roles,name', 'not_in:cashier'],
             'status' => ['required', 'in:active,inactive'],
             'project_id' => ['nullable', 'required_if:role,project_manager', 'exists:projects,id'],
             'site_id' => ['nullable', 'required_if:role,coordinator', 'exists:sites,id'],
             'is_director_interim' => ['sometimes', 'boolean'],
-            'cash_register_ids' => ['nullable', 'array'],
-            'cash_register_ids.*' => ['exists:cash_registers,id'],
         ], [
             'site_id.required_if' => 'Veuillez obligatoirement affecter un site opérationnel au coordinateur.',
             'project_id.required_if' => 'Veuillez obligatoirement affecter un projet au Manager de Projet.',
@@ -107,9 +102,6 @@ class UserController extends Controller
 
             $user->assignRole($data['role']);
 
-            if ($data['role'] === 'cashier' && ! empty($data['cash_register_ids'])) {
-                $user->cashRegisters()->sync($data['cash_register_ids']);
-            }
         });
 
         return redirect()->route('admin.users.index')
@@ -119,8 +111,6 @@ class UserController extends Controller
     public function edit(User $user)
     {
         $this->authorize('update', $user);
-
-        $user->load('cashRegisters:id');
 
         return Inertia::render('Admin/Users/Edit', [
             'user' => [
@@ -132,12 +122,10 @@ class UserController extends Controller
                 'project_id' => $user->project_id,
                 'site_id' => $user->site_id,
                 'is_director_interim' => (bool) $user->is_director_interim,
-                'cash_register_ids' => $user->cashRegisters->pluck('id')->all(),
             ],
             'projects' => Project::orderBy('name')->get(['id', 'name']),
             'sites' => Site::orderBy('name')->get(['id', 'name']),
-            'cashRegisters' => CashRegister::where('is_active', true)->orderBy('name')->get(['id', 'name', 'code', 'devise']),
-            'roles' => Role::orderBy('name')->get(['id', 'name']),
+            'roles' => Role::where('name', '!=', 'cashier')->orderBy('name')->get(['id', 'name']),
         ]);
     }
 
@@ -149,13 +137,11 @@ class UserController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email,'.$user->id],
             'password' => ['nullable', 'string', 'min:8'],
-            'role' => ['required', 'string', 'exists:roles,name'],
+            'role' => ['required', 'string', 'exists:roles,name', 'not_in:cashier'],
             'status' => ['required', 'in:active,inactive'],
             'project_id' => ['nullable', 'required_if:role,project_manager', 'exists:projects,id'],
             'site_id' => ['nullable', 'required_if:role,coordinator', 'exists:sites,id'],
             'is_director_interim' => ['sometimes', 'boolean'],
-            'cash_register_ids' => ['nullable', 'array'],
-            'cash_register_ids.*' => ['exists:cash_registers,id'],
         ], [
             'site_id.required_if' => 'Veuillez obligatoirement affecter un site opérationnel au coordinateur.',
             'project_id.required_if' => 'Veuillez obligatoirement affecter un projet au Manager de Projet.',
@@ -188,11 +174,7 @@ class UserController extends Controller
             $user->update($updateData);
             $user->syncRoles([$data['role']]);
 
-            if ($data['role'] === 'cashier') {
-                $user->cashRegisters()->sync($data['cash_register_ids'] ?? []);
-            } else {
-                $user->cashRegisters()->detach();
-            }
+            $user->cashRegisters()->detach();
         });
 
         return redirect()->route('admin.users.index')

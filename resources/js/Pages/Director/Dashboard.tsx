@@ -50,7 +50,7 @@ interface RequisitionDirectrice {
     observation: string | null;
     derniere_observation?: string | null;
     is_urgent: boolean;
-    is_decaissee: boolean;
+    is_payment_request: boolean;
     is_delayed?: boolean; // NOUVEAU: Pour la gestion des 48h
     statusCode: string;
     workflowLevel: WorkflowLevel;
@@ -81,15 +81,15 @@ interface CaisseStat {
     caisse: string;
     count: number;
     total_usd: number;
-    decaisse_usd: number;
+    payment_request_usd: number;
 }
 
 interface Props extends PageProps {
     selectedPeriod: string;
     projectsStats: ProjectStat[];
     caissesStats: CaisseStat[];
-    decaisseesCount: number;
-    nonDecaisseesCount: number;
+    paymentRequestsCount: number;
+    pendingPaymentRequestCount: number;
     requisitions: RequisitionDirectrice[];
     isInterim?: boolean;
 }
@@ -101,8 +101,8 @@ export default function DirectorDashboard({
     selectedPeriod,
     projectsStats = [],
     caissesStats = [],
-    decaisseesCount = 0,
-    nonDecaisseesCount = 0,
+    paymentRequestsCount = 0,
+    pendingPaymentRequestCount = 0,
     requisitions = [],
     isInterim = false,
 }: Props) {
@@ -112,7 +112,7 @@ export default function DirectorDashboard({
     const [period, setPeriod] = useState(selectedPeriod || new Date().toISOString().slice(0, 7));
     const [selectedProject, setSelectedProject] = useState('all');
     const [selectedCaisse, setSelectedCaisse] = useState('all');
-    const [decaissementFilter, setDecaissementFilter] = useState<'all' | 'decaissees' | 'non_decaissees'>('all');
+    const [paymentRequestFilter, setPaymentRequestFilter] = useState<'all' | 'ready' | 'pending'>('all');
 
     const [detailReq, setDetailReq] = useState<RequisitionDirectrice | null>(null);
     const [printReq, setPrintReq] = useState<RequisitionDirectrice | null>(null);
@@ -134,11 +134,11 @@ export default function DirectorDashboard({
         return requisitions.filter((r) => {
             if (selectedProject !== 'all' && r.projet !== selectedProject) return false;
             if (selectedCaisse !== 'all' && r.caisseAttribuee !== selectedCaisse) return false;
-            if (decaissementFilter === 'decaissees' && !r.is_decaissee) return false;
-            if (decaissementFilter === 'non_decaissees' && r.is_decaissee) return false;
+            if (paymentRequestFilter === 'ready' && !r.is_payment_request) return false;
+            if (paymentRequestFilter === 'pending' && r.is_payment_request) return false;
             return true;
         });
-    }, [requisitions, selectedProject, selectedCaisse, decaissementFilter]);
+    }, [requisitions, selectedProject, selectedCaisse, paymentRequestFilter]);
 
     const volumeUSD = useMemo(
         () => requisitions.reduce((acc, r) => acc + (r.devise === 'USD' ? r.montantTotal : 0), 0),
@@ -152,20 +152,20 @@ export default function DirectorDashboard({
 
     const donutData = useMemo(() => {
         const total = requisitions.length || 1;
-        const pctDecaisse = requisitions.length > 0 ? Math.round((decaisseesCount / total) * 100) : 0;
-        const pctNonDecaisse = requisitions.length > 0 ? 100 - pctDecaisse : 0;
+        const pctReady = requisitions.length > 0 ? Math.round((paymentRequestsCount / total) * 100) : 0;
+        const pctPending = requisitions.length > 0 ? 100 - pctReady : 0;
         const isEmpty = requisitions.length === 0;
 
-        return { total, decaisseesCount, nonDecaisseesCount, pctDecaisse, pctNonDecaisse, isEmpty };
-    }, [requisitions, decaisseesCount, nonDecaisseesCount]);
+        return { total, paymentRequestsCount, pendingPaymentRequestCount, pctReady, pctPending, isEmpty };
+    }, [requisitions, paymentRequestsCount, pendingPaymentRequestCount]);
 
     const gaugeData = useMemo(() => {
         const totalUSD = volumeUSD || 1;
-        const decaisseUSD = caissesStats.reduce((sum, c) => sum + c.decaisse_usd, 0);
-        const pctDecaisse = volumeUSD > 0 ? Math.min(100, Math.round((decaisseUSD / totalUSD) * 100)) : 0;
-        const pctRestant = volumeUSD > 0 ? 100 - pctDecaisse : 100;
+        const paymentRequestUSD = caissesStats.reduce((sum, c) => sum + c.payment_request_usd, 0);
+        const pctReady = volumeUSD > 0 ? Math.min(100, Math.round((paymentRequestUSD / totalUSD) * 100)) : 0;
+        const pctPending = volumeUSD > 0 ? 100 - pctReady : 100;
 
-        return { totalUSD, decaisseUSD, pctDecaisse, pctRestant, isEmpty: volumeUSD === 0 };
+        return { totalUSD, paymentRequestUSD, pctReady, pctPending, isEmpty: volumeUSD === 0 };
     }, [volumeUSD, caissesStats]);
 
     const timelineReqs = useMemo(() => {
@@ -208,8 +208,8 @@ export default function DirectorDashboard({
                     setToast({
                         type: 'success',
                         message: isInterim
-                            ? 'Bon à payer accordé (Pour ordre / Intérim). Le dossier est transmis à la Caisse.'
-                            : 'Bon à payer accordé. Le dossier est transmis au guichet pour décaissement.',
+                            ? 'Réquisition approuvée (Pour ordre / Intérim). Le Payment Request est disponible.'
+                            : 'Réquisition approuvée. Le Payment Request est disponible.',
                     });
                 },
                 onError: (errs) => {
@@ -276,18 +276,21 @@ export default function DirectorDashboard({
             case 'draft':
                 return 'visa_mp';
             case 'visa_mp':
-                return 'visa_admin';
+                return 'visa_mp';
             case 'visa_pam':
+                return 'visa_pam';
+            case 'finance_precheck':
+            case 'visa_finance':
             case 'controle_finance':
                 return 'controle_finance';
             case 'visa_admin':
             case 'urgent_direction':
                 return 'approbation_direction';
+            case 'payment_request':
             case 'decaissement_caisse':
-                return 'decaissement_caisse';
             case 'decaisse':
             case 'cloture':
-                return 'cloture';
+                return 'payment_request';
             default:
                 return 'brouillon';
         }
@@ -408,14 +411,14 @@ export default function DirectorDashboard({
                         hint={`Sur ${projectsStats.length} projet${projectsStats.length > 1 ? 's' : ''}`}
                     />
                     <KpiCard
-                        label="Décaissées"
-                        value={decaisseesCount}
-                        hint="Fonds remis au guichet"
+                        label="Payment Requests prêts"
+                        value={paymentRequestsCount}
+                        hint="Après validation de la Direction"
                         tone="emerald"
                     />
                     <KpiCard
                         label="En attente"
-                        value={nonDecaisseesCount}
+                        value={pendingPaymentRequestCount}
                         hint="En cours d'approbation"
                         tone="amber"
                     />
@@ -458,7 +461,7 @@ export default function DirectorDashboard({
                                     {!donutData.isEmpty && (
                                         <path
                                             className="text-emerald-500 transition-all duration-700 ease-out"
-                                            strokeDasharray={`${donutData.pctDecaisse}, 100`}
+                                            strokeDasharray={`${donutData.pctReady}, 100`}
                                             strokeWidth="4"
                                             strokeLinecap="round"
                                             stroke="currentColor"
@@ -469,10 +472,10 @@ export default function DirectorDashboard({
                                 </svg>
                                 <div className="absolute text-center">
                                     <span className="text-xs font-black font-mono text-[#0B192C] block">
-                                        {donutData.isEmpty ? '-' : `${donutData.pctDecaisse}%`}
+                                        {donutData.isEmpty ? '-' : `${donutData.pctReady}%`}
                                     </span>
                                     <span className="text-[8px] font-bold uppercase text-gray-400 block -mt-0.5">
-                                        Décaissé
+                                        Payment Request prêt
                                     </span>
                                 </div>
                             </div>
@@ -481,10 +484,10 @@ export default function DirectorDashboard({
                                 <div className="flex items-center justify-between">
                                     <span className="flex items-center gap-1.5 text-gray-600">
                                         <span className={`w-2.5 h-2.5 rounded-full ${donutData.isEmpty ? 'bg-gray-300' : 'bg-emerald-500'}`} />
-                                        Décaissées :
+                                        Payment Requests prêts :
                                     </span>
                                     <strong className="font-mono text-emerald-800">
-                                        {donutData.decaisseesCount}
+                                        {donutData.paymentRequestsCount}
                                     </strong>
                                 </div>
                                 <div className="flex items-center justify-between pt-1 border-t border-gray-100">
@@ -493,7 +496,7 @@ export default function DirectorDashboard({
                                         En attente :
                                     </span>
                                     <strong className="font-mono text-[#F58F20]">
-                                        {donutData.nonDecaisseesCount}
+                                        {donutData.pendingPaymentRequestCount}
                                     </strong>
                                 </div>
                             </div>
@@ -511,33 +514,33 @@ export default function DirectorDashboard({
 
                         <div className="space-y-2 pt-1 text-xs">
                             <div className="flex justify-between items-center text-[11px]">
-                                <span className="text-gray-600">Taux d'exécution (Fonds sortis) :</span>
+                                <span className="text-gray-600">Part des Payment Requests validés :</span>
                                 <strong className="font-mono text-sm text-[#04326D]">
-                                    {gaugeData.pctDecaisse}%
+                                    {gaugeData.pctReady}%
                                 </strong>
                             </div>
 
                             <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden flex relative">
                                 <div
                                     className={`${gaugeData.isEmpty ? 'bg-gray-300' : 'bg-emerald-500'} transition-all duration-700`}
-                                    style={{ width: `${gaugeData.pctDecaisse}%` }}
-                                    title={`Décaissés: ${gaugeData.pctDecaisse}%`}
+                                    style={{ width: `${gaugeData.pctReady}%` }}
+                                    title={`Payment Requests prêts: ${gaugeData.pctReady}%`}
                                 />
                                 <div
                                     className={`${gaugeData.isEmpty ? 'bg-gray-200' : 'bg-[#F58F20]'} transition-all duration-700`}
-                                    style={{ width: `${gaugeData.pctRestant}%` }}
-                                    title={`Engagés restants: ${gaugeData.pctRestant}%`}
+                                    style={{ width: `${gaugeData.pctPending}%` }}
+                                    title={`Réquisitions sans Payment Request: ${gaugeData.pctPending}%`}
                                 />
                             </div>
 
                             <div className="p-2.5 bg-gray-50 rounded border border-gray-100 space-y-1 text-[11px]">
                                 <div className="flex justify-between">
-                                    <span className="text-gray-500">Volume total engagé :</span>
+                                    <span className="text-gray-500">Volume total des réquisitions :</span>
                                     <strong className="font-mono text-[#04326D]">${gaugeData.totalUSD.toLocaleString('fr-FR')}</strong>
                                 </div>
                                 <div className="flex justify-between">
-                                    <span className="text-gray-500">Fonds libérés en caisse :</span>
-                                    <strong className="font-mono text-emerald-700">${gaugeData.decaisseUSD.toLocaleString('fr-FR')}</strong>
+                                    <span className="text-gray-500">Montant des Payment Requests validés :</span>
+                                    <strong className="font-mono text-emerald-700">${gaugeData.paymentRequestUSD.toLocaleString('fr-FR')}</strong>
                                 </div>
                             </div>
                         </div>
@@ -568,8 +571,8 @@ export default function DirectorDashboard({
                                     const heightPct = Math.max((req.montantTotal / maxTimelineAmount) * 100, 2);
 
                                     let barColor = 'bg-gray-400';
-                                    if (req.is_decaissee) barColor = 'bg-emerald-500';
-                                    else if (req.statusCode === 'decaissement_caisse') barColor = 'bg-[#04326D]';
+                                    if (req.is_payment_request) barColor = 'bg-emerald-500';
+                                    else if (req.statusCode === 'payment_request') barColor = 'bg-emerald-500';
                                     else if (req.statusCode === 'visa_admin') barColor = 'bg-[#F58F20]';
 
                                     return (
@@ -658,8 +661,8 @@ export default function DirectorDashboard({
                             ) : (
                                 caissesStats.map((c, idx) => {
                                     const total = c.total_usd || 1;
-                                    const decaisse = c.decaisse_usd;
-                                    const pct = Math.round((decaisse / total) * 100);
+                                    const paymentRequest = c.payment_request_usd;
+                                    const pct = Math.round((paymentRequest / total) * 100);
 
                                     return (
                                         <div
@@ -678,7 +681,7 @@ export default function DirectorDashboard({
                                                         ${c.total_usd.toLocaleString('fr-FR')}
                                                     </p>
                                                     <p className="text-[10px] text-emerald-700 font-bold">
-                                                        Décaissé : ${c.decaisse_usd.toLocaleString('fr-FR')}
+                                                        Payment Request : ${c.payment_request_usd.toLocaleString('fr-FR')}
                                                     </p>
                                                 </div>
                                             </div>
@@ -723,13 +726,13 @@ export default function DirectorDashboard({
                             </FilterSelect>
 
                             <FilterSelect
-                                value={decaissementFilter}
-                                onChange={(v) => setDecaissementFilter(v as 'all' | 'decaissees' | 'non_decaissees')}
-                                label="Décaissement"
+                                value={paymentRequestFilter}
+                                onChange={(v) => setPaymentRequestFilter(v as 'all' | 'ready' | 'pending')}
+                                label="Payment Request"
                             >
                                 <option value="all">Toutes</option>
-                                <option value="decaissees">Décaissées</option>
-                                <option value="non_decaissees">Non décaissées</option>
+                                <option value="ready">Prêts</option>
+                                <option value="pending">En attente</option>
                             </FilterSelect>
                         </div>
                     </header>
@@ -749,7 +752,7 @@ export default function DirectorDashboard({
                                         <th className="py-2.5 px-4">Demandeur</th>
                                         <th className="py-2.5 px-4 text-right">Montant</th>
                                         <th className="py-2.5 px-4 text-center">Workflow</th>
-                                        <th className="py-2.5 px-4 text-center">Décaissement</th>
+                                        <th className="py-2.5 px-4 text-center">Payment Request</th>
                                         <th className="py-2.5 px-4 text-right">Actions</th>
                                     </tr>
                                 </thead>
@@ -790,13 +793,13 @@ export default function DirectorDashboard({
                                                 <WorkflowBadge level={req.workflowLevel} />
                                             </td>
                                             <td className="py-3 px-4 text-center whitespace-nowrap">
-                                                {req.is_decaissee ? (
+                                                {req.is_payment_request ? (
                                                     <span className="inline-flex items-center text-[10px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded uppercase tracking-wide">
-                                                        Décaissé
+                                                        Document prêt
                                                     </span>
                                                 ) : (
                                                     <span className="inline-flex items-center text-[10px] font-bold text-gray-500 bg-gray-100 border border-gray-200 px-2 py-0.5 rounded uppercase tracking-wide">
-                                                        Non décaissé
+                                                        En cours de validation
                                                     </span>
                                                 )}
                                             </td>
@@ -812,7 +815,7 @@ export default function DirectorDashboard({
                                                                 onClick={() => handleOpenSignature(req)}
                                                                 className="px-2.5 py-1 bg-[#10B981] hover:bg-[#059669] text-white rounded text-[11px] font-bold transition"
                                                             >
-                                                                Bon à payer
+                                                                Approuver
                                                             </button>
                                                             <button
                                                                 type="button"
@@ -825,6 +828,14 @@ export default function DirectorDashboard({
                                                                 Rejeter
                                                             </button>
                                                         </>
+                                                    )}
+                                                    {req.statusCode === 'payment_request' && (
+                                                        <a
+                                                            href={route('requisitions.payment-request.pdf', req.id)}
+                                                            className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-[11px] font-bold transition"
+                                                        >
+                                                            Payment Request
+                                                        </a>
                                                     )}
                                                     <IconButton
                                                         title="Consulter"

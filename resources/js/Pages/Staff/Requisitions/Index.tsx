@@ -483,6 +483,15 @@ export default function RequisitionsIndex({
                                     <Download className="w-3.5 h-3.5" />
                                     Télécharger PDF
                                 </button>
+                                {viewReq.statusCode === 'payment_request' && (
+                                    <a
+                                        href={route('requisitions.payment-request.pdf', viewReq.id)}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 text-white rounded text-xs font-bold hover:bg-emerald-800 transition shadow-sm"
+                                    >
+                                        <Download className="w-3.5 h-3.5" />
+                                        Payment Request
+                                    </a>
+                                )}
                                 <button
                                     type="button"
                                     onClick={() => setViewReq(null)}

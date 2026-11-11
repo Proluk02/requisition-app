@@ -22,8 +22,8 @@ it('persists the project manager approval decision in the database', function ()
     ]);
 
     Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
-    Role::firstOrCreate(['name' => 'beneficiary', 'guard_name' => 'web']);
     Role::firstOrCreate(['name' => 'finance', 'guard_name' => 'web']);
+    Role::firstOrCreate(['name' => 'beneficiary', 'guard_name' => 'web']);
 
     $manager = User::factory()->create([
         'name' => 'Project Manager',
@@ -704,13 +704,16 @@ it('loads active cash registers from the database for project manager decisions'
         );
 });
 
-it('creates a project manager requisition already past their own approval stage', function () {
+it('routes a project manager requisition through the out-of-window finance precheck', function () {
+    $this->travelTo(\Carbon\Carbon::parse('2026-11-27 12:00:00'));
+
     $project = Project::create([
         'name' => 'USIMAMIZI BORA',
         'full_name' => 'USIMAMIZI BORA',
     ]);
 
     Role::firstOrCreate(['name' => 'project_manager', 'guard_name' => 'web']);
+    Role::firstOrCreate(['name' => 'finance', 'guard_name' => 'web']);
     $manager = User::factory()->create([
         'status' => 'active',
         'project_id' => $project->id,
@@ -732,10 +735,20 @@ it('creates a project manager requisition already past their own approval stage'
             'project_code' => 'UB',
             'caisse_decaissement' => 'Caisse principale',
             'devise' => 'USD',
+            'mode_paiement' => 'Virement bancaire',
+            'beneficiaire_nom' => 'Fournisseur Test',
+            'beneficiaire_adresse' => 'Adresse complète',
+            'beneficiaire_telephone' => '+243000000000',
+            'beneficiaire_email' => 'fournisseur@example.test',
+            'numero_facture' => 'FAC-PM-001',
+            'date_facture' => now()->toDateString(),
+            'date_paiement' => now()->addMonth()->toDateString(),
             'observation' => 'Créée par le Manager',
             'montant_total' => 120,
             'lignes' => [[
                 'activite' => 'Fournitures',
+                'entreprise' => 'BON PASTEUR',
+                'donneur' => 'Fonds propres',
                 'code_all_budget' => 'BUD-001',
                 'nature' => 'Achat',
                 'quantite' => 2,
@@ -752,13 +765,13 @@ it('creates a project manager requisition already past their own approval stage'
         ->where('project_id', $project->id)
         ->firstOrFail();
     expect($managerRequisition->project_id)->toBe($project->id)
-        ->and($managerRequisition->status)->toBe('visa_mp');
+        ->and($managerRequisition->status)->toBe('finance_precheck');
 
     $this->actingAs($manager)
         ->get(route('dashboard'))
         ->assertInertia(fn (Assert $page) => $page
             ->component('ProjectManager/Dashboard')
-            ->where('requisitions.0.statusCode', 'visa_mp')
+            ->where('requisitions.0.statusCode', 'finance_precheck')
             ->where('requisitions.0.canDecide', false)
         );
 
@@ -803,10 +816,20 @@ it('forbids a project manager from creating a requisition for another project', 
             'project_code' => 'AB',
             'caisse_decaissement' => 'Caisse principale',
             'devise' => 'USD',
+            'mode_paiement' => 'Virement bancaire',
+            'beneficiaire_nom' => 'Fournisseur Test',
+            'beneficiaire_adresse' => 'Adresse complète',
+            'beneficiaire_telephone' => '+243000000000',
+            'beneficiaire_email' => 'fournisseur@example.test',
+            'numero_facture' => 'FAC-PM-002',
+            'date_facture' => now()->toDateString(),
+            'date_paiement' => now()->addMonth()->toDateString(),
             'observation' => null,
             'montant_total' => 100,
             'lignes' => [[
                 'activite' => 'Fournitures',
+                'entreprise' => 'BON PASTEUR',
+                'donneur' => 'Fonds propres',
                 'code_all_budget' => 'BUD-001',
                 'nature' => 'Achat',
                 'quantite' => 1,

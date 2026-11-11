@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Head, router, useForm, usePage } from '@inertiajs/react';
 import AppLayout from '@/Layouts/AppLayout';
 import { PageProps } from '@/types';
@@ -7,17 +7,11 @@ import {
     Plus,
     Pencil,
     Trash2,
-    Users,
     CheckCircle2,
     AlertCircle,
     X,
+    Search,
 } from 'lucide-react';
-
-interface CashierUser {
-    id: string;
-    name: string;
-    email: string;
-}
 
 interface CashRegisterItem {
     id: string;
@@ -26,21 +20,31 @@ interface CashRegisterItem {
     devise: string;
     solde_actuel: number;
     is_active: boolean;
-    cashiers: CashierUser[];
     sessions_count: number;
     movements_count: number;
 }
 
 interface Props extends PageProps {
     cashRegisters: CashRegisterItem[];
-    availableCashiers: CashierUser[];
+    search?: string;
 }
 
 const money = (n: number, dev: string) =>
     `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${dev}`;
 
-export default function CashRegistersIndex({ cashRegisters = [], availableCashiers = [] }: Props) {
-    const { flash } = usePage<PageProps>().props;
+export default function CashRegistersIndex({ cashRegisters = [], search = '' }: Props) {
+    const { auth, flash } = usePage<PageProps>().props;
+    const financeRoutes = auth.user.role === 'finance';
+    const routePrefix = financeRoutes ? 'finance.cash-registers' : 'admin.cash-registers';
+    const [searchQuery, setSearchQuery] = useState(search);
+    const filteredCashRegisters = useMemo(() => {
+        const query = searchQuery.trim().toLowerCase();
+        if (!query) return cashRegisters;
+
+        return cashRegisters.filter((caisse) =>
+            `${caisse.name} ${caisse.code}`.toLowerCase().includes(query)
+        );
+    }, [cashRegisters, searchQuery]);
 
     const [modalOpen, setModalOpen] = useState(false);
     const [editingCaisse, setEditingCaisse] = useState<CashRegisterItem | null>(null);
@@ -51,14 +55,12 @@ export default function CashRegistersIndex({ cashRegisters = [], availableCashie
         devise: 'USD' | 'FC';
         solde_initial: string;
         is_active: boolean;
-        cashier_ids: string[];
     }>({
         name: '',
         code: '',
         devise: 'USD',
         solde_initial: '0',
         is_active: true,
-        cashier_ids: [],
     });
 
     const handleOpenCreate = () => {
@@ -69,7 +71,6 @@ export default function CashRegistersIndex({ cashRegisters = [], availableCashie
             devise: 'USD',
             solde_initial: '0',
             is_active: true,
-            cashier_ids: [],
         });
         setModalOpen(true);
     };
@@ -82,7 +83,6 @@ export default function CashRegistersIndex({ cashRegisters = [], availableCashie
             devise: caisse.devise as 'USD' | 'FC',
             solde_initial: String(caisse.solde_actuel),
             is_active: caisse.is_active,
-            cashier_ids: caisse.cashiers.map((c) => c.id),
         });
         setModalOpen(true);
     };
@@ -90,12 +90,12 @@ export default function CashRegistersIndex({ cashRegisters = [], availableCashie
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (editingCaisse) {
-            form.put(route('admin.cash-registers.update', editingCaisse.id), {
+            form.put(route(`${routePrefix}.update`, editingCaisse.id), {
                 preserveScroll: true,
                 onSuccess: () => setModalOpen(false),
             });
         } else {
-            form.post(route('admin.cash-registers.store'), {
+            form.post(route(`${routePrefix}.store`), {
                 preserveScroll: true,
                 onSuccess: () => setModalOpen(false),
             });
@@ -104,21 +104,10 @@ export default function CashRegistersIndex({ cashRegisters = [], availableCashie
 
     const handleDelete = (caisse: CashRegisterItem) => {
         if (confirm(`Confirmez-vous la suppression de la caisse ${caisse.name} ?`)) {
-            router.delete(route('admin.cash-registers.destroy', caisse.id), {
+            router.delete(route(`${routePrefix}.destroy`, caisse.id), {
                 preserveScroll: true,
             });
         }
-    };
-
-    const toggleCashier = (userId: string) => {
-        const current = [...form.data.cashier_ids];
-        const index = current.indexOf(userId);
-        if (index > -1) {
-            current.splice(index, 1);
-        } else {
-            current.push(userId);
-        }
-        form.setData('cashier_ids', current);
     };
 
     return (
@@ -130,15 +119,15 @@ export default function CashRegistersIndex({ cashRegisters = [], availableCashie
                     <div>
                         <nav className="text-[10px] font-bold uppercase tracking-widest text-[#B2BED6] mb-1.5 flex items-center gap-1.5">
                             <Wallet className="w-3.5 h-3.5 text-[#04326D]" />
-                            <span>Administration</span>
+                            <span>{financeRoutes ? 'Direction Financière' : 'Administration'}</span>
                             <span className="mx-1">/</span>
                             <span className="text-[#04326D]">Caisses</span>
                         </nav>
                         <h1 className="text-xl font-bold text-[#0B192C]">
-                            Gestion des Caisses & Affectation des Caissiers
+                            Gestion des Caisses
                         </h1>
                         <p className="text-[12px] text-gray-500 mt-1">
-                            Configuration des guichets de trésorerie, suivi des soldes et habilitation multi-caisses pour les caissiers.
+                            Configuration des caisses utilisées dans les Payment Requests.
                         </p>
                     </div>
 
@@ -165,6 +154,18 @@ export default function CashRegistersIndex({ cashRegisters = [], availableCashie
                     </div>
                 )}
 
+                <div className="relative max-w-md">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                        type="search"
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        placeholder="Rechercher par nom ou code de caisse"
+                        className="w-full border border-[#B2BED6] rounded py-2 pl-9 pr-3 text-xs focus:outline-none focus:border-[#04326D]"
+                        aria-label="Rechercher une caisse par nom ou code"
+                    />
+                </div>
+
                 <div className="bg-white border border-[#B2BED6] rounded shadow-sm overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs border-collapse">
@@ -174,20 +175,19 @@ export default function CashRegistersIndex({ cashRegisters = [], availableCashie
                                     <th className="py-3 px-4">Nom de la Caisse</th>
                                     <th className="py-3 px-4">Devise</th>
                                     <th className="py-3 px-4 text-right">Solde Actuel</th>
-                                    <th className="py-3 px-4">Caissiers Habilités</th>
                                     <th className="py-3 px-4 text-center">Statut</th>
                                     <th className="py-3 px-4 text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#E2E8F0] text-gray-700">
-                                {cashRegisters.length === 0 ? (
+                                {filteredCashRegisters.length === 0 ? (
                                     <tr>
-                                        <td colSpan={7} className="py-12 text-center text-gray-400 italic">
-                                            Aucune caisse enregistrée.
+                                        <td colSpan={6} className="py-12 text-center text-gray-400 italic">
+                                            {searchQuery ? 'Aucune caisse ne correspond à la recherche.' : 'Aucune caisse enregistrée.'}
                                         </td>
                                     </tr>
                                 ) : (
-                                    cashRegisters.map((c) => (
+                                    filteredCashRegisters.map((c) => (
                                         <tr key={c.id} className="hover:bg-[#F9F9FF] transition">
                                             <td className="py-3.5 px-4 font-mono font-bold text-[#04326D] whitespace-nowrap">
                                                 {c.code}
@@ -200,25 +200,6 @@ export default function CashRegistersIndex({ cashRegisters = [], availableCashie
                                             </td>
                                             <td className="py-3.5 px-4 text-right font-mono font-bold whitespace-nowrap text-emerald-700">
                                                 {money(c.solde_actuel, c.devise)}
-                                            </td>
-                                            <td className="py-3.5 px-4">
-                                                <div className="flex flex-wrap gap-1">
-                                                    {c.cashiers.length === 0 ? (
-                                                        <span className="text-[10px] text-gray-400 italic">
-                                                            Aucun caissier affecté
-                                                        </span>
-                                                    ) : (
-                                                        c.cashiers.map((u) => (
-                                                            <span
-                                                                key={u.id}
-                                                                className="inline-flex items-center gap-1 text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded"
-                                                            >
-                                                                <Users className="w-2.5 h-2.5" />
-                                                                {u.name}
-                                                            </span>
-                                                        ))
-                                                    )}
-                                                </div>
                                             </td>
                                             <td className="py-3.5 px-4 text-center whitespace-nowrap">
                                                 {c.is_active ? (
@@ -348,35 +329,6 @@ export default function CashRegistersIndex({ cashRegisters = [], availableCashie
                                         </label>
                                     </div>
                                 )}
-                            </div>
-
-                            <div className="p-3 bg-gray-50 border border-gray-200 rounded space-y-2">
-                                <label className="block text-[11px] font-bold text-[#0B192C] uppercase tracking-wider">
-                                    Affecter les Caissiers Autorisés à ce Guichet
-                                </label>
-                                <div className="grid grid-cols-2 gap-2 max-h-36 overflow-y-auto">
-                                    {availableCashiers.map((cashier) => {
-                                        const checked = form.data.cashier_ids.includes(cashier.id);
-                                        return (
-                                            <label
-                                                key={cashier.id}
-                                                className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition ${
-                                                    checked
-                                                        ? 'bg-blue-50 border-[#04326D] text-[#04326D] font-bold'
-                                                        : 'bg-white border-gray-200 text-gray-700'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={checked}
-                                                    onChange={() => toggleCashier(cashier.id)}
-                                                    className="rounded border-gray-300 text-[#04326D] focus:ring-[#04326D]"
-                                                />
-                                                <span className="text-[11px] truncate">{cashier.name}</span>
-                                            </label>
-                                        );
-                                    })}
-                                </div>
                             </div>
 
                             <div className="flex justify-end gap-2 pt-2 border-t">

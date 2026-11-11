@@ -468,19 +468,19 @@ export default function Index({ users, filters, roles, projects, sites }: Props)
                                 </div>
                                 <div className="flex justify-between items-center">
                                     <span className="text-gray-600">Manager de Projet</span>
-                                    <strong className="text-primary text-[11px]">1er Visa & Caisse</strong>
+                                    <strong className="text-primary text-[11px]">1er Visa</strong>
                                 </div>
                                 <div className="flex justify-between items-center">
                                     <span className="text-gray-600">Manager Finances</span>
                                     <strong className="text-primary text-[11px]">Contrôle Budgétaire</strong>
                                 </div>
                                 <div className="flex justify-between items-center">
-                                    <span className="text-gray-600">Direction Générale</span>
-                                    <strong className="text-tertiary text-[11px]">Approbation Finale</strong>
+                                    <span className="text-gray-600">Manager Administratif (PAM)</span>
+                                    <strong className="text-success text-[11px]">Visa administratif</strong>
                                 </div>
                                 <div className="flex justify-between items-center">
-                                    <span className="text-gray-600">Caisse</span>
-                                    <strong className="text-success text-[11px]">Décaissement</strong>
+                                    <span className="text-gray-600">Direction Générale</span>
+                                    <strong className="text-tertiary text-[11px]">Approbation finale</strong>
                                 </div>
                             </div>
                         </div>

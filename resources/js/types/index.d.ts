@@ -41,7 +41,6 @@ export interface User {
         | 'admin_manager'
         | 'director'
         | 'purchaser'
-        | 'cashier'
         | 'coordinator';
     status: 'active' | 'inactive';
     avatar?: string | null;
@@ -77,9 +76,12 @@ export type WorkflowStep =
     | 'brouillon'
     | 'urgent_direction'
     | 'visa_mp'
+    | 'finance_precheck'
     | 'controle_finance'
+    | 'visa_pam'
     | 'visa_admin'
     | 'approbation_direction'
+    | 'payment_request'
     | 'decaissement_caisse'
     | 'decaisse'
     | 'cloture'

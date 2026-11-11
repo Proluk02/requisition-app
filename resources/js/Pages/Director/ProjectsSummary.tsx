@@ -11,7 +11,7 @@ interface ProjectData {
     count: number;
     total_usd: number;
     total_fc: number;
-    decaisse_usd: number;
+    payment_request_usd: number;
     en_attente_count: number;
 }
 
@@ -22,13 +22,13 @@ export default function ProjectsSummary({ projects = [] }: { projects: ProjectDa
         (acc, p) => ({
             dossiers: acc.dossiers + p.count,
             engage: acc.engage + p.total_usd,
-            decaisse: acc.decaisse + p.decaisse_usd,
+            paymentRequest: acc.paymentRequest + p.payment_request_usd,
         }),
-        { dossiers: 0, engage: 0, decaisse: 0 }
+        { dossiers: 0, engage: 0, paymentRequest: 0 }
     ), [projects]);
 
     // Graphiques
-    const pctDecaisse = totals.engage > 0 ? Math.round((totals.decaisse / totals.engage) * 100) : 0;
+    const pctPaymentRequest = totals.engage > 0 ? Math.round((totals.paymentRequest / totals.engage) * 100) : 0;
     const maxProjectVol = projects.length > 0 ? Math.max(...projects.map(p => p.total_usd)) : 1;
     const isEmpty = totals.engage === 0;
 
@@ -82,7 +82,7 @@ export default function ProjectsSummary({ projects = [] }: { projects: ProjectDa
                                     {!isEmpty && (
                                         <path
                                             className="text-[#04326D] transition-all duration-700 ease-out"
-                                            strokeDasharray={`${pctDecaisse}, 100`}
+                                            strokeDasharray={`${pctPaymentRequest}, 100`}
                                             strokeWidth="4" strokeLinecap="round" stroke="currentColor" fill="none"
                                             d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                                         />
@@ -90,9 +90,9 @@ export default function ProjectsSummary({ projects = [] }: { projects: ProjectDa
                                 </svg>
                                 <div className="absolute text-center">
                                     <span className="text-xs font-black font-mono text-[#0B192C] block">
-                                        {isEmpty ? '-' : `${pctDecaisse}%`}
+                                        {isEmpty ? '-' : `${pctPaymentRequest}%`}
                                     </span>
-                                    <span className="text-[8px] font-bold uppercase text-gray-400 block -mt-0.5">Exécuté</span>
+                                    <span className="text-[8px] font-bold uppercase text-gray-400 block -mt-0.5">Payment Request</span>
                                 </div>
                             </div>
                             <div className="space-y-1.5 text-[11px] flex-1">
@@ -106,9 +106,9 @@ export default function ProjectsSummary({ projects = [] }: { projects: ProjectDa
                                 <div className="flex items-center justify-between pt-1 border-t border-gray-100">
                                     <span className="flex items-center gap-1.5 text-gray-600">
                                         <span className={`w-2.5 h-2.5 rounded-full ${isEmpty ? 'bg-gray-300' : 'bg-[#04326D]'}`} />
-                                        Dont Décaissé :
+                                        Payment Request prêt :
                                     </span>
-                                    <strong className="font-mono text-[#04326D]">{fmt(totals.decaisse, '')}</strong>
+                                    <strong className="font-mono text-[#04326D]">{fmt(totals.paymentRequest, '')}</strong>
                                 </div>
                             </div>
                         </div>
@@ -177,7 +177,7 @@ export default function ProjectsSummary({ projects = [] }: { projects: ProjectDa
 }
 
 function ProjectCard({ project }: { project: ProjectData }) {
-    const taux = project.total_usd > 0 ? Math.round((project.decaisse_usd / project.total_usd) * 100) : 0;
+    const taux = project.total_usd > 0 ? Math.round((project.payment_request_usd / project.total_usd) * 100) : 0;
 
     return (
         <article className="bg-white border border-[#B2BED6] rounded overflow-hidden hover:border-[#04326D]">
@@ -198,8 +198,8 @@ function ProjectCard({ project }: { project: ProjectData }) {
                     <Row label="Volume USD" value={`${project.total_usd.toLocaleString('fr-FR')} USD`} />
                     <Row label="Volume FC" value={`${project.total_fc.toLocaleString('fr-FR')} FC`} />
                     <Row
-                        label="Décaissé"
-                        value={`${project.decaisse_usd.toLocaleString('fr-FR')} USD`}
+                        label="Payment Request prêt"
+                        value={`${project.payment_request_usd.toLocaleString('fr-FR')} USD`}
                         valueClass="text-emerald-700 font-bold"
                     />
                 </dl>

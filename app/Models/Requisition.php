@@ -35,6 +35,12 @@ class Requisition extends Model
         'mode_paiement',
         'reference_paiement',
         'date_decaissement',
+        'beneficiaire_nom',
+        'beneficiaire_adresse',
+        'beneficiaire_telephone',
+        'beneficiaire_email',
+        'numero_facture',
+        'date_facture',
     ];
 
     protected function casts(): array
@@ -45,6 +51,7 @@ class Requisition extends Model
             'date_paiement' => 'date',
             'date_livraison' => 'date',
             'date_decaissement' => 'datetime',
+            'date_facture' => 'date',
         ];
     }
 

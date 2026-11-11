@@ -5,7 +5,6 @@ import {
     UserPlus,
     Users,
     ShieldCheck,
-    Building2,
     Lock,
     MapPin,
     FolderKanban,
@@ -17,26 +16,17 @@ interface OptionItem {
     name: string;
 }
 
-interface CashRegisterItem {
-    id: string;
-    name: string;
-    code?: string;
-    devise?: string;
-}
-
 type RoleItem = string | { id: number | string; name: string };
 
 interface Props extends PageProps {
     projects?: OptionItem[];
     sites?: OptionItem[];
-    cashRegisters?: CashRegisterItem[];
     roles?: RoleItem[];
 }
 
 export default function UsersCreate({
     projects = [],
     sites = [],
-    cashRegisters = [],
     roles = [],
 }: Props) {
     const getRoleName = (r: RoleItem): string => {
@@ -58,7 +48,6 @@ export default function UsersCreate({
         project_id: string;
         site_id: string;
         is_director_interim: boolean;
-        cash_register_ids: string[];
     }>({
         name: '',
         first_name: '',
@@ -71,7 +60,6 @@ export default function UsersCreate({
         project_id: '',
         site_id: '',
         is_director_interim: false,
-        cash_register_ids: [],
     });
 
     const isCoordinator = form.data.role === 'coordinator';
@@ -84,19 +72,7 @@ export default function UsersCreate({
             project_id: newRole === 'coordinator' ? '' : form.data.project_id,
             site_id: newRole === 'project_manager' ? '' : form.data.site_id,
             is_director_interim: newRole === 'admin_manager' ? form.data.is_director_interim : false,
-            cash_register_ids: newRole === 'cashier' ? form.data.cash_register_ids : [],
         });
-    };
-
-    const toggleCaisse = (id: string) => {
-        const current = [...form.data.cash_register_ids];
-        const index = current.indexOf(id);
-        if (index > -1) {
-            current.splice(index, 1);
-        } else {
-            current.push(id);
-        }
-        form.setData('cash_register_ids', current);
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -382,46 +358,6 @@ export default function UsersCreate({
                             <p className="text-[11px] text-emerald-800 leading-snug pl-6">
                                 En cochant cette option, le Manager Administratif (PAM) aura accès à la supervision de la Direction et pourra signer le Bon à Payer avec la mention officielle « Pour ordre / Intérim ».
                             </p>
-                        </div>
-                    )}
-
-                    {form.data.role === 'cashier' && (
-                        <div className="p-3.5 bg-blue-50 border border-blue-200 rounded space-y-2">
-                            <label className="block font-bold text-[#04326D] uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                                <Building2 className="w-3.5 h-3.5" />
-                                Affecter ce caissier à une ou plusieurs caisses
-                            </label>
-                            <div className="grid grid-cols-2 gap-2">
-                                {cashRegisters.length === 0 ? (
-                                    <p className="text-[11px] text-gray-500 italic col-span-2">
-                                        Aucune caisse active enregistrée.
-                                    </p>
-                                ) : (
-                                    cashRegisters.map((caisse) => {
-                                        const checked = form.data.cash_register_ids.includes(caisse.id);
-                                        return (
-                                            <label
-                                                key={caisse.id}
-                                                className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition ${
-                                                    checked
-                                                        ? 'bg-white border-[#04326D] text-[#04326D] font-bold shadow-xs'
-                                                        : 'bg-white/60 border-gray-200 text-gray-700'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={checked}
-                                                    onChange={() => toggleCaisse(caisse.id)}
-                                                    className="rounded border-gray-300 text-[#04326D] focus:ring-[#04326D]"
-                                                />
-                                                <span className="text-[11px] truncate">
-                                                    {caisse.name} {caisse.devise ? `(${caisse.devise})` : ''}
-                                                </span>
-                                            </label>
-                                        );
-                                    })
-                                )}
-                            </div>
                         </div>
                     )}
 

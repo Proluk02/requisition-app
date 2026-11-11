@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\CashRegister;
-use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redirect;
@@ -14,12 +13,16 @@ use Inertia\Response;
 class CashRegisterController extends Controller
 {
     /**
-     * Liste des caisses configurées avec leurs caissiers affectés.
+     * Liste des caisses configurées.
      */
-    public function index(): Response
+    public function index(Request $request): Response
     {
-        $cashRegisters = CashRegister::with('cashiers:id,name,email')
-            ->withCount(['sessions', 'movements'])
+        $search = trim((string) $request->query('search', ''));
+        $cashRegisters = CashRegister::withCount(['sessions', 'movements'])
+            ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search) {
+                $query->where('name', 'like', "%{$search}%")
+                    ->orWhere('code', 'like', "%{$search}%");
+            }))
             ->orderBy('name')
             ->get()
             ->map(fn (CashRegister $c) => [
@@ -29,19 +32,13 @@ class CashRegisterController extends Controller
                 'devise' => $c->devise,
                 'solde_actuel' => (float) $c->solde_actuel,
                 'is_active' => (bool) $c->is_active,
-                'cashiers' => $c->cashiers->map(fn ($u) => ['id' => $u->id, 'name' => $u->name, 'email' => $u->email]),
                 'sessions_count' => $c->sessions_count,
                 'movements_count' => $c->movements_count,
             ]);
 
-        $availableCashiers = User::role('cashier')
-            ->orWhere('role', 'cashier')
-            ->orderBy('name')
-            ->get(['id', 'name', 'email']);
-
         return Inertia::render('Admin/CashRegisters/Index', [
             'cashRegisters' => $cashRegisters,
-            'availableCashiers' => $availableCashiers,
+            'search' => $search,
         ]);
     }
 
@@ -55,8 +52,6 @@ class CashRegisterController extends Controller
             'code' => ['required', 'string', 'max:50', 'unique:cash_registers,code'],
             'devise' => ['required', 'in:USD,FC'],
             'solde_initial' => ['required', 'numeric', 'min:0'],
-            'cashier_ids' => ['nullable', 'array'],
-            'cashier_ids.*' => ['exists:users,id'],
         ], [
             'name.unique' => 'Une caisse portant ce nom existe déjà.',
             'code.unique' => 'Ce code caisse est déjà attribué.',
@@ -70,11 +65,7 @@ class CashRegisterController extends Controller
             'is_active' => true,
         ]);
 
-        if (! empty($validated['cashier_ids'])) {
-            $caisse->cashiers()->sync($validated['cashier_ids']);
-        }
-
-        return Redirect::back()->with('success', "Caisse {$caisse->name} créée et caissiers affectés.");
+        return Redirect::back()->with('success', "Caisse {$caisse->name} créée.");
     }
 
     /**
@@ -87,8 +78,6 @@ class CashRegisterController extends Controller
             'code' => ['required', 'string', 'max:50', 'unique:cash_registers,code,'.$cashRegister->id],
             'devise' => ['required', 'in:USD,FC'],
             'is_active' => ['required', 'boolean'],
-            'cashier_ids' => ['nullable', 'array'],
-            'cashier_ids.*' => ['exists:users,id'],
         ]);
 
         $cashRegister->update([
@@ -98,8 +87,6 @@ class CashRegisterController extends Controller
             'is_active' => $validated['is_active'],
         ]);
 
-        $cashRegister->cashiers()->sync($validated['cashier_ids'] ?? []);
-
         return Redirect::back()->with('success', "Caisse {$cashRegister->name} mise à jour.");
     }
 
@@ -108,14 +95,13 @@ class CashRegisterController extends Controller
      */
     public function destroy(CashRegister $cashRegister): RedirectResponse
     {
-        if ($cashRegister->movements()->exists()) {
-            return Redirect::back()->with('error', 'Suppression impossible : cette caisse contient des mouvements financiers enregistrés.');
+        if ($cashRegister->movements()->exists() || $cashRegister->sessions()->exists()) {
+            return back()->with('error', 'Suppression impossible : cette caisse possède un historique financier.');
         }
 
         $name = $cashRegister->name;
-        $cashRegister->cashiers()->detach();
         $cashRegister->delete();
 
-        return Redirect::back()->with('success', "Caisse {$name} supprimée avec succès.");
+        return back()->with('success', "Caisse {$name} supprimée avec succès.");
     }
 }

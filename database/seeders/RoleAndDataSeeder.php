@@ -22,7 +22,6 @@ class RoleAndDataSeeder extends Seeder
             'admin_manager',
             'director',
             'purchaser',
-            'cashier',
             'coordinator',
         ];
 
@@ -94,31 +93,14 @@ class RoleAndDataSeeder extends Seeder
             ]);
         }
 
-        $admin = User::updateOrCreate(
+        $beneficiary = User::updateOrCreate(
             [
-                'email' => 'prolukeka@gmail.com',
+                'email' => 'falonnemwenda603@gmail.com',
             ],
             [
-                'name' => 'Administrateur',
-                'first_name' => 'Semper',
-                'last_name' => 'Othan',
-                'password' => Hash::make('password123'),
-                'role' => 'admin',
-                'status' => 'active',
-                'email_verified_at' => now(),
-            ]
-        );
-
-        $admin->syncRoles(['admin']);
-
-        $staff = User::updateOrCreate(
-            [
-                'email' => 'prolukdev@gmail.com',
-            ],
-            [
-                'name' => 'Miss Eunice',
-                'first_name' => 'Eunice',
-                'last_name' => 'Kenyan',
+                'name' => 'Falonne Mwenda',
+                'first_name' => 'Falonne',
+                'last_name' => 'Mwenda',
                 'password' => Hash::make('password123'),
                 'role' => 'beneficiary',
                 'status' => 'active',
@@ -128,6 +110,102 @@ class RoleAndDataSeeder extends Seeder
             ]
         );
 
-        $staff->syncRoles(['beneficiary']);
+        $beneficiary->syncRoles(['beneficiary']);
+
+        $admin = User::updateOrCreate(
+            [
+                'email' => 'admin@gmail.com',
+            ],
+            [
+                'name' => 'Miss Eunice',
+                'first_name' => 'Eunice',
+                'last_name' => 'Kenyan',
+                'password' => Hash::make('password123'),
+                'role' => 'admin',
+                'status' => 'active',
+                'email_verified_at' => now(),
+                'project_id' => $chakuishi?->id,
+                'site_id' => $kanina?->id,
+            ]
+        );
+
+        $admin->syncRoles(['admin']);
+
+        $project = User::updateOrCreate(
+            [
+                'email' => 'project@gmail.com',
+            ],
+            [
+                'name' => 'Myriam Mwenze',
+                'first_name' => 'Myriam',
+                'last_name' => 'Mwenze',
+                'password' => Hash::make('password123'),
+                'role' => 'project_manager',
+                'status' => 'active',
+                'email_verified_at' => now(),
+                'project_id' => $chakuishi?->id,
+                'site_id' => $kanina?->id,
+            ]
+        );
+
+        $project->syncRoles(['project_manager']);
+
+        $finance = User::updateOrCreate(
+            [
+                'email' => 'finance@gmail.com',
+            ],
+            [
+                'name' => 'Anicet Mukanjila',
+                'first_name' => 'Anicet',
+                'last_name' => 'Mukanjila',
+                'password' => Hash::make('password123'),
+                'role' => 'finance',
+                'status' => 'active',
+                'email_verified_at' => now(),
+                'project_id' => $chakuishi?->id,
+                'site_id' => $kanina?->id,
+            ]
+        );
+
+        $finance->syncRoles(['finance']);
+
+        $pam = User::updateOrCreate(
+            [
+                'email' => 'pam@gmail.com',
+            ],
+            [
+                'name' => 'Benjamin Mukanjila',   
+                'first_name' => 'Benjamin',
+                'last_name' => 'Mukanjila',
+                'password' => Hash::make('password123'),
+                'role' => 'admin_manager',
+                'status' => 'active',
+                'email_verified_at' => now(),
+                'project_id' => $chakuishi?->id,
+                'site_id' => $kanina?->id,
+            ]
+        );
+
+        $pam->syncRoles(['admin_manager']);
+
+        $director = User::updateOrCreate(
+            [
+                'email' => 'director@gmail.com',
+            ],
+            [
+                'name' => 'Bernie The none',
+                'first_name' => 'Bernie',
+                'last_name' => 'The none',
+                'password' => Hash::make('password123'),
+                'role' => 'director',
+                'status' => 'active',
+                'email_verified_at' => now(),
+                'project_id' => $chakuishi?->id,
+                'site_id' => $kanina?->id,
+            ]
+        );
+
+        $director->syncRoles(['director']);
+
     }
 }

@@ -1,9 +1,12 @@
 export type WorkflowStep =
     | 'brouillon'
     | 'visa_mp'
+    | 'finance_precheck'
     | 'controle_finance'
+    | 'visa_pam'
     | 'visa_admin'
     | 'approbation_direction'
+    | 'payment_request'
     | 'caisse_pret'
     | 'decaissement_caisse'
     | 'cloture';

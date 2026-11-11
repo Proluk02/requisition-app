@@ -10,7 +10,6 @@ import {
     Building2,
     AlertOctagon,
     FileText,
-    Truck,
     CheckSquare,
     ShieldCheck,
     Wallet,
@@ -29,7 +28,6 @@ import {
     BookOpen,
     KeyRound,
     BarChart3,
-    FileCheck,
     Search,
     Check,
     CheckCheck,
@@ -78,7 +76,6 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
     const isAdminManager = hasRole('admin_manager');
     const isDirector = hasRole('director');
     const isPurchaser = hasRole('purchaser');
-    const isCashier = hasRole('cashier');
     const isAdmin = hasRole('admin');
 
     const isDirectorInterim = isAdminManager && Boolean(user.is_director_interim);
@@ -320,6 +317,18 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 </Link>
 
                                 <Link
+                                    href={route('director.payment-requests')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('director.payment-requests')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <FileText className="w-4 h-4 text-emerald-300" />
+                                    <span>Réquisitions approuvées</span>
+                                </Link>
+
+                                <Link
                                     href={route('director.projects')}
                                     className={`flex items-center gap-3 px-3 py-2 rounded transition ${
                                         isRouteActive('director.projects')
@@ -372,29 +381,6 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                     <span>{__('Mes Réquisitions')}</span>
                                 </Link>
 
-                                <Link
-                                    href={route('transport.index')}
-                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('transport.*')
-                                            ? 'bg-white/10 text-white font-bold'
-                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
-                                    }`}
-                                >
-                                    <Truck className="w-4 h-4" />
-                                    <span>{__('Transport & Déplacements')}</span>
-                                </Link>
-
-                                <Link
-                                    href={route('justifications.index')}
-                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('justifications.*')
-                                            ? 'bg-white/10 text-white font-bold'
-                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
-                                    }`}
-                                >
-                                    <FileCheck className="w-4 h-4 text-emerald-400" />
-                                    <span>{__('Justificatifs')}</span>
-                                </Link>
                             </div>
                         )}
 
@@ -423,30 +409,6 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 >
                                     <BarChart3 className="w-4 h-4 text-emerald-400" />
                                     <span>{__('Rapports & Synthèse')}</span>
-                                </Link>
-
-                                <Link
-                                    href={route('justifications.index')}
-                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('justifications.*')
-                                            ? 'bg-white/10 text-white font-bold'
-                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
-                                    }`}
-                                >
-                                    <FileCheck className="w-4 h-4 text-amber-300" />
-                                    <span>{__('Justificatifs')}</span>
-                                </Link>
-
-                                <Link
-                                    href={route('transport.index')}
-                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('transport.*')
-                                            ? 'bg-white/10 text-white font-bold'
-                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
-                                    }`}
-                                >
-                                    <Truck className="w-4 h-4" />
-                                    <span>{__('Contrôle Transports')}</span>
                                 </Link>
 
                                 <Link
@@ -495,6 +457,18 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                 </Link>
 
                                 <Link
+                                    href={route('finance.cash-registers.index')}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
+                                        isRouteActive('finance.cash-registers.*')
+                                            ? 'bg-white/10 text-white font-bold'
+                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
+                                    }`}
+                                >
+                                    <Wallet className="w-4 h-4 text-amber-300" />
+                                    <span>Gestion des Caisses</span>
+                                </Link>
+
+                                <Link
                                     href={route('finance.budgets.import-form')}
                                     className={`flex items-center gap-3 px-3 py-2 rounded transition ${
                                         isRouteActive('finance.budgets.import-form')
@@ -519,98 +493,7 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                                     <span>Taux de Change Journaliers</span>
                                 </Link>
 
-                                <Link
-                                    href={route('finance.caisses.index')}
-                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('finance.caisses.index')
-                                            ? 'bg-white/10 text-white font-bold'
-                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
-                                    }`}
-                                >
-                                    <Building2 className="w-4 h-4 text-amber-300" />
-                                    <span>Gestion des Caisses & Soldes</span>
-                                </Link>
 
-                                <Link
-                                    href={route('finance.caisses.sessions')}
-                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('finance.caisses.sessions')
-                                            ? 'bg-white/10 text-white font-bold'
-                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
-                                    }`}
-                                >
-                                    <KeyRound className="w-4 h-4 text-[#F58F20]" />
-                                    <span>Approbations d'Ouvertures</span>
-                                </Link>
-                            </div>
-                        )}
-
-                        {/* Guichet Caisse */}
-                        {isCashier && (
-                            <div className="space-y-1">
-                                <span className="px-3 text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">
-                                    Guichet Caisse
-                                </span>
-
-                                <Link
-                                    href={route('cashier.dashboard')}
-                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('cashier.dashboard')
-                                            ? 'bg-white/10 text-white font-bold'
-                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
-                                    }`}
-                                >
-                                    <Wallet className="w-4 h-4 text-amber-300" />
-                                    <span>Guichet & Sessions</span>
-                                </Link>
-
-                                <Link
-                                    href={route('cashier.journal.du-jour')}
-                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('cashier.journal.du-jour')
-                                            ? 'bg-white/10 text-white font-bold'
-                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
-                                    }`}
-                                >
-                                    <CalendarDays className="w-4 h-4 text-cyan-300" />
-                                    <span>Journal du Jour</span>
-                                </Link>
-
-                                <Link
-                                    href={route('cashier.disbursements.index')}
-                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('cashier.disbursements.*')
-                                            ? 'bg-white/10 text-white font-bold'
-                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
-                                    }`}
-                                >
-                                    <ArrowUpRight className="w-4 h-4 text-emerald-400" />
-                                    <span>Bons à Décaisser (BSC)</span>
-                                </Link>
-
-                                <Link
-                                    href={route('cashier.receipts.index')}
-                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('cashier.receipts.*')
-                                            ? 'bg-white/10 text-white font-bold'
-                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
-                                    }`}
-                                >
-                                    <ArrowDownLeft className="w-4 h-4 text-blue-300" />
-                                    <span>Entrées de Caisse (BEC)</span>
-                                </Link>
-
-                                <Link
-                                    href={route('cashier.ledger.index')}
-                                    className={`flex items-center gap-3 px-3 py-2 rounded transition ${
-                                        isRouteActive('cashier.ledger.*')
-                                            ? 'bg-white/10 text-white font-bold'
-                                            : 'text-[#B2BED6] hover:bg-white/5 hover:text-white'
-                                    }`}
-                                >
-                                    <BookOpen className="w-4 h-4 text-purple-300" />
-                                    <span>Grand Livre de Caisse</span>
-                                </Link>
                             </div>
                         )}
 
@@ -1029,28 +912,28 @@ export default function AppLayout({ header, children }: AppLayoutProps) {
                         <div className="space-y-3 text-xs text-gray-700">
                             <div className="p-3 bg-blue-50 border border-blue-200 rounded">
                                 <strong className="text-[#04326D] block mb-1">
-                                    1. Petite Caisse (&le; 20 USD / 30 000 FC)
+                                    1. Période de soumission
                                 </strong>
                                 <p className="text-[11px] text-gray-600">
-                                    Achats d'urgence immédiats. Décaissement direct avec visa du Chef de Projet.
+                                    Déposez les réquisitions du 20 au 25. Hors de cette période, un visa préalable des Finances est requis.
                                 </p>
                             </div>
 
                             <div className="p-3 bg-gray-50 border border-gray-200 rounded">
                                 <strong className="text-gray-900 block mb-1">
-                                    2. Règle des 3 Devis (&gt; 150 USD)
+                                    2. Circuit de validation
                                 </strong>
                                 <p className="text-[11px] text-gray-600">
-                                    Toute réquisition excédant 150 USD doit obligatoirement inclure 3 devis comparatifs.
+                                    Manager des Projets, Manager des Finances, PAM, puis Direction. Tout rejet renvoie la réquisition au Manager des Projets.
                                 </p>
                             </div>
 
                             <div className="p-3 bg-orange-50 border border-orange-200 rounded">
                                 <strong className="text-[#F58F20] block mb-1">
-                                    3. Règle d'or de Décharge (48h ouvrées)
+                                    3. Payment Request
                                 </strong>
                                 <p className="text-[11px] text-gray-600">
-                                    Les pièces de caisse originales doivent être retournées dans les 48h suivant le décaissement.
+                                    Après validation de la Direction, téléchargez le Payment Request. Aucun décaissement n’est enregistré dans le logiciel.
                                 </p>
                             </div>
                         </div>
