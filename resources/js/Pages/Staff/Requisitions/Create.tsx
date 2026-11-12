@@ -626,7 +626,7 @@ export default function CreateRequisition({
                                 Informations du Payment Request
                             </h2>
                             <p className="text-[11px] text-gray-500 mt-1">
-                                Ces informations seront reprises dans le document après validation de la Direction.
+                                Ces informations seront reprises sur le Payment Request.
                             </p>
                         </div>
 
@@ -755,9 +755,7 @@ export default function CreateRequisition({
                                                 ? "Description de l'article"
                                                 : 'Nature du service'}
                                         </th>
-                                        <th className="py-2.5 px-3 min-w-[150px]">Entreprise</th>
                                         <th className="py-2.5 px-3 min-w-[150px]">Donneur</th>
-                                        <th className="py-2.5 px-3 min-w-[150px]">Projet</th>
                                         <th className="py-2.5 px-3 min-w-[140px]">Code allocation budget</th>
                                         <th className="py-2.5 px-3 min-w-[90px]">Type demande</th>
 
@@ -807,18 +805,6 @@ export default function CreateRequisition({
                                                     required
                                                 />
                                             </td>
-
-                                            <td className="py-2.5 px-3">
-                                                <input
-                                                    type="text"
-                                                    value={ligne.entreprise}
-                                                    onChange={(e) => handleUpdateLigne(ligne.id, 'entreprise', e.target.value)}
-                                                    maxLength={255}
-                                                    className="w-full border border-outline-variant rounded-md px-2 py-1.5 text-xs"
-                                                    required
-                                                />
-                                            </td>
-
                                             <td className="py-2.5 px-3">
                                                 <input
                                                     type="text"
@@ -837,16 +823,6 @@ export default function CreateRequisition({
                                                     ))}
                                                 </datalist>
                                             </td>
-
-                                            <td className="py-2.5 px-3">
-                                                <input
-                                                    type="text"
-                                                    value={selectedProject}
-                                                    readOnly
-                                                    className="w-full border border-outline-variant rounded-md px-2 py-1.5 text-xs bg-gray-50"
-                                                />
-                                            </td>
-
                                             <td className="py-2.5 px-3">
                                                 <input
                                                     type="text"

@@ -359,7 +359,6 @@ class RequisitionController extends Controller
             'date_livraison' => ['nullable', 'date'],
             'lignes' => ['required', 'array', 'min:1'],
             'lignes.*.activite' => ['required', 'string', 'max:255'],
-            'lignes.*.entreprise' => ['required', 'string', 'max:255'],
             'lignes.*.donneur' => ['required', 'string', 'max:255'],
             'lignes.*.code_all_budget' => ['required', 'string', 'max:255'],
             'lignes.*.nature' => ['required', 'in:Achat,Service'],
@@ -476,7 +475,7 @@ class RequisitionController extends Controller
             $demande = Demande::create([
                 'requisition_id' => $requisition->id,
                 'activite' => $ligne['activite'],
-                'entreprise' => $ligne['entreprise'],
+                'entreprise' => 'BP RDC',
                 'donneur' => $ligne['donneur'],
                 'code_all_budget' => $ligne['code_all_budget'],
                 'code_allocation' => null,
